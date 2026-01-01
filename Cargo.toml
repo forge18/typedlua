@@ -1,6 +1,37 @@
-[package]
-name = "typed-lua"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = [
+    "crates/typedlua-core",
+    "crates/typedlua-cli",
+    "crates/typedlua-lsp",
+]
+resolver = "2"
 
-[dependencies]
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["TypedLua Contributors"]
+license = "MIT"
+repository = "https://github.com/forge18/typed-lua"
+
+[workspace.dependencies]
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# File watching
+notify = "7.0"
+
+# LSP
+tower-lsp = "0.20"
+tokio = { version = "1.0", features = ["full"] }
+
+# Testing
+insta = "1.40"
+criterion = "0.5"

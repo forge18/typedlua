@@ -1,0 +1,18 @@
+[package]
+name = "typedlua-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "typedlua"
+path = "src/main.rs"
+
+[dependencies]
+typedlua-core = { path = "../typedlua-core" }
+clap.workspace = true
+anyhow.workspace = true
+notify.workspace = true
+serde_json.workspace = true
