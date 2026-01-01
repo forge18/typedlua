@@ -53,6 +53,11 @@ impl Span {
             column: self.column.min(other.column),
         }
     }
+
+    /// Alias for merge - combines two spans into one
+    pub fn combine(&self, other: &Span) -> Span {
+        self.merge(other)
+    }
 }
 
 impl fmt::Display for Span {
