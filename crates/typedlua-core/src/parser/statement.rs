@@ -12,6 +12,11 @@ pub trait StatementParser {
 
 impl StatementParser for Parser {
     fn parse_statement(&mut self) -> Result<Statement, ParserError> {
+        // Check for decorators first
+        if self.check(&TokenKind::At) {
+            return self.parse_class_declaration();
+        }
+
         match &self.current().kind {
             TokenKind::Const | TokenKind::Local => self.parse_variable_declaration(),
             TokenKind::Function => self.parse_function_declaration(),
@@ -35,7 +40,7 @@ impl StatementParser for Parser {
             TokenKind::Enum => self.parse_enum_declaration(),
             TokenKind::Import => self.parse_import_declaration(),
             TokenKind::Export => self.parse_export_declaration(),
-            TokenKind::Class => self.parse_class_declaration(),
+            TokenKind::Abstract | TokenKind::Class => self.parse_class_declaration(),
             _ => {
                 // Expression statement
                 let expr = self.parse_expression()?;
@@ -690,7 +695,7 @@ impl Parser {
         let start_span = self.current_span();
 
         // Parse decorators
-        let decorators = Vec::new(); // TODO: Implement decorator parsing
+        let decorators = self.parse_decorators()?;
 
         let is_abstract = self.match_token(&[TokenKind::Abstract]);
 
@@ -738,6 +743,77 @@ impl Parser {
     }
 
     // Helper methods (pub so other parser modules can use them)
+
+    fn parse_decorators(&mut self) -> Result<Vec<Decorator>, ParserError> {
+        let mut decorators = Vec::new();
+
+        while self.check(&TokenKind::At) {
+            decorators.push(self.parse_decorator()?);
+        }
+
+        Ok(decorators)
+    }
+
+    fn parse_decorator(&mut self) -> Result<Decorator, ParserError> {
+        let start_span = self.current_span();
+        self.consume(TokenKind::At, "Expected '@'")?;
+
+        let expression = self.parse_decorator_expression()?;
+        let end_span = self.current_span();
+
+        Ok(Decorator {
+            expression,
+            span: start_span.combine(&end_span),
+        })
+    }
+
+    fn parse_decorator_expression(&mut self) -> Result<DecoratorExpression, ParserError> {
+        let start_span = self.current_span();
+        let name = self.parse_identifier()?;
+
+        let mut expr = DecoratorExpression::Identifier(name);
+
+        loop {
+            match &self.current().kind {
+                TokenKind::Dot => {
+                    self.advance();
+                    let property = self.parse_identifier()?;
+                    let span = start_span.combine(&property.span);
+                    expr = DecoratorExpression::Member {
+                        object: Box::new(expr),
+                        property,
+                        span,
+                    };
+                }
+                TokenKind::LeftParen => {
+                    self.advance();
+                    let mut arguments = Vec::new();
+
+                    if !self.check(&TokenKind::RightParen) {
+                        loop {
+                            arguments.push(self.parse_expression()?);
+                            if !self.match_token(&[TokenKind::Comma]) {
+                                break;
+                            }
+                        }
+                    }
+
+                    let end_span = self.current_span();
+                    self.consume(TokenKind::RightParen, "Expected ')' after decorator arguments")?;
+
+                    let span = start_span.combine(&end_span);
+                    expr = DecoratorExpression::Call {
+                        callee: Box::new(expr),
+                        arguments,
+                        span,
+                    };
+                }
+                _ => break,
+            }
+        }
+
+        Ok(expr)
+    }
 
     pub(super) fn parse_identifier(&mut self) -> Result<Ident, ParserError> {
         match &self.current().kind {

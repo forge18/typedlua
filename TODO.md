@@ -113,7 +113,7 @@ This is a comprehensive checklist for implementing TypedLua from start to finish
 - [x] Parse parenthesized expressions
 - [ ] Parse template literals (deferred - lexer support needed)
 - [x] Parse conditional expressions (a ? b : c)
-- [ ] Parse arrow functions (deferred - needs fat arrow token)
+- [x] Parse arrow functions (x => expr and (params) => expr)
 - [x] Parse function expressions
 
 ### Parser - Type Annotations ✅ COMPLETED
@@ -136,7 +136,7 @@ This is a comprehensive checklist for implementing TypedLua from start to finish
 - [x] Parse import statements
 - [x] Parse export statements
 - [x] Parse class declarations (if enableOOP)
-- [ ] Parse decorators (if enableDecorators) (deferred - needs @ token support)
+- [x] Parse decorators (@decorator, @decorator(args), @namespace.decorator)
 
 ### Parser - Patterns ✅ COMPLETED
 - [x] Parse identifier patterns
@@ -152,13 +152,13 @@ This is a comprehensive checklist for implementing TypedLua from start to finish
 - [x] Test all type annotation syntax
 - [x] Test error recovery (basic synchronization)
 - [x] Test complex programs
-- [x] 18 comprehensive parser tests passing
+- [x] 22 comprehensive parser tests passing
 
 ### Parser Error Recovery ✅ COMPLETED
 - [x] Implement error recovery strategies (synchronization)
 - [x] Continue parsing after errors when possible
-- [ ] Report multiple errors per file
-- [ ] Provide helpful error messages
+- [x] Report multiple errors per file (via synchronization in parse loop)
+- [x] Provide helpful error messages (via diagnostic handler)
 
 ---
 

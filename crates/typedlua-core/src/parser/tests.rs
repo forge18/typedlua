@@ -383,3 +383,94 @@ fn test_parse_complex_program() {
         crate::ast::statement::Statement::Expression(_)
     ));
 }
+
+#[test]
+fn test_parse_arrow_function() {
+    let source = "const add = (a: number, b: number): number => a + b";
+    let program = parse_source(source).expect("Parse failed");
+    assert_eq!(program.statements.len(), 1);
+
+    match &program.statements[0] {
+        crate::ast::statement::Statement::Variable(decl) => match &decl.initializer.kind {
+            crate::ast::expression::ExpressionKind::Arrow(arrow) => {
+                assert_eq!(arrow.parameters.len(), 2);
+                assert!(arrow.return_type.is_some());
+                assert!(matches!(arrow.body, crate::ast::expression::ArrowBody::Expression(_)));
+            }
+            _ => panic!("Expected arrow function"),
+        },
+        _ => panic!("Expected variable declaration"),
+    }
+}
+
+#[test]
+fn test_parse_arrow_function_single_param() {
+    let source = "const double = x => x * 2";
+    let program = parse_source(source).expect("Parse failed");
+    assert_eq!(program.statements.len(), 1);
+
+    match &program.statements[0] {
+        crate::ast::statement::Statement::Variable(decl) => match &decl.initializer.kind {
+            crate::ast::expression::ExpressionKind::Arrow(arrow) => {
+                assert_eq!(arrow.parameters.len(), 1);
+                assert!(arrow.return_type.is_none());
+            }
+            _ => panic!("Expected arrow function"),
+        },
+        _ => panic!("Expected variable declaration"),
+    }
+}
+
+#[test]
+fn test_parse_decorator() {
+    let source = r#"
+        @sealed
+        class MyClass {
+        }
+    "#;
+    let program = parse_source(source).expect("Parse failed");
+    assert_eq!(program.statements.len(), 1);
+
+    match &program.statements[0] {
+        crate::ast::statement::Statement::Class(class_decl) => {
+            assert_eq!(class_decl.decorators.len(), 1);
+            match &class_decl.decorators[0].expression {
+                crate::ast::statement::DecoratorExpression::Identifier(name) => {
+                    assert_eq!(name.node, "sealed");
+                }
+                _ => panic!("Expected identifier decorator"),
+            }
+        }
+        _ => panic!("Expected class declaration"),
+    }
+}
+
+#[test]
+fn test_parse_decorator_with_args() {
+    let source = r#"
+        @component("my-component")
+        class MyComponent {
+        }
+    "#;
+    let program = parse_source(source).expect("Parse failed");
+    assert_eq!(program.statements.len(), 1);
+
+    match &program.statements[0] {
+        crate::ast::statement::Statement::Class(class_decl) => {
+            assert_eq!(class_decl.decorators.len(), 1);
+            match &class_decl.decorators[0].expression {
+                crate::ast::statement::DecoratorExpression::Call { callee, arguments, .. } => {
+                    assert_eq!(arguments.len(), 1);
+                    match &**callee {
+                        crate::ast::statement::DecoratorExpression::Identifier(name) => {
+                            assert_eq!(name.node, "component");
+                        }
+                        _ => panic!("Expected identifier in decorator call"),
+                    }
+                }
+                _ => panic!("Expected call decorator"),
+            }
+        }
+        _ => panic!("Expected class declaration"),
+    }
+}

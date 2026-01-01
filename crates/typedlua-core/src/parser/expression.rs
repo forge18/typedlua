@@ -15,6 +15,17 @@ impl ExpressionParser for Parser {
 // Expression parsing using Pratt parsing for precedence
 impl Parser {
     fn parse_assignment(&mut self) -> Result<Expression, ParserError> {
+        // Check for arrow function: identifier => expr or (params) => expr
+        let checkpoint = self.position;
+
+        // Try to parse as arrow function
+        if let Ok(arrow) = self.try_parse_arrow_function() {
+            return Ok(arrow);
+        }
+
+        // Reset and parse normally
+        self.position = checkpoint;
+
         let expr = self.parse_conditional()?;
 
         if let Some(op) = self.match_assignment_op() {
@@ -27,6 +38,66 @@ impl Parser {
         }
 
         Ok(expr)
+    }
+
+    fn try_parse_arrow_function(&mut self) -> Result<Expression, ParserError> {
+        let start_span = self.current_span();
+
+        // Parse parameters - either single identifier or (param list)
+        let parameters = if self.check(&TokenKind::LeftParen) {
+            self.advance();
+            let params = self.parse_parameter_list()?;
+            self.consume(TokenKind::RightParen, "Expected ')'")?;
+            params
+        } else if matches!(&self.current().kind, TokenKind::Identifier(_)) {
+            // Single parameter without parens
+            let param_name = self.parse_identifier()?;
+            vec![crate::ast::statement::Parameter {
+                pattern: crate::ast::pattern::Pattern::Identifier(param_name),
+                type_annotation: None,
+                default: None,
+                is_rest: false,
+                span: start_span,
+            }]
+        } else {
+            return Err(ParserError {
+                message: "Expected parameter or '(' in arrow function".to_string(),
+                span: start_span,
+            });
+        };
+
+        // Optional return type
+        let return_type = if self.match_token(&[TokenKind::Colon]) {
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
+        // Must have =>
+        self.consume(TokenKind::FatArrow, "Expected '=>' in arrow function")?;
+
+        // Parse body - either expression or block
+        let body = if self.check(&TokenKind::LeftBrace) {
+            self.advance();
+            let block = self.parse_block()?;
+            self.consume(TokenKind::RightBrace, "Expected '}' after arrow function body")?;
+            ArrowBody::Block(block)
+        } else {
+            let expr = self.parse_assignment()?;
+            ArrowBody::Expression(Box::new(expr))
+        };
+
+        let end_span = self.current_span();
+
+        Ok(Expression {
+            kind: ExpressionKind::Arrow(ArrowFunction {
+                parameters,
+                return_type,
+                body,
+                span: start_span.combine(&end_span),
+            }),
+            span: start_span.combine(&end_span),
+        })
     }
 
     fn parse_conditional(&mut self) -> Result<Expression, ParserError> {
