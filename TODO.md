@@ -34,8 +34,7 @@ This is a comprehensive checklist for implementing TypedLua from start to finish
 ### Configuration System
 - [x] Define CompilerConfig struct
 - [x] Define CompilerOptions struct
-- [x] Implement JSON parsing for typedlua.json
-- [ ] Support tsconfig.json for compatibility
+- [x] Implement YAML parsing for tlconfig.yaml
 - [x] Add default configuration values
 - [ ] Implement config merging (defaults → file → CLI)
 

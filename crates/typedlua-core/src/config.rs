@@ -153,20 +153,20 @@ impl Default for CompilerConfig {
 }
 
 impl CompilerConfig {
-    /// Load configuration from a JSON file
+    /// Load configuration from a YAML file (tlconfig.yaml)
     pub fn from_file(path: &Path) -> Result<Self, crate::errors::CompilationError> {
         let content = std::fs::read_to_string(path)?;
-        let config: CompilerConfig = serde_json::from_str(&content)
+        let config: CompilerConfig = serde_yaml::from_str(&content)
             .map_err(|e| crate::errors::CompilationError::ConfigError(e.to_string()))?;
         Ok(config)
     }
 
-    /// Create a default configuration and write it to a file
+    /// Create a default configuration and write it to tlconfig.yaml
     pub fn init_file(path: &Path) -> Result<(), crate::errors::CompilationError> {
         let config = CompilerConfig::default();
-        let json = serde_json::to_string_pretty(&config)
+        let yaml = serde_yaml::to_string(&config)
             .map_err(|e| crate::errors::CompilationError::ConfigError(e.to_string()))?;
-        std::fs::write(path, json)?;
+        std::fs::write(path, yaml)?;
         Ok(())
     }
 
@@ -193,19 +193,18 @@ mod tests {
     #[test]
     fn test_serialize_config() {
         let config = CompilerConfig::default();
-        let json = serde_json::to_string(&config).unwrap();
-        assert!(json.contains("compilerOptions"));
+        let yaml = serde_yaml::to_string(&config).unwrap();
+        assert!(yaml.contains("compilerOptions"));
     }
 
     #[test]
     fn test_deserialize_config() {
-        let json = r#"{
-            "compilerOptions": {
-                "target": "5.3",
-                "enableOop": false
-            }
-        }"#;
-        let config: CompilerConfig = serde_json::from_str(json).unwrap();
+        let yaml = r#"
+compilerOptions:
+  target: "5.3"
+  enableOop: false
+"#;
+        let config: CompilerConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.compiler_options.target, LuaVersion::Lua53);
         assert!(!config.compiler_options.enable_oop);
     }
