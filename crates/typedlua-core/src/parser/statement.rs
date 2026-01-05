@@ -1240,9 +1240,15 @@ impl Parser {
             // Allow keywords as identifiers in certain contexts
             kind if kind.is_keyword() => {
                 // Get the keyword string representation
-                kind.to_keyword_str()
-                    .unwrap_or_else(|| panic!("Keyword {:?} missing from to_keyword_str", kind))
-                    .to_string()
+                match kind.to_keyword_str() {
+                    Some(s) => s.to_string(),
+                    None => {
+                        return Err(ParserError {
+                            message: format!("Internal error: keyword {:?} missing string representation", kind),
+                            span,
+                        });
+                    }
+                }
             }
             _ => {
                 return Err(ParserError {

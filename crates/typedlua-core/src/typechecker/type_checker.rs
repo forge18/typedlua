@@ -267,10 +267,17 @@ impl TypeChecker {
                                     }
                                 }
                                 None
-                            })
-                            .unwrap_or_else(|| {
-                                Type::new(TypeKind::Primitive(PrimitiveType::Unknown), span)
                             });
+
+                        let prop_type = match prop_type {
+                            Some(t) => t,
+                            None => {
+                                return Err(TypeCheckError::new(
+                                    format!("Property '{}' does not exist on type", prop_pattern.key.node),
+                                    span,
+                                ));
+                            }
+                        };
 
                         if let Some(value_pattern) = &prop_pattern.value {
                             self.declare_pattern(value_pattern, prop_type, kind, span)?;
