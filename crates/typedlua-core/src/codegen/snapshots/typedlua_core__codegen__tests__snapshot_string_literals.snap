@@ -1,0 +1,7 @@
+---
+source: crates/typedlua-core/src/codegen/mod.rs
+expression: output
+---
+local simple = "hello"
+local withEscape = "hello \"world\""
+local withBackslash = "path\\to\\file"

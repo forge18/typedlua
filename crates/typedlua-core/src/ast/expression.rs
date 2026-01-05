@@ -40,7 +40,7 @@ pub enum ExpressionKind {
     TypeAssertion(Box<Expression>, Type),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     Nil,
     Boolean(bool),
@@ -72,6 +72,7 @@ pub enum BinaryOp {
     BitwiseXor,
     ShiftLeft,
     ShiftRight,
+    Instanceof,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,13 +85,19 @@ pub enum UnaryOp {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssignmentOp {
-    Assign,
-    AddAssign,
-    SubtractAssign,
-    MultiplyAssign,
-    DivideAssign,
-    ModuloAssign,
-    ConcatenateAssign,
+    Assign,              // =
+    AddAssign,           // +=
+    SubtractAssign,      // -=
+    MultiplyAssign,      // *=
+    DivideAssign,        // /=
+    ModuloAssign,        // %=
+    PowerAssign,         // ^=
+    ConcatenateAssign,   // ..=
+    BitwiseAndAssign,    // &=
+    BitwiseOrAssign,     // |=
+    FloorDivideAssign,   // //=
+    LeftShiftAssign,     // <<=
+    RightShiftAssign,    // >>=
 }
 
 #[derive(Debug, Clone)]

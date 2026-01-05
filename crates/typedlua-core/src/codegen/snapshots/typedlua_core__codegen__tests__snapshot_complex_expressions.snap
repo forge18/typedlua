@@ -1,0 +1,7 @@
+---
+source: crates/typedlua-core/src/codegen/mod.rs
+expression: output
+---
+local result = ((nil * nil) / e)
+local comparison = ((x >= y) and (z < w))
+local ternary = (condition and value1 or value2)

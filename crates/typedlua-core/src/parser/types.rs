@@ -10,6 +10,34 @@ pub trait TypeParser {
 
 impl TypeParser for Parser {
     fn parse_type(&mut self) -> Result<Type, ParserError> {
+        // Check for type predicate: identifier is Type
+        // We need to look ahead to see if this is a type predicate
+        if matches!(&self.current().kind, TokenKind::Identifier(_)) {
+            let checkpoint = self.position;
+            let start_span = self.current_span();
+
+            // Try to parse identifier
+            if let Ok(param_name) = self.parse_identifier() {
+                // Check if next token is 'is'
+                if self.check(&TokenKind::Is) {
+                    self.advance(); // consume 'is'
+                    let type_annotation = Box::new(self.parse_union_type()?);
+                    let end_span = type_annotation.span;
+                    return Ok(Type {
+                        kind: TypeKind::TypePredicate(crate::ast::types::TypePredicate {
+                            parameter_name: param_name,
+                            type_annotation,
+                            span: start_span.combine(&end_span),
+                        }),
+                        span: start_span.combine(&end_span),
+                    });
+                }
+            }
+
+            // Not a type predicate, rewind and parse as normal type
+            self.position = checkpoint;
+        }
+
         self.parse_union_type()
     }
 }
@@ -201,7 +229,7 @@ impl Parser {
             TokenKind::LeftParen => self.parse_function_type(),
 
             // Parenthesized type: (T)
-            // TODO: Distinguish from function type
+            
 
             _ => Err(ParserError {
                 message: format!("Unexpected token in type: {:?}", self.current().kind),

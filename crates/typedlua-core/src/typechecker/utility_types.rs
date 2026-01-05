@@ -1,0 +1,1181 @@
+use crate::ast::expression::Literal;
+use crate::ast::statement::{IndexKeyType, PropertySignature};
+use crate::ast::types::{MappedType, ObjectType, ObjectTypeMember, PrimitiveType, Type, TypeKind};
+use crate::ast::Ident;
+use crate::span::Span;
+use rustc_hash::FxHashMap;
+
+/// Apply a utility type transformation
+pub fn apply_utility_type(
+    name: &str,
+    type_args: &[Type],
+    span: Span,
+) -> Result<Type, String> {
+    match name {
+        "Partial" => partial(type_args, span),
+        "Required" => required(type_args, span),
+        "Readonly" => readonly(type_args, span),
+        "Record" => record(type_args, span),
+        "Pick" => pick(type_args, span),
+        "Omit" => omit(type_args, span),
+        "Exclude" => exclude(type_args, span),
+        "Extract" => extract(type_args, span),
+        "NonNilable" => non_nilable(type_args, span),
+        "Nilable" => nilable(type_args, span),
+        "ReturnType" => return_type(type_args, span),
+        "Parameters" => parameters(type_args, span),
+        _ => Err(format!("Unknown utility type: {}", name)),
+    }
+}
+
+/// Partial<T> - Makes all properties in T optional
+fn partial(type_args: &[Type], span: Span) -> Result<Type, String> {
+    if type_args.len() != 1 {
+        return Err(format!("Partial<T> expects 1 type argument, got {}", type_args.len()));
+    }
+
+    let typ = &type_args[0];
+    match &typ.kind {
+        TypeKind::Object(obj) => {
+            let new_members = obj.members.iter().map(|member| {
+                match member {
+                    ObjectTypeMember::Property(prop) => {
+                        ObjectTypeMember::Property(PropertySignature {
+                            is_readonly: prop.is_readonly,
+                            name: prop.name.clone(),
+                            is_optional: true, // Make optional
+                            type_annotation: prop.type_annotation.clone(),
+                            span: prop.span,
+                        })
+                    }
+                    // Methods and index signatures remain unchanged
+                    other => other.clone(),
+                }
+            }).collect();
+
+            Ok(Type::new(
+                TypeKind::Object(ObjectType {
+                    members: new_members,
+                    span,
+                }),
+                span,
+            ))
+        }
+        _ => Err(format!("Partial<T> requires T to be an object type")),
+    }
+}
+
+/// Required<T> - Makes all properties in T required (non-optional)
+fn required(type_args: &[Type], span: Span) -> Result<Type, String> {
+    if type_args.len() != 1 {
+        return Err(format!("Required<T> expects 1 type argument, got {}", type_args.len()));
+    }
+
+    let typ = &type_args[0];
+    match &typ.kind {
+        TypeKind::Object(obj) => {
+            let new_members = obj.members.iter().map(|member| {
+                match member {
+                    ObjectTypeMember::Property(prop) => {
+                        ObjectTypeMember::Property(PropertySignature {
+                            is_readonly: prop.is_readonly,
+                            name: prop.name.clone(),
+                            is_optional: false, // Make required
+                            type_annotation: prop.type_annotation.clone(),
+                            span: prop.span,
+                        })
+                    }
+                    other => other.clone(),
+                }
+            }).collect();
+
+            Ok(Type::new(
+                TypeKind::Object(ObjectType {
+                    members: new_members,
+                    span,
+                }),
+                span,
+            ))
+        }
+        _ => Err(format!("Required<T> requires T to be an object type")),
+    }
+}
+
+/// Readonly<T> - Makes all properties in T readonly
+fn readonly(type_args: &[Type], span: Span) -> Result<Type, String> {
+    if type_args.len() != 1 {
+        return Err(format!("Readonly<T> expects 1 type argument, got {}", type_args.len()));
+    }
+
+    let typ = &type_args[0];
+    match &typ.kind {
+        TypeKind::Object(obj) => {
+            let new_members = obj.members.iter().map(|member| {
+                match member {
+                    ObjectTypeMember::Property(prop) => {
+                        ObjectTypeMember::Property(PropertySignature {
+                            is_readonly: true, // Make readonly
+                            name: prop.name.clone(),
+                            is_optional: prop.is_optional,
+                            type_annotation: prop.type_annotation.clone(),
+                            span: prop.span,
+                        })
+                    }
+                    other => other.clone(),
+                }
+            }).collect();
+
+            Ok(Type::new(
+                TypeKind::Object(ObjectType {
+                    members: new_members,
+                    span,
+                }),
+                span,
+            ))
+        }
+        TypeKind::Array(_) => {
+            // For arrays, we can wrap in a readonly wrapper
+            // but for now, just return the same array (Lua doesn't enforce readonly)
+            Ok(typ.clone())
+        }
+        _ => Err(format!("Readonly<T> requires T to be an object or array type")),
+    }
+}
+
+/// Record<K, V> - Constructs an object type with keys of type K and values of type V
+fn record(type_args: &[Type], span: Span) -> Result<Type, String> {
+    if type_args.len() != 2 {
+        return Err(format!("Record<K, V> expects 2 type arguments, got {}", type_args.len()));
+    }
+
+    let key_type = &type_args[0];
+    let value_type = &type_args[1];
+
+    // Validate key type is string or number and determine IndexKeyType
+    let index_key_type = match &key_type.kind {
+        TypeKind::Primitive(PrimitiveType::String) | TypeKind::Literal(Literal::String(_)) => {
+            IndexKeyType::String
+        }
+        TypeKind::Primitive(PrimitiveType::Number)
+        | TypeKind::Primitive(PrimitiveType::Integer)
+        | TypeKind::Literal(Literal::Number(_)) => IndexKeyType::Number,
+        TypeKind::Union(types) => {
+            // Check if all union members are string literals
+            if types
+                .iter()
+                .all(|t| matches!(t.kind, TypeKind::Literal(Literal::String(_))))
+            {
+                IndexKeyType::String
+            } else {
+                return Err(
+                    "Record<K, V> requires K to be string, number, or a union of string literals"
+                        .to_string(),
+                );
+            }
+        }
+        _ => {
+            return Err(
+                "Record<K, V> requires K to be string, number, or a union of string literals"
+                    .to_string(),
+            )
+        }
+    };
+
+    // Create an object type with an index signature
+    use crate::ast::statement::IndexSignature;
+    use crate::ast::Ident;
+
+    let index_sig = IndexSignature {
+        key_name: Ident::new("key".to_string(), span),
+        key_type: index_key_type,
+        value_type: value_type.clone(),
+        span,
+    };
+
+    Ok(Type::new(
+        TypeKind::Object(ObjectType {
+            members: vec![ObjectTypeMember::Index(index_sig)],
+            span,
+        }),
+        span,
+    ))
+}
+
+/// Pick<T, K> - Picks a subset of properties from T
+fn pick(type_args: &[Type], span: Span) -> Result<Type, String> {
+    if type_args.len() != 2 {
+        return Err(format!("Pick<T, K> expects 2 type arguments, got {}", type_args.len()));
+    }
+
+    let typ = &type_args[0];
+    let keys = &type_args[1];
+
+    match &typ.kind {
+        TypeKind::Object(obj) => {
+            // Extract the property names to pick
+            let keys_to_pick = extract_string_literal_keys(keys)?;
+
+            let new_members: Vec<ObjectTypeMember> = obj.members.iter()
+                .filter_map(|member| {
+                    match member {
+                        ObjectTypeMember::Property(prop) => {
+                            if keys_to_pick.contains(&prop.name.node.as_str()) {
+                                Some(member.clone())
+                            } else {
+                                None
+                            }
+                        }
+                        // Don't pick methods or index signatures
+                        _ => None,
+                    }
+                })
+                .collect();
+
+            Ok(Type::new(
+                TypeKind::Object(ObjectType {
+                    members: new_members,
+                    span,
+                }),
+                span,
+            ))
+        }
+        _ => Err(format!("Pick<T, K> requires T to be an object type")),
+    }
+}
+
+/// Omit<T, K> - Omits properties from T
+fn omit(type_args: &[Type], span: Span) -> Result<Type, String> {
+    if type_args.len() != 2 {
+        return Err(format!("Omit<T, K> expects 2 type arguments, got {}", type_args.len()));
+    }
+
+    let typ = &type_args[0];
+    let keys = &type_args[1];
+
+    match &typ.kind {
+        TypeKind::Object(obj) => {
+            // Extract the property names to omit
+            let keys_to_omit = extract_string_literal_keys(keys)?;
+
+            let new_members: Vec<ObjectTypeMember> = obj.members.iter()
+                .filter_map(|member| {
+                    match member {
+                        ObjectTypeMember::Property(prop) => {
+                            if !keys_to_omit.contains(&prop.name.node.as_str()) {
+                                Some(member.clone())
+                            } else {
+                                None
+                            }
+                        }
+                        // Keep methods and index signatures
+                        other => Some(other.clone()),
+                    }
+                })
+                .collect();
+
+            Ok(Type::new(
+                TypeKind::Object(ObjectType {
+                    members: new_members,
+                    span,
+                }),
+                span,
+            ))
+        }
+        _ => Err(format!("Omit<T, K> requires T to be an object type")),
+    }
+}
+
+/// Exclude<T, U> - Excludes types from a union T that are assignable to U
+fn exclude(type_args: &[Type], span: Span) -> Result<Type, String> {
+    if type_args.len() != 2 {
+        return Err(format!("Exclude<T, U> expects 2 type arguments, got {}", type_args.len()));
+    }
+
+    let typ = &type_args[0];
+    let exclude_type = &type_args[1];
+
+    match &typ.kind {
+        TypeKind::Union(types) => {
+            let remaining: Vec<Type> = types.iter()
+                .filter(|t| !is_assignable_to(t, exclude_type))
+                .cloned()
+                .collect();
+
+            if remaining.is_empty() {
+                Ok(Type::new(TypeKind::Primitive(PrimitiveType::Never), span))
+            } else if remaining.len() == 1 {
+                Ok(remaining[0].clone())
+            } else {
+                Ok(Type::new(TypeKind::Union(remaining), span))
+            }
+        }
+        _ => {
+            // If T is not a union, check if it's assignable to U
+            if is_assignable_to(typ, exclude_type) {
+                Ok(Type::new(TypeKind::Primitive(PrimitiveType::Never), span))
+            } else {
+                Ok(typ.clone())
+            }
+        }
+    }
+}
+
+/// Extract<T, U> - Extracts types from a union T that are assignable to U
+fn extract(type_args: &[Type], span: Span) -> Result<Type, String> {
+    if type_args.len() != 2 {
+        return Err(format!("Extract<T, U> expects 2 type arguments, got {}", type_args.len()));
+    }
+
+    let typ = &type_args[0];
+    let extract_type = &type_args[1];
+
+    match &typ.kind {
+        TypeKind::Union(types) => {
+            let extracted: Vec<Type> = types.iter()
+                .filter(|t| is_assignable_to(t, extract_type))
+                .cloned()
+                .collect();
+
+            if extracted.is_empty() {
+                Ok(Type::new(TypeKind::Primitive(PrimitiveType::Never), span))
+            } else if extracted.len() == 1 {
+                Ok(extracted[0].clone())
+            } else {
+                Ok(Type::new(TypeKind::Union(extracted), span))
+            }
+        }
+        _ => {
+            // If T is not a union, check if it's assignable to U
+            if is_assignable_to(typ, extract_type) {
+                Ok(typ.clone())
+            } else {
+                Ok(Type::new(TypeKind::Primitive(PrimitiveType::Never), span))
+            }
+        }
+    }
+}
+
+/// NonNilable<T> - Removes nil and void from a type
+fn non_nilable(type_args: &[Type], span: Span) -> Result<Type, String> {
+    if type_args.len() != 1 {
+        return Err(format!("NonNilable<T> expects 1 type argument, got {}", type_args.len()));
+    }
+
+    let typ = &type_args[0];
+
+    match &typ.kind {
+        TypeKind::Union(types) => {
+            let non_nil: Vec<Type> = types.iter()
+                .filter(|t| !is_nil_or_void(t))
+                .cloned()
+                .collect();
+
+            if non_nil.is_empty() {
+                Ok(Type::new(TypeKind::Primitive(PrimitiveType::Never), span))
+            } else if non_nil.len() == 1 {
+                Ok(non_nil[0].clone())
+            } else {
+                Ok(Type::new(TypeKind::Union(non_nil), span))
+            }
+        }
+        TypeKind::Nullable(inner) => {
+            Ok((**inner).clone())
+        }
+        _ => {
+            if is_nil_or_void(typ) {
+                Ok(Type::new(TypeKind::Primitive(PrimitiveType::Never), span))
+            } else {
+                Ok(typ.clone())
+            }
+        }
+    }
+}
+
+/// Nilable<T> - Adds nil to a type (equivalent to T | nil)
+fn nilable(type_args: &[Type], span: Span) -> Result<Type, String> {
+    if type_args.len() != 1 {
+        return Err(format!("Nilable<T> expects 1 type argument, got {}", type_args.len()));
+    }
+
+    let typ = &type_args[0];
+
+    // Check if it's already nilable
+    if is_nil_or_void(typ) {
+        return Ok(typ.clone());
+    }
+
+    match &typ.kind {
+        TypeKind::Union(types) => {
+            // Check if nil is already in the union
+            if types.iter().any(is_nil_or_void) {
+                Ok(typ.clone())
+            } else {
+                let mut new_types = types.clone();
+                new_types.push(Type::new(TypeKind::Primitive(PrimitiveType::Nil), span));
+                Ok(Type::new(TypeKind::Union(new_types), span))
+            }
+        }
+        TypeKind::Nullable(_) => {
+            // Already nullable
+            Ok(typ.clone())
+        }
+        _ => {
+            Ok(Type::new(
+                TypeKind::Union(vec![
+                    typ.clone(),
+                    Type::new(TypeKind::Primitive(PrimitiveType::Nil), span),
+                ]),
+                span,
+            ))
+        }
+    }
+}
+
+/// ReturnType<F> - Extracts the return type from a function type
+fn return_type(type_args: &[Type], _span: Span) -> Result<Type, String> {
+    if type_args.len() != 1 {
+        return Err(format!("ReturnType<F> expects 1 type argument, got {}", type_args.len()));
+    }
+
+    let typ = &type_args[0];
+
+    match &typ.kind {
+        TypeKind::Function(ref func) => Ok((*func.return_type).clone()),
+        _ => Err(format!("ReturnType<F> requires F to be a function type")),
+    }
+}
+
+/// Parameters<F> - Extracts parameter types from a function as a tuple
+fn parameters(type_args: &[Type], span: Span) -> Result<Type, String> {
+    if type_args.len() != 1 {
+        return Err(format!("Parameters<F> expects 1 type argument, got {}", type_args.len()));
+    }
+
+    let typ = &type_args[0];
+
+    match &typ.kind {
+        TypeKind::Function(ref func) => {
+            let param_types: Vec<Type> = func
+                .parameters
+                .iter()
+                .filter_map(|p| p.type_annotation.clone())
+                .collect();
+
+            Ok(Type::new(TypeKind::Tuple(param_types), span))
+        }
+        _ => Err(format!("Parameters<F> requires F to be a function type")),
+    }
+}
+
+/// Evaluate a mapped type: { [K in T]: V }
+/// Transforms the mapped type into a concrete object type
+pub fn evaluate_mapped_type(mapped: &MappedType, type_env: &super::TypeEnvironment) -> Result<Type, String> {
+    // Resolve the 'in' type if it's a KeyOf expression
+    let in_type_resolved = match &mapped.in_type.kind {
+        TypeKind::KeyOf(operand) => {
+            // Evaluate keyof to get the union of string literals
+            evaluate_keyof(operand, type_env)?
+        }
+        _ => (*mapped.in_type).clone(),
+    };
+
+    // Extract the keys from the resolved 'in' clause
+    let keys = extract_keys_from_type(&in_type_resolved)?;
+
+    let mut members = Vec::new();
+
+    for key in keys {
+        let prop = PropertySignature {
+            is_readonly: mapped.is_readonly,
+            name: Ident::new(key.to_string(), mapped.span),
+            is_optional: mapped.is_optional,
+            type_annotation: (*mapped.value_type).clone(),
+            span: mapped.span,
+        };
+        members.push(ObjectTypeMember::Property(prop));
+    }
+
+    Ok(Type::new(
+        TypeKind::Object(ObjectType {
+            members,
+            span: mapped.span,
+        }),
+        mapped.span,
+    ))
+}
+
+/// Evaluate keyof operator - extracts property names from an object type
+pub fn evaluate_keyof(typ: &Type, type_env: &super::TypeEnvironment) -> Result<Type, String> {
+    // Resolve type reference first
+    let resolved_type = match &typ.kind {
+        TypeKind::Reference(type_ref) => {
+            match type_env.lookup_type(&type_ref.name.node) {
+                Some(t) => t.clone(),
+                None => return Err(format!("Type '{}' not found", type_ref.name.node)),
+            }
+        }
+        _ => typ.clone(),
+    };
+
+    match &resolved_type.kind {
+        TypeKind::Object(obj) => {
+            let mut keys = Vec::new();
+
+            for member in &obj.members {
+                match member {
+                    ObjectTypeMember::Property(prop) => {
+                        keys.push(Type::new(
+                            TypeKind::Literal(Literal::String(prop.name.node.clone())),
+                            prop.span,
+                        ));
+                    }
+                    ObjectTypeMember::Method(method) => {
+                        keys.push(Type::new(
+                            TypeKind::Literal(Literal::String(method.name.node.clone())),
+                            method.span,
+                        ));
+                    }
+                    // Index signatures don't contribute to keyof
+                    ObjectTypeMember::Index(_) => {}
+                }
+            }
+
+            if keys.is_empty() {
+                Ok(Type::new(TypeKind::Primitive(PrimitiveType::Never), typ.span))
+            } else if keys.len() == 1 {
+                Ok(keys.into_iter().next().unwrap())
+            } else {
+                Ok(Type::new(TypeKind::Union(keys), resolved_type.span))
+            }
+        }
+        _ => Err(format!("keyof requires an object type, got {:?}", resolved_type.kind)),
+    }
+}
+
+/// Evaluate a conditional type: T extends U ? X : Y
+/// Also handles infer keyword: T extends Array<infer U> ? U : never
+pub fn evaluate_conditional_type(
+    conditional: &crate::ast::types::ConditionalType,
+    type_env: &super::TypeEnvironment,
+) -> Result<Type, String> {
+    use super::type_compat::TypeCompatibility;
+    use rustc_hash::FxHashMap;
+
+    // Check if check_type extends extends_type
+    let check_type = &conditional.check_type;
+    let extends_type = &conditional.extends_type;
+
+    // Check if extends_type contains infer - if so, we need pattern matching
+    let mut inferred_types: FxHashMap<String, Type> = FxHashMap::default();
+    let has_infer = contains_infer(extends_type);
+
+    if has_infer {
+        // Try to match check_type against extends_type pattern and extract inferred types
+        if try_match_and_infer(check_type, extends_type, &mut inferred_types, type_env) {
+            // Match succeeded - evaluate true branch with inferred types
+            return substitute_inferred_types(&conditional.true_type, &inferred_types);
+        } else {
+            // Match failed - return false branch
+            return Ok((*conditional.false_type).clone());
+        }
+    }
+
+    // Handle distributive conditional types
+    // If check_type is a union, distribute the conditional over each member
+    if let TypeKind::Union(union_types) = &check_type.kind {
+        let mut result_types = Vec::new();
+
+        for member_type in union_types {
+            // Create a new conditional for each union member
+            let member_conditional = crate::ast::types::ConditionalType {
+                check_type: Box::new(member_type.clone()),
+                extends_type: conditional.extends_type.clone(),
+                true_type: conditional.true_type.clone(),
+                false_type: conditional.false_type.clone(),
+                span: conditional.span,
+            };
+
+            let evaluated = evaluate_conditional_type(&member_conditional, type_env)?;
+            result_types.push(evaluated);
+        }
+
+        // If all results are the same, return just one
+        // Otherwise, return a union
+        if result_types.len() == 1 {
+            return Ok(result_types.into_iter().next().unwrap());
+        }
+
+        // Check if all types are the same (simplified check)
+        let all_same = result_types.windows(2).all(|w| {
+            types_structurally_equal(&w[0], &w[1])
+        });
+
+        if all_same {
+            return Ok(result_types.into_iter().next().unwrap());
+        }
+
+        return Ok(Type::new(
+            TypeKind::Union(result_types),
+            conditional.span,
+        ));
+    }
+
+    // Resolve type references for comparison
+    let resolved_check = resolve_type_reference(check_type, type_env);
+    let resolved_extends = resolve_type_reference(extends_type, type_env);
+
+    // Check assignability: does check_type extend extends_type?
+    if TypeCompatibility::is_assignable(&resolved_check, &resolved_extends) {
+        Ok((*conditional.true_type).clone())
+    } else {
+        Ok((*conditional.false_type).clone())
+    }
+}
+
+/// Helper to resolve type references
+fn resolve_type_reference(typ: &Type, type_env: &super::TypeEnvironment) -> Type {
+    match &typ.kind {
+        TypeKind::Reference(type_ref) => {
+            match type_env.lookup_type(&type_ref.name.node) {
+                Some(t) => t.clone(),
+                None => typ.clone(), // Can't resolve, use as-is
+            }
+        }
+        _ => typ.clone(),
+    }
+}
+
+/// Helper to check if two types are structurally equal (simplified)
+fn types_structurally_equal(t1: &Type, t2: &Type) -> bool {
+    match (&t1.kind, &t2.kind) {
+        (TypeKind::Primitive(p1), TypeKind::Primitive(p2)) => p1 == p2,
+        (TypeKind::Literal(l1), TypeKind::Literal(l2)) => l1 == l2,
+        (TypeKind::Reference(r1), TypeKind::Reference(r2)) => r1.name.node == r2.name.node,
+        (TypeKind::Array(a1), TypeKind::Array(a2)) => types_structurally_equal(a1, a2),
+        _ => false,
+    }
+}
+
+/// Check if a type contains an infer keyword
+fn contains_infer(typ: &Type) -> bool {
+    match &typ.kind {
+        TypeKind::Infer(_) => true,
+        TypeKind::Array(elem) => contains_infer(elem),
+        TypeKind::Union(types) | TypeKind::Intersection(types) | TypeKind::Tuple(types) => {
+            types.iter().any(|t| contains_infer(t))
+        }
+        TypeKind::Function(func) => {
+            func.parameters.iter().any(|p| {
+                p.type_annotation.as_ref().map_or(false, |t| contains_infer(t))
+            }) || contains_infer(&func.return_type)
+        }
+        TypeKind::Reference(type_ref) => {
+            type_ref.type_arguments.as_ref().map_or(false, |args| {
+                args.iter().any(|t| contains_infer(t))
+            })
+        }
+        _ => false,
+    }
+}
+
+/// Try to match a check_type against a pattern (extends_type) and extract inferred types
+fn try_match_and_infer(
+    check_type: &Type,
+    pattern: &Type,
+    inferred: &mut FxHashMap<String, Type>,
+    type_env: &super::TypeEnvironment,
+) -> bool {
+    
+
+    match &pattern.kind {
+        // If pattern is `infer R`, capture the check_type as R
+        TypeKind::Infer(name) => {
+            inferred.insert(name.node.clone(), check_type.clone());
+            true
+        }
+
+        // Array pattern: T[] matches against Array<U>
+        TypeKind::Array(pattern_elem) => {
+            if let TypeKind::Array(check_elem) = &check_type.kind {
+                try_match_and_infer(check_elem, pattern_elem, inferred, type_env)
+            } else {
+                false
+            }
+        }
+
+        // Type reference with type arguments: Foo<infer R>
+        TypeKind::Reference(pattern_ref) => {
+            // Resolve check_type if it's a reference
+            let resolved_check = resolve_type_reference(check_type, type_env);
+
+            if let TypeKind::Reference(check_ref) = &resolved_check.kind {
+                // Names must match
+                if pattern_ref.name.node != check_ref.name.node {
+                    return false;
+                }
+
+                // Match type arguments
+                match (&pattern_ref.type_arguments, &check_ref.type_arguments) {
+                    (Some(pattern_args), Some(check_args)) => {
+                        if pattern_args.len() != check_args.len() {
+                            return false;
+                        }
+                        pattern_args.iter().zip(check_args.iter()).all(|(p, c)| {
+                            try_match_and_infer(c, p, inferred, type_env)
+                        })
+                    }
+                    (None, None) => true,
+                    _ => false,
+                }
+            } else {
+                false
+            }
+        }
+
+        // Function type pattern
+        TypeKind::Function(pattern_func) => {
+            if let TypeKind::Function(check_func) = &check_type.kind {
+                // Match parameters
+                if pattern_func.parameters.len() != check_func.parameters.len() {
+                    return false;
+                }
+
+                let params_match = pattern_func.parameters.iter().zip(check_func.parameters.iter()).all(|(p_param, c_param)| {
+                    match (&p_param.type_annotation, &c_param.type_annotation) {
+                        (Some(p_type), Some(c_type)) => try_match_and_infer(c_type, p_type, inferred, type_env),
+                        _ => true,
+                    }
+                });
+
+                params_match && try_match_and_infer(&check_func.return_type, &pattern_func.return_type, inferred, type_env)
+            } else {
+                false
+            }
+        }
+
+        // Tuple pattern
+        TypeKind::Tuple(pattern_types) => {
+            if let TypeKind::Tuple(check_types) = &check_type.kind {
+                if pattern_types.len() != check_types.len() {
+                    return false;
+                }
+                pattern_types.iter().zip(check_types.iter()).all(|(p, c)| {
+                    try_match_and_infer(c, p, inferred, type_env)
+                })
+            } else {
+                false
+            }
+        }
+
+        // For other patterns, just check type equality
+        _ => {
+            use super::type_compat::TypeCompatibility;
+            TypeCompatibility::is_assignable(check_type, pattern)
+        }
+    }
+}
+
+/// Substitute inferred type variables in a type
+fn substitute_inferred_types(
+    typ: &Type,
+    inferred: &FxHashMap<String, Type>,
+) -> Result<Type, String> {
+    match &typ.kind {
+        // If it's a reference to an inferred type variable, substitute it
+        TypeKind::Reference(type_ref) if type_ref.type_arguments.is_none() => {
+            if let Some(inferred_type) = inferred.get(&type_ref.name.node) {
+                Ok(inferred_type.clone())
+            } else {
+                Ok(typ.clone())
+            }
+        }
+
+        // Recursively substitute in compound types
+        TypeKind::Array(elem) => {
+            let substituted_elem = substitute_inferred_types(elem, inferred)?;
+            Ok(Type::new(TypeKind::Array(Box::new(substituted_elem)), typ.span))
+        }
+
+        TypeKind::Union(types) => {
+            let substituted: Result<Vec<_>, _> = types.iter()
+                .map(|t| substitute_inferred_types(t, inferred))
+                .collect();
+            Ok(Type::new(TypeKind::Union(substituted?), typ.span))
+        }
+
+        TypeKind::Intersection(types) => {
+            let substituted: Result<Vec<_>, _> = types.iter()
+                .map(|t| substitute_inferred_types(t, inferred))
+                .collect();
+            Ok(Type::new(TypeKind::Intersection(substituted?), typ.span))
+        }
+
+        TypeKind::Tuple(types) => {
+            let substituted: Result<Vec<_>, _> = types.iter()
+                .map(|t| substitute_inferred_types(t, inferred))
+                .collect();
+            Ok(Type::new(TypeKind::Tuple(substituted?), typ.span))
+        }
+
+        // For other types, return as-is
+        _ => Ok(typ.clone()),
+    }
+}
+
+/// Extract keys from a type for mapped type iteration
+/// Currently supports: string literal unions and type references to them
+fn extract_keys_from_type(typ: &Type) -> Result<Vec<&str>, String> {
+    match &typ.kind {
+        TypeKind::Literal(Literal::String(s)) => Ok(vec![s.as_str()]),
+        TypeKind::Union(types) => {
+            let mut keys = Vec::new();
+            for t in types {
+                match &t.kind {
+                    TypeKind::Literal(Literal::String(s)) => keys.push(s.as_str()),
+                    _ => {
+                        return Err(
+                            "Mapped type currently only supports string literal unions".to_string()
+                        )
+                    }
+                }
+            }
+            Ok(keys)
+        }
+        // Type reference - for now, we can't resolve it without the type environment
+        // This is a limitation - mapped types with type references need special handling
+        TypeKind::Reference(_) => {
+            Err("Mapped type with type reference not yet fully supported - use inline string literal union".to_string())
+        }
+        // Future: support keyof T
+        _ => Err("Mapped type 'in' clause must be a string literal or union of string literals".to_string()),
+    }
+}
+
+// Helper functions
+
+/// Extract string literal keys from a type (for Pick/Omit)
+fn extract_string_literal_keys(typ: &Type) -> Result<Vec<&str>, String> {
+    match &typ.kind {
+        TypeKind::Literal(Literal::String(s)) => Ok(vec![s.as_str()]),
+        TypeKind::Union(types) => {
+            let mut keys = Vec::new();
+            for t in types {
+                match &t.kind {
+                    TypeKind::Literal(Literal::String(s)) => keys.push(s.as_str()),
+                    _ => return Err("Pick/Omit key type must be string literal or union of string literals".to_string()),
+                }
+            }
+            Ok(keys)
+        }
+        _ => Err("Pick/Omit key type must be string literal or union of string literals".to_string()),
+    }
+}
+
+/// Check if a type is nil or void
+fn is_nil_or_void(typ: &Type) -> bool {
+    matches!(
+        typ.kind,
+        TypeKind::Primitive(PrimitiveType::Nil) | TypeKind::Primitive(PrimitiveType::Void)
+    )
+}
+
+/// Simple type assignability check
+fn is_assignable_to(source: &Type, target: &Type) -> bool {
+    use super::type_compat::TypeCompatibility;
+    TypeCompatibility::is_assignable(source, target)
+}
+
+/// Evaluate a template literal type to a union of string literals
+/// For example: `Hello ${T}` where T = "World" | "Rust" becomes "Hello World" | "Hello Rust"
+pub fn evaluate_template_literal_type(
+    template: &crate::ast::types::TemplateLiteralType,
+    type_env: &super::TypeEnvironment,
+) -> Result<Type, String> {
+    use crate::ast::types::TemplateLiteralTypePart;
+
+    // Extract all interpolated types and get their possible values
+    let mut part_expansions: Vec<Vec<String>> = Vec::new();
+
+    for part in &template.parts {
+        match part {
+            TemplateLiteralTypePart::String(s) => {
+                // Static string - single value
+                part_expansions.push(vec![s.clone()]);
+            }
+            TemplateLiteralTypePart::Type(ty) => {
+                // Type interpolation - expand to all possible string values
+                let values = expand_type_to_strings(ty, type_env)?;
+                if values.is_empty() {
+                    return Err("Template literal type interpolation produced no values".to_string());
+                }
+                part_expansions.push(values);
+            }
+        }
+    }
+
+    // Generate all combinations
+    let combinations = cartesian_product(&part_expansions);
+
+    // If there's only one combination, return a single string literal
+    // Otherwise, return a union of string literals
+    if combinations.len() == 1 {
+        Ok(Type::new(
+            TypeKind::Literal(Literal::String(combinations[0].clone())),
+            template.span,
+        ))
+    } else {
+        let literal_types: Vec<Type> = combinations
+            .into_iter()
+            .map(|s| Type::new(TypeKind::Literal(Literal::String(s)), template.span))
+            .collect();
+
+        Ok(Type::new(TypeKind::Union(literal_types), template.span))
+    }
+}
+
+/// Expand a type to all possible string literal values
+fn expand_type_to_strings(ty: &Type, type_env: &super::TypeEnvironment) -> Result<Vec<String>, String> {
+    // First resolve any type references
+    let resolved = match &ty.kind {
+        TypeKind::Reference(type_ref) => {
+            if let Some(resolved) = type_env.lookup_type(&type_ref.name.node) {
+                resolved
+            } else {
+                ty
+            }
+        }
+        _ => ty,
+    };
+
+    match &resolved.kind {
+        TypeKind::Literal(Literal::String(s)) => Ok(vec![s.clone()]),
+        TypeKind::Literal(Literal::Number(n)) => Ok(vec![n.to_string()]),
+        TypeKind::Literal(Literal::Boolean(b)) => Ok(vec![b.to_string()]),
+        TypeKind::Literal(Literal::Nil) => Ok(vec!["nil".to_string()]),
+        TypeKind::Primitive(PrimitiveType::String) => {
+            Err("Cannot interpolate primitive string type in template literal - use string literal union instead".to_string())
+        }
+        TypeKind::Primitive(PrimitiveType::Number) => {
+            Err("Cannot interpolate primitive number type in template literal - use number literal union instead".to_string())
+        }
+        TypeKind::Union(types) => {
+            let mut all_values = Vec::new();
+            for t in types {
+                let mut values = expand_type_to_strings(t, type_env)?;
+                all_values.append(&mut values);
+            }
+            Ok(all_values)
+        }
+        _ => Err(format!(
+            "Cannot interpolate type {:?} in template literal - only string/number/boolean literals and unions are supported",
+            resolved.kind
+        )),
+    }
+}
+
+/// Generate cartesian product of string vectors
+/// For example: [["a", "b"], ["1", "2"]] -> ["a1", "a2", "b1", "b2"]
+fn cartesian_product(vecs: &[Vec<String>]) -> Vec<String> {
+    if vecs.is_empty() {
+        return vec![String::new()];
+    }
+
+    if vecs.len() == 1 {
+        return vecs[0].clone();
+    }
+
+    let mut result = vec![String::new()];
+
+    for vec in vecs {
+        let mut new_result = Vec::new();
+        for existing in &result {
+            for item in vec {
+                let mut new_item = existing.clone();
+                new_item.push_str(item);
+                new_result.push(new_item);
+            }
+        }
+        result = new_result;
+    }
+
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::Ident;
+
+    fn make_span() -> Span {
+        Span::new(0, 0, 0, 0)
+    }
+
+    fn make_object_type(properties: Vec<(&str, Type, bool, bool)>) -> Type {
+        let members = properties
+            .into_iter()
+            .map(|(name, typ, optional, readonly)| {
+                ObjectTypeMember::Property(PropertySignature {
+                    is_readonly: readonly,
+                    name: Ident::new(name.to_string(), make_span()),
+                    is_optional: optional,
+                    type_annotation: typ,
+                    span: make_span(),
+                })
+            })
+            .collect();
+
+        Type::new(
+            TypeKind::Object(ObjectType {
+                members,
+                span: make_span(),
+            }),
+            make_span(),
+        )
+    }
+
+    #[test]
+    fn test_partial() {
+        let obj = make_object_type(vec![
+            ("name", Type::new(TypeKind::Primitive(PrimitiveType::String), make_span()), false, false),
+            ("age", Type::new(TypeKind::Primitive(PrimitiveType::Number), make_span()), false, false),
+        ]);
+
+        let result = partial(&[obj], make_span()).unwrap();
+
+        if let TypeKind::Object(obj_type) = &result.kind {
+            assert_eq!(obj_type.members.len(), 2);
+            for member in &obj_type.members {
+                if let ObjectTypeMember::Property(prop) = member {
+                    assert!(prop.is_optional, "Property {} should be optional", prop.name.node);
+                }
+            }
+        } else {
+            panic!("Expected object type");
+        }
+    }
+
+    #[test]
+    fn test_required() {
+        let obj = make_object_type(vec![
+            ("name", Type::new(TypeKind::Primitive(PrimitiveType::String), make_span()), true, false),
+            ("age", Type::new(TypeKind::Primitive(PrimitiveType::Number), make_span()), true, false),
+        ]);
+
+        let result = required(&[obj], make_span()).unwrap();
+
+        if let TypeKind::Object(obj_type) = &result.kind {
+            assert_eq!(obj_type.members.len(), 2);
+            for member in &obj_type.members {
+                if let ObjectTypeMember::Property(prop) = member {
+                    assert!(!prop.is_optional, "Property {} should be required", prop.name.node);
+                }
+            }
+        } else {
+            panic!("Expected object type");
+        }
+    }
+
+    #[test]
+    fn test_readonly() {
+        let obj = make_object_type(vec![
+            ("name", Type::new(TypeKind::Primitive(PrimitiveType::String), make_span()), false, false),
+            ("age", Type::new(TypeKind::Primitive(PrimitiveType::Number), make_span()), false, false),
+        ]);
+
+        let result = readonly(&[obj], make_span()).unwrap();
+
+        if let TypeKind::Object(obj_type) = &result.kind {
+            assert_eq!(obj_type.members.len(), 2);
+            for member in &obj_type.members {
+                if let ObjectTypeMember::Property(prop) = member {
+                    assert!(prop.is_readonly, "Property {} should be readonly", prop.name.node);
+                }
+            }
+        } else {
+            panic!("Expected object type");
+        }
+    }
+
+    #[test]
+    fn test_record() {
+        let key_type = Type::new(TypeKind::Primitive(PrimitiveType::String), make_span());
+        let value_type = Type::new(TypeKind::Primitive(PrimitiveType::Number), make_span());
+
+        let result = record(&[key_type, value_type], make_span()).unwrap();
+
+        if let TypeKind::Object(obj_type) = &result.kind {
+            assert_eq!(obj_type.members.len(), 1);
+            assert!(matches!(obj_type.members[0], ObjectTypeMember::Index(_)));
+        } else {
+            panic!("Expected object type");
+        }
+    }
+
+    #[test]
+    fn test_exclude() {
+        let union = Type::new(
+            TypeKind::Union(vec![
+                Type::new(TypeKind::Primitive(PrimitiveType::String), make_span()),
+                Type::new(TypeKind::Primitive(PrimitiveType::Number), make_span()),
+                Type::new(TypeKind::Primitive(PrimitiveType::Boolean), make_span()),
+            ]),
+            make_span(),
+        );
+        let exclude = Type::new(TypeKind::Primitive(PrimitiveType::String), make_span());
+
+        let result = self::exclude(&[union, exclude], make_span()).unwrap();
+
+        if let TypeKind::Union(types) = &result.kind {
+            assert_eq!(types.len(), 2);
+            assert!(types.iter().all(|t| !matches!(t.kind, TypeKind::Primitive(PrimitiveType::String))));
+        } else {
+            panic!("Expected union type");
+        }
+    }
+
+    #[test]
+    fn test_non_nilable() {
+        let union = Type::new(
+            TypeKind::Union(vec![
+                Type::new(TypeKind::Primitive(PrimitiveType::String), make_span()),
+                Type::new(TypeKind::Primitive(PrimitiveType::Nil), make_span()),
+            ]),
+            make_span(),
+        );
+
+        let result = non_nilable(&[union], make_span()).unwrap();
+
+        assert!(matches!(result.kind, TypeKind::Primitive(PrimitiveType::String)));
+    }
+
+    #[test]
+    fn test_nilable() {
+        let typ = Type::new(TypeKind::Primitive(PrimitiveType::String), make_span());
+        let result = nilable(&[typ], make_span()).unwrap();
+
+        if let TypeKind::Union(types) = &result.kind {
+            assert_eq!(types.len(), 2);
+            assert!(types.iter().any(|t| matches!(t.kind, TypeKind::Primitive(PrimitiveType::String))));
+            assert!(types.iter().any(|t| matches!(t.kind, TypeKind::Primitive(PrimitiveType::Nil))));
+        } else {
+            panic!("Expected union type");
+        }
+    }
+
+    #[test]
+    fn test_return_type() {
+        use crate::ast::types::FunctionType;
+
+        let func = Type::new(
+            TypeKind::Function(FunctionType {
+                parameters: vec![],
+                return_type: Box::new(Type::new(TypeKind::Primitive(PrimitiveType::Number), make_span())),
+                span: make_span(),
+            }),
+            make_span(),
+        );
+
+        let result = return_type(&[func], make_span()).unwrap();
+        assert!(matches!(result.kind, TypeKind::Primitive(PrimitiveType::Number)));
+    }
+}

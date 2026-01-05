@@ -1,0 +1,128 @@
+{
+  "name": "typedlua",
+  "displayName": "TypedLua",
+  "description": "Language support for TypedLua - a statically typed dialect of Lua",
+  "version": "0.1.0",
+  "publisher": "typedlua",
+  "license": "MIT",
+  "icon": "assets/typedlua-icon-128.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/typed-lua"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "lua",
+    "typedlua",
+    "type checking",
+    "language server"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "typedlua",
+        "aliases": [
+          "TypedLua",
+          "typedlua"
+        ],
+        "extensions": [
+          ".tl"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "typedlua",
+        "scopeName": "source.typedlua",
+        "path": "./syntaxes/typedlua.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "TypedLua",
+      "properties": {
+        "typedlua.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the TypedLua language server."
+        },
+        "typedlua.server.path": {
+          "type": "string",
+          "default": "typedlua-lsp",
+          "description": "Path to the TypedLua language server executable. If not set, will try to find 'typedlua-lsp' in PATH."
+        },
+        "typedlua.compiler.checkOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run type checking when saving files."
+        },
+        "typedlua.compiler.strictNullChecks": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable strict null checking."
+        },
+        "typedlua.format.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable code formatting."
+        },
+        "typedlua.format.indentSize": {
+          "type": "number",
+          "default": 4,
+          "description": "Number of spaces for indentation."
+        },
+        "typedlua.inlayHints.typeHints": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inlay hints for inferred types."
+        },
+        "typedlua.inlayHints.parameterHints": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inlay hints for parameter names."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "typedlua.restartServer",
+        "title": "TypedLua: Restart Language Server"
+      },
+      {
+        "command": "typedlua.showOutputChannel",
+        "title": "TypedLua: Show Output Channel"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.75.0",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3",
+    "@vscode/vsce": "^2.22.0"
+  }
+}

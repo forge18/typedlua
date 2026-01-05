@@ -45,6 +45,16 @@ pub enum TokenKind {
     Static,
     Abstract,
     Readonly,
+    Super,
+    Keyof,
+    Infer,
+    Is,
+    Instanceof,
+    Declare,
+    Namespace,
+    Constructor,
+    Get,
+    Set,
 
     // Identifiers and Literals
     Identifier(String),
@@ -71,9 +81,24 @@ pub enum TokenKind {
     EqualEqual,   // ==
     BangEqual,    // !=
     TildeEqual,   // ~=
+    PlusEqual,    // +=
+    MinusEqual,   // -=
+    StarEqual,    // *=
+    SlashEqual,   // /=
+    PercentEqual, // %=
+    CaretEqual,   // ^=
+    DotDotEqual,  // ..=
+    AmpersandEqual, // &=
+    PipeEqual,    // |=
+    SlashSlashEqual, // //=
+    LessLessEqual,   // <<=
+    GreaterGreaterEqual, // >>=
     Dot,          // .
     DotDot,       // ..
     DotDotDot,    // ...
+    SlashSlash,   // //
+    LessLess,     // <<
+    GreaterGreater, // >>
     Arrow,        // ->
     FatArrow,     // =>
     PipeOp,       // |>
@@ -117,7 +142,7 @@ impl Token {
         Self { kind, span }
     }
 
-    pub fn eof(position: usize) -> Self {
+    pub fn eof(position: u32) -> Self {
         Self {
             kind: TokenKind::Eof,
             span: Span::new(position, position, 0, 0),
@@ -171,53 +196,163 @@ impl TokenKind {
                 | TokenKind::Static
                 | TokenKind::Abstract
                 | TokenKind::Readonly
+                | TokenKind::Super
+                | TokenKind::Keyof
+                | TokenKind::Infer
+                | TokenKind::Is
+                | TokenKind::Instanceof
+                | TokenKind::Declare
+                | TokenKind::Namespace
+                | TokenKind::Constructor
+                | TokenKind::Get
+                | TokenKind::Set
         )
     }
 
+    /// Convert keyword TokenKind to its string representation
+    pub fn to_keyword_str(&self) -> Option<&'static str> {
+        match self {
+            TokenKind::Const => Some("const"),
+            TokenKind::Local => Some("local"),
+            TokenKind::Function => Some("function"),
+            TokenKind::Return => Some("return"),
+            TokenKind::If => Some("if"),
+            TokenKind::Elseif => Some("elseif"),
+            TokenKind::Else => Some("else"),
+            TokenKind::Then => Some("then"),
+            TokenKind::End => Some("end"),
+            TokenKind::While => Some("while"),
+            TokenKind::Do => Some("do"),
+            TokenKind::For => Some("for"),
+            TokenKind::In => Some("in"),
+            TokenKind::Break => Some("break"),
+            TokenKind::Continue => Some("continue"),
+            TokenKind::Repeat => Some("repeat"),
+            TokenKind::Until => Some("until"),
+            TokenKind::And => Some("and"),
+            TokenKind::Or => Some("or"),
+            TokenKind::Not => Some("not"),
+            TokenKind::True => Some("true"),
+            TokenKind::False => Some("false"),
+            TokenKind::Nil => Some("nil"),
+            TokenKind::Interface => Some("interface"),
+            TokenKind::Type => Some("type"),
+            TokenKind::Enum => Some("enum"),
+            TokenKind::Export => Some("export"),
+            TokenKind::Import => Some("import"),
+            TokenKind::From => Some("from"),
+            TokenKind::As => Some("as"),
+            TokenKind::Match => Some("match"),
+            TokenKind::When => Some("when"),
+            TokenKind::Class => Some("class"),
+            TokenKind::Extends => Some("extends"),
+            TokenKind::Implements => Some("implements"),
+            TokenKind::Public => Some("public"),
+            TokenKind::Private => Some("private"),
+            TokenKind::Protected => Some("protected"),
+            TokenKind::Static => Some("static"),
+            TokenKind::Abstract => Some("abstract"),
+            TokenKind::Readonly => Some("readonly"),
+            TokenKind::Super => Some("super"),
+            TokenKind::Keyof => Some("keyof"),
+            TokenKind::Infer => Some("infer"),
+            TokenKind::Is => Some("is"),
+            TokenKind::Instanceof => Some("instanceof"),
+            TokenKind::Declare => Some("declare"),
+            TokenKind::Namespace => Some("namespace"),
+            TokenKind::Constructor => Some("constructor"),
+            TokenKind::Get => Some("get"),
+            TokenKind::Set => Some("set"),
+            _ => None,
+        }
+    }
+
     /// Get keyword from string
+    /// Uses length-based bucketing for O(1) length check + small match per bucket
     pub fn from_keyword(s: &str) -> Option<Self> {
-        match s {
-            "const" => Some(TokenKind::Const),
-            "local" => Some(TokenKind::Local),
-            "function" => Some(TokenKind::Function),
-            "return" => Some(TokenKind::Return),
-            "if" => Some(TokenKind::If),
-            "elseif" => Some(TokenKind::Elseif),
-            "else" => Some(TokenKind::Else),
-            "then" => Some(TokenKind::Then),
-            "end" => Some(TokenKind::End),
-            "while" => Some(TokenKind::While),
-            "do" => Some(TokenKind::Do),
-            "for" => Some(TokenKind::For),
-            "in" => Some(TokenKind::In),
-            "break" => Some(TokenKind::Break),
-            "continue" => Some(TokenKind::Continue),
-            "repeat" => Some(TokenKind::Repeat),
-            "until" => Some(TokenKind::Until),
-            "and" => Some(TokenKind::And),
-            "or" => Some(TokenKind::Or),
-            "not" => Some(TokenKind::Not),
-            "true" => Some(TokenKind::True),
-            "false" => Some(TokenKind::False),
-            "nil" => Some(TokenKind::Nil),
-            "interface" => Some(TokenKind::Interface),
-            "type" => Some(TokenKind::Type),
-            "enum" => Some(TokenKind::Enum),
-            "export" => Some(TokenKind::Export),
-            "import" => Some(TokenKind::Import),
-            "from" => Some(TokenKind::From),
-            "as" => Some(TokenKind::As),
-            "match" => Some(TokenKind::Match),
-            "when" => Some(TokenKind::When),
-            "class" => Some(TokenKind::Class),
-            "extends" => Some(TokenKind::Extends),
-            "implements" => Some(TokenKind::Implements),
-            "public" => Some(TokenKind::Public),
-            "private" => Some(TokenKind::Private),
-            "protected" => Some(TokenKind::Protected),
-            "static" => Some(TokenKind::Static),
-            "abstract" => Some(TokenKind::Abstract),
-            "readonly" => Some(TokenKind::Readonly),
+        // Fast path: check length first to reduce string comparisons
+        match s.len() {
+            2 => match s {
+                "do" => Some(TokenKind::Do),
+                "if" => Some(TokenKind::If),
+                "in" => Some(TokenKind::In),
+                "or" => Some(TokenKind::Or),
+                "as" => Some(TokenKind::As),
+                "is" => Some(TokenKind::Is),
+                _ => None,
+            },
+            3 => match s {
+                "end" => Some(TokenKind::End),
+                "for" => Some(TokenKind::For),
+                "and" => Some(TokenKind::And),
+                "not" => Some(TokenKind::Not),
+                "nil" => Some(TokenKind::Nil),
+                "get" => Some(TokenKind::Get),
+                "set" => Some(TokenKind::Set),
+                _ => None,
+            },
+            4 => match s {
+                "then" => Some(TokenKind::Then),
+                "else" => Some(TokenKind::Else),
+                "type" => Some(TokenKind::Type),
+                "enum" => Some(TokenKind::Enum),
+                "from" => Some(TokenKind::From),
+                "when" => Some(TokenKind::When),
+                "true" => Some(TokenKind::True),
+                _ => None,
+            },
+            5 => match s {
+                "const" => Some(TokenKind::Const),
+                "local" => Some(TokenKind::Local),
+                "while" => Some(TokenKind::While),
+                "break" => Some(TokenKind::Break),
+                "until" => Some(TokenKind::Until),
+                "false" => Some(TokenKind::False),
+                "match" => Some(TokenKind::Match),
+                "class" => Some(TokenKind::Class),
+                "super" => Some(TokenKind::Super),
+                "keyof" => Some(TokenKind::Keyof),
+                "infer" => Some(TokenKind::Infer),
+                _ => None,
+            },
+            6 => match s {
+                "return" => Some(TokenKind::Return),
+                "elseif" => Some(TokenKind::Elseif),
+                "repeat" => Some(TokenKind::Repeat),
+                "import" => Some(TokenKind::Import),
+                "export" => Some(TokenKind::Export),
+                "public" => Some(TokenKind::Public),
+                "static" => Some(TokenKind::Static),
+                _ => None,
+            },
+            7 => match s {
+                "private" => Some(TokenKind::Private),
+                "extends" => Some(TokenKind::Extends),
+                "declare" => Some(TokenKind::Declare),
+                _ => None,
+            },
+            8 => match s {
+                "function" => Some(TokenKind::Function),
+                "continue" => Some(TokenKind::Continue),
+                "abstract" => Some(TokenKind::Abstract),
+                "readonly" => Some(TokenKind::Readonly),
+                _ => None,
+            },
+            9 => match s {
+                "interface" => Some(TokenKind::Interface),
+                "protected" => Some(TokenKind::Protected),
+                "namespace" => Some(TokenKind::Namespace),
+                _ => None,
+            },
+            10 => match s {
+                "implements" => Some(TokenKind::Implements),
+                "instanceof" => Some(TokenKind::Instanceof),
+                _ => None,
+            },
+            11 => match s {
+                "constructor" => Some(TokenKind::Constructor),
+                _ => None,
+            },
             _ => None,
         }
     }

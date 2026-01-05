@@ -1,0 +1,10 @@
+---
+source: crates/typedlua-core/src/codegen/mod.rs
+expression: output
+---
+local a = (x & y)
+local b = (x | y)
+local c = (x ~ y)
+local d = (x << 2)
+local e = (x >> 3)
+local f = (x // y)

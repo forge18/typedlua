@@ -1,9 +1,17 @@
 # TypedLua Formal Grammar
 
-**Document Version:** 0.1  
+**Document Version:** 0.1
 **Last Updated:** 2024-12-31
 
 This document defines the complete formal grammar for TypedLua using Extended Backus-Naur Form (EBNF) notation.
+
+## Note on Comments
+
+TypedLua uses **Lua-style comments**:
+- Single-line: `--` (not C-style `//`)
+- Multi-line: `--[[ ... ]]--` (not C-style `/* ... */`)
+
+This design choice avoids conflicts with the `//` integer division operator introduced in Lua 5.3 and maintains consistency with the target language.
 
 ---
 
@@ -403,9 +411,9 @@ TemplateChar = [^`$\\] | "\\" . | "$" [^{]
 
 Comment = LineComment | BlockComment
 
-LineComment = "//" [^\n]* "\n"
+LineComment = "--" [^\n]* "\n"
 
-BlockComment = "/*" (. | \n)* "*/"
+BlockComment = "--[[" (. | \n)* "]]" "--"?
 
 Whitespace = [ \t\n\r]+
 ```

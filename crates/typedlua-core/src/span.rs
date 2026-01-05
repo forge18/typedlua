@@ -1,21 +1,23 @@
 use std::fmt;
 
 /// Represents a location in source code with line and column information
+/// Uses u32 instead of usize for memory efficiency (16 bytes vs 32 bytes on 64-bit)
+/// This supports files up to 4GB and 4 billion lines, which is more than sufficient
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span {
     /// Starting byte offset in the source
-    pub start: usize,
+    pub start: u32,
     /// Ending byte offset in the source (exclusive)
-    pub end: usize,
+    pub end: u32,
     /// Line number (1-indexed)
-    pub line: usize,
+    pub line: u32,
     /// Column number (1-indexed)
-    pub column: usize,
+    pub column: u32,
 }
 
 impl Span {
     /// Create a new span
-    pub fn new(start: usize, end: usize, line: usize, column: usize) -> Self {
+    pub fn new(start: u32, end: u32, line: u32, column: u32) -> Self {
         Self {
             start,
             end,
@@ -35,7 +37,7 @@ impl Span {
     }
 
     /// Get the length of the span
-    pub fn len(&self) -> usize {
+    pub fn len(&self) -> u32 {
         self.end - self.start
     }
 

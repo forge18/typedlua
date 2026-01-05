@@ -469,6 +469,126 @@ impl InlayHintProvider {
 }
 ```
 
+### 11. Folding Ranges
+
+```rust
+// lsp/providers/folding_range.rs
+
+pub struct FoldingRangeProvider;
+
+impl FoldingRangeProvider {
+    pub fn provide(&self, document: &Document) -> Vec<FoldingRange> {
+        let mut ranges = Vec::new();
+
+        // Find foldable regions:
+        // - Function bodies (function...end)
+        // - Control flow blocks (if...end, while...end, for...end)
+        // - Table literals ({...})
+        // - Array literals ([...])
+        // - Multi-line comments (--[[ ... ]])
+        // - Consecutive single-line comments (3+ lines)
+
+        self.find_block_ranges(document, &mut ranges);
+        self.find_comment_ranges(document, &mut ranges);
+
+        ranges
+    }
+}
+```
+
+**Use Cases:**
+- Collapse function implementations to see overview
+- Hide implementation details in large files
+- Focus on specific sections of code
+- Collapse multi-line comments
+
+### 12. Selection Ranges (Smart Selection)
+
+```rust
+// lsp/providers/selection_range.rs
+
+pub struct SelectionRangeProvider;
+
+impl SelectionRangeProvider {
+    pub fn provide(&self, document: &Document, positions: Vec<Position>) -> Vec<SelectionRange> {
+        // For each position, build a hierarchy of selections from innermost to outermost:
+        // 1. Current word/identifier
+        // 2. Expression
+        // 3. Statement
+        // 4. Block
+        // 5. Function/class body
+        // 6. Entire document
+
+        positions.iter()
+            .filter_map(|pos| self.get_selection_range_at_position(document, *pos))
+            .collect()
+    }
+}
+```
+
+**Selection Hierarchy Example:**
+```lua
+local result = calculateSum(getValue(10), 20)
+                                    ^cursor
+```
+1. `10` (literal)
+2. `getValue(10)` (call expression)
+3. `calculateSum(getValue(10), 20)` (outer call)
+4. `result = calculateSum(getValue(10), 20)` (assignment)
+5. Entire line
+
+### 13. Semantic Tokens
+
+```rust
+// lsp/providers/semantic_tokens.rs
+
+pub struct SemanticTokensProvider {
+    token_types: Vec<SemanticTokenType>,
+    token_modifiers: Vec<SemanticTokenModifier>,
+}
+
+impl SemanticTokensProvider {
+    pub fn provide_full(&self, document: &Document) -> SemanticTokens {
+        // Parse document and extract semantic information
+        // For each token:
+        // - Determine type: class, function, variable, parameter, property, etc.
+        // - Determine modifiers: declaration, readonly, static, abstract, deprecated
+        // - Encode in delta format for efficient transmission
+
+        // Token types: class, interface, enum, type, parameter, variable, property,
+        //              function, method, keyword, comment, string, number
+        // Modifiers: declaration, readonly, static, abstract, deprecated, modification
+
+        SemanticTokens { result_id: None, data: encoded_tokens }
+    }
+
+    pub fn provide_range(&self, document: &Document, range: Range) -> SemanticTokens {
+        // Same as provide_full but only for the visible range (optimization)
+    }
+
+    pub fn provide_full_delta(&self, document: &Document, previous_result_id: String) -> SemanticTokensDelta {
+        // Return only changes from previous state (incremental update)
+    }
+}
+```
+
+**Semantic vs Textual Highlighting:**
+- **Textual**: Based on regex patterns, doesn't understand code semantics
+- **Semantic**: Based on type information and symbol resolution
+  - Distinguish between local variables and constants
+  - Highlight deprecated symbols differently
+  - Show readonly vs mutable properties
+  - Accurate even in complex contexts
+
+**Example:**
+```lua
+const PI: number = 3.14159  -- PI highlighted as readonly variable
+local radius: number = 5     -- radius highlighted as mutable variable
+
+@deprecated
+function oldFunction() end   -- oldFunction highlighted with strikethrough
+```
+
 ---
 
 ## Document Management

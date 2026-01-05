@@ -20,6 +20,12 @@ pub enum Statement {
     Continue(Span),
     Expression(Expression),
     Block(Block),
+    // Declaration file statements
+    DeclareFunction(DeclareFunctionStatement),
+    DeclareNamespace(DeclareNamespaceStatement),
+    DeclareType(TypeAliasDeclaration),  // Same as TypeAlias
+    DeclareInterface(InterfaceDeclaration),  // Same as Interface
+    DeclareConst(DeclareConstStatement),
 }
 
 #[derive(Debug, Clone)]
@@ -329,6 +335,7 @@ pub struct Parameter {
     pub type_annotation: Option<Type>,
     pub default: Option<Expression>,
     pub is_rest: bool,
+    pub is_optional: bool,  // For optional parameters (parameter?: Type)
     pub span: Span,
 }
 
@@ -351,4 +358,31 @@ pub enum DecoratorExpression {
         property: Ident,
         span: Span,
     },
+}
+
+// Declaration file-specific statements
+
+#[derive(Debug, Clone)]
+pub struct DeclareFunctionStatement {
+    pub name: Ident,
+    pub type_parameters: Option<Vec<TypeParameter>>,
+    pub parameters: Vec<Parameter>,
+    pub return_type: Type,
+    pub is_export: bool,  // For `export function` inside namespaces
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeclareNamespaceStatement {
+    pub name: Ident,
+    pub members: Vec<Statement>,  // Can contain export function, export const, etc.
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeclareConstStatement {
+    pub name: Ident,
+    pub type_annotation: Type,
+    pub is_export: bool,  // For `export const` inside namespaces
+    pub span: Span,
 }

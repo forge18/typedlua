@@ -1763,15 +1763,15 @@ function processUser(user: NonNilable<User | nil>): void
 end
 ```
 
-#### `Nilable<T>` (Lua-specific)
+#### `Nullable<T>` (Lua-specific)
 
 Shorthand for `T | nil`:
 
 ```lua
-type MaybeUser = Nilable<User>
+type MaybeUser = Nullable<User>
 // Equivalent to: User | nil
 
-function getUser(id: number): Nilable<User>
+function getUser(id: number): Nullable<User>
   if id > 0 then
     return {id = id, name = "User"}
   end
@@ -3648,9 +3648,9 @@ type DecoratorContext = {
 }
 
 type ClassDecorator<T> = (value: T, context: DecoratorContext) -> T | void
-type MethodDecorator = (value: function, context: DecoratorContext) -> function | void
+type MethodDecorator = (value: callable, context: DecoratorContext) -> callable | void
 type FieldDecorator = (value: undefined, context: DecoratorContext) -> (initialValue: unknown) -> unknown | void
-type AccessorDecorator = ({ get: function, set: function }, context: DecoratorContext) -> { get: function, set: function } | void
+type AccessorDecorator = ({ get: callable, set: callable }, context: DecoratorContext) -> { get: callable, set: callable } | void
 ```
 
 ### Class Decorators
@@ -3709,7 +3709,7 @@ print(user.created)  // Timestamp
 Decorate class methods:
 
 ```lua
-function log(value: function, context: DecoratorContext): function
+function log(value: callable, context: DecoratorContext): callable
   const methodName = context.name
   return function(...args: unknown[]): unknown
     print(`Calling ${methodName} with args:`, args)
@@ -3735,15 +3735,15 @@ calc:add(2, 3)
 
 **Memoization decorator:**
 ```lua
-function memoize(value: function, context: DecoratorContext): function
+function memoize(value: callable, context: DecoratorContext): callable
   const cache: table = {}
-  
+
   return function(...args: unknown[]): unknown
     const key = table.concat(args, ",")
     if cache[key] ~= nil then
       return cache[key]
     end
-    
+
     const result = value(...args)
     cache[key] = result
     return result
@@ -3762,7 +3762,7 @@ class Fibonacci {
 **Validation decorator:**
 ```lua
 function validate(schema: table) {
-  return function(value: function, context: DecoratorContext): function
+  return function(value: callable, context: DecoratorContext): callable
     return function(...args: unknown[]): unknown
       // Validate args against schema
       for i, arg in ipairs(args) do
@@ -3882,7 +3882,7 @@ Decorate getters and setters:
 
 ```lua
 function validate(predicate: (value: unknown) -> boolean, message: string) {
-  return function(value: { get: function, set: function }, context: DecoratorContext) {
+  return function(value: { get: callable, set: callable }, context: DecoratorContext) {
     return {
       get = value.get,
       set = function(newValue: unknown): void
@@ -3942,7 +3942,7 @@ Decorators that accept parameters:
 
 ```lua
 function deprecated(message: string) {
-  return function(value: function, context: DecoratorContext): function
+  return function(value: callable, context: DecoratorContext): callable
     return function(...args: unknown[]): unknown
       print(`WARNING: ${context.name} is deprecated. ${message}`)
       return value(...args)
@@ -3951,7 +3951,7 @@ function deprecated(message: string) {
 }
 
 function throttle(ms: number) {
-  return function(value: function, context: DecoratorContext): function
+  return function(value: callable, context: DecoratorContext): callable
     local lastCall = 0
     return function(...args: unknown[]): unknown
       const now = os.clock() * 1000
@@ -3983,7 +3983,7 @@ Decorators can attach metadata:
 
 ```lua
 function route(path: string) {
-  return function(value: function, context: DecoratorContext): function
+  return function(value: callable, context: DecoratorContext): callable
     context.metadata.routes = context.metadata.routes or {}
     table.insert(context.metadata.routes, {
       path = path,
@@ -4068,7 +4068,7 @@ api:oldMethod()  // WARNING: oldMethod is deprecated. Use newMethod instead
 
 **TypedLua source:**
 ```lua
-function log(value: function, context: DecoratorContext): function
+function log(value: callable, context: DecoratorContext): callable
   return function(...args: unknown[]): unknown
     print("Calling " .. context.name)
     return value(...args)

@@ -1,4 +1,5 @@
 use super::*;
+use crate::ast::expression::AssignmentOp;
 use crate::diagnostics::CollectingDiagnosticHandler;
 use crate::lexer::Lexer;
 use std::sync::Arc;
@@ -529,5 +530,40 @@ fn test_parse_template_literal_complex() {
             }
         }
         _ => panic!("Expected variable declaration"),
+    }
+}
+
+#[test]
+fn test_parse_compound_assignment_operators() {
+    let test_cases = vec![
+        ("x += 5", AssignmentOp::AddAssign),
+        ("x -= 3", AssignmentOp::SubtractAssign),
+        ("x *= 2", AssignmentOp::MultiplyAssign),
+        ("x /= 4", AssignmentOp::DivideAssign),
+        ("x %= 3", AssignmentOp::ModuloAssign),
+        ("x ^= 2", AssignmentOp::PowerAssign),
+        ("s ..= \"world\"", AssignmentOp::ConcatenateAssign),
+        ("x &= 3", AssignmentOp::BitwiseAndAssign),
+        ("x |= 8", AssignmentOp::BitwiseOrAssign),
+        ("x //= 3", AssignmentOp::FloorDivideAssign),
+        ("x <<= 2", AssignmentOp::LeftShiftAssign),
+        ("x >>= 1", AssignmentOp::RightShiftAssign),
+    ];
+
+    for (source, expected_op) in test_cases {
+        let program = parse_source(source).expect(&format!("Parse failed for: {}", source));
+        assert_eq!(program.statements.len(), 1);
+
+        match &program.statements[0] {
+            crate::ast::statement::Statement::Expression(expr) => {
+                match &expr.kind {
+                    crate::ast::expression::ExpressionKind::Assignment(_, op, _) => {
+                        assert_eq!(*op, expected_op, "Failed for: {}", source);
+                    }
+                    _ => panic!("Expected assignment expression for: {}", source),
+                }
+            }
+            _ => panic!("Expected expression statement for: {}", source),
+        }
     }
 }

@@ -1,0 +1,7 @@
+---
+source: crates/typedlua-core/src/codegen/mod.rs
+expression: output
+---
+local function greet(name)
+    return ("Hello, " .. name)
+end

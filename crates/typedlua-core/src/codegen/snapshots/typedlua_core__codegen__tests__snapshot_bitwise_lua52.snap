@@ -1,0 +1,10 @@
+---
+source: crates/typedlua-core/src/codegen/mod.rs
+expression: output
+---
+local a = bit32.band(x, y)
+local b = bit32.bor(x, y)
+local c = bit32.bxor(x, y)
+local d = bit32.lshift(x, 2)
+local e = bit32.rshift(x, 3)
+local f = math.floor(x / y)

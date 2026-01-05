@@ -1,0 +1,178 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "TypedLua",
+  "scopeName": "source.typedlua",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#functions" },
+    { "include": "#keywords" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#decorators" },
+    { "include": "#types" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.block.typedlua",
+          "begin": "--\\[\\[",
+          "end": "\\]\\]"
+        },
+        {
+          "name": "comment.line.double-dash.typedlua",
+          "match": "--.*$"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.typedlua",
+          "match": "\\b(if|then|else|elseif|while|do|for|in|repeat|until|return|break|continue|match|case|when)\\b"
+        },
+        {
+          "name": "keyword.other.typedlua",
+          "match": "\\b(function|end|local|const|class|interface|type|enum|implements|extends|abstract|static|readonly|private|public|protected|async|await|declare|namespace|module|export|import)\\b"
+        },
+        {
+          "name": "constant.language.typedlua",
+          "match": "\\b(true|false|nil|null|undefined)\\b"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.typedlua",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.typedlua",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.typedlua",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.typedlua",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.template.typedlua",
+          "begin": "`",
+          "end": "`",
+          "patterns": [
+            {
+              "name": "constant.character.escape.typedlua",
+              "match": "\\\\."
+            },
+            {
+              "name": "meta.embedded.line.typedlua",
+              "begin": "\\$\\{",
+              "end": "\\}",
+              "patterns": [
+                { "include": "$self" }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.typedlua",
+          "match": "\\b(0[xX][0-9a-fA-F]+|0[bB][01]+|\\d+(\\.\\d+)?([eE][+-]?\\d+)?)\\b"
+        }
+      ]
+    },
+    "decorators": {
+      "patterns": [
+        {
+          "name": "meta.decorator.typedlua",
+          "match": "@[a-zA-Z_][a-zA-Z0-9_]*",
+          "captures": {
+            "0": { "name": "entity.name.function.decorator.typedlua" }
+          }
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "entity.name.function.typedlua",
+          "match": "(?<=\\bnamespace\\s+)([a-zA-Z_][a-zA-Z0-9_.]*)(?=\\s*\\{)"
+        },
+        {
+          "name": "entity.name.function.typedlua",
+          "match": "(?<=declare\\s+namespace\\s+)([a-zA-Z_][a-zA-Z0-9_.]*)(?=\\s*\\{)"
+        },
+        {
+          "name": "entity.name.function.typedlua",
+          "match": "(?<=\\btype\\s+)([a-zA-Z_][a-zA-Z0-9_]*)(?=\\s*[=<])"
+        },
+        {
+          "name": "entity.name.function.typedlua",
+          "match": "(?<=declare\\s+type\\s+)([a-zA-Z_][a-zA-Z0-9_]*)(?=\\s*[=<])"
+        },
+        {
+          "name": "support.type.primitive.typedlua",
+          "match": "\\b(number|string|boolean|table|callable|thread|userdata|void|any|unknown|never)\\b"
+        },
+        {
+          "name": "entity.name.type.typedlua",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.typedlua",
+          "match": "\\b(print|tostring|tonumber|error|assert|len|rawlen|pairs|ipairs|next|setmetatable|getmetatable|rawget|rawset|rawequal|select|load|loadfile|dofile|loadstring|pcall|xpcall|unpack|pack|getfenv|setfenv|collectgarbage|require)\\b"
+        },
+        {
+          "name": "support.function.builtin.typedlua",
+          "match": "(?<!declare\\s)\\btype\\b(?!\\s+[a-zA-Z_])"
+        },
+        {
+          "name": "entity.name.function.typedlua",
+          "match": "(?<=export\\s+function\\s+)([a-zA-Z_][a-zA-Z0-9_]*)(?=\\s*[<(])"
+        },
+        {
+          "name": "entity.name.function.typedlua",
+          "match": "(?<=declare\\s+function\\s+)([a-zA-Z_][a-zA-Z0-9_]*)(?=\\s*[<(])"
+        },
+        {
+          "name": "entity.name.function.typedlua",
+          "match": "(?<=export\\s+const\\s+)([a-zA-Z_][a-zA-Z0-9_]*)(?=\\s*:)"
+        },
+        {
+          "name": "entity.name.function.typedlua",
+          "match": "(?<=declare\\s+const\\s+)([a-zA-Z_][a-zA-Z0-9_]*)(?=\\s*:)"
+        },
+        {
+          "name": "entity.name.function.typedlua",
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.typedlua",
+          "match": "(\\+|\\-|\\*|\\/|%|\\^|==|!=|<=|>=|<|>|&&|\\|\\||!|&|\\||~|<<|>>|\\.\\.\\.|=>|:)"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,10 @@
+---
+source: crates/typedlua-core/src/codegen/mod.rs
+expression: output
+---
+local add = function(a, b)
+    return (a + b)
+end
+local multiply = function(x, y)
+    return (x * y)
+end

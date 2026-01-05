@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
 /// File system abstraction for dependency injection
@@ -47,13 +47,13 @@ impl FileSystem for RealFileSystem {
 
 /// Mock file system for testing
 pub struct MockFileSystem {
-    files: HashMap<PathBuf, String>,
+    files: FxHashMap<PathBuf, String>,
 }
 
 impl MockFileSystem {
     pub fn new() -> Self {
         Self {
-            files: HashMap::new(),
+            files: FxHashMap::default(),
         }
     }
 

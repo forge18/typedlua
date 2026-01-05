@@ -1,0 +1,7 @@
+---
+source: crates/typedlua-core/src/codegen/mod.rs
+expression: output
+---
+local arr = {1, 2, 3, 4, 5}
+local obj = {name = "John", age = 30, active = true}
+local nested = {data = {1, 2}, meta = {version = 1}}

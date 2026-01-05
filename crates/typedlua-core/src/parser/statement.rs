@@ -1,5 +1,6 @@
 use super::{ExpressionParser, Parser, ParserError, PatternParser, TypeParser};
 use crate::ast::statement::*;
+use crate::ast::types::{Type, TypeKind, PrimitiveType};
 use crate::ast::Ident;
 use crate::ast::Spanned;
 use crate::lexer::TokenKind;
@@ -41,6 +42,7 @@ impl StatementParser for Parser {
             TokenKind::Import => self.parse_import_declaration(),
             TokenKind::Export => self.parse_export_declaration(),
             TokenKind::Abstract | TokenKind::Class => self.parse_class_declaration(),
+            TokenKind::Declare => self.parse_declare_statement(),
             _ => {
                 // Expression statement
                 let expr = self.parse_expression()?;
@@ -139,8 +141,17 @@ impl Parser {
             None
         };
 
+        // Support both { } and Lua-style ... end
+        let use_braces = self.check(&TokenKind::LeftBrace);
+        if use_braces {
+            self.consume(TokenKind::LeftBrace, "Expected '{'")?;
+        }
         let body = self.parse_block()?;
-        self.consume(TokenKind::End, "Expected 'end' after function body")?;
+        if use_braces {
+            self.consume(TokenKind::RightBrace, "Expected '}' after function body")?;
+        } else {
+            self.consume(TokenKind::End, "Expected 'end' after function body")?;
+        }
         let end_span = self.current_span();
 
         Ok(Statement::Function(FunctionDeclaration {
@@ -324,9 +335,13 @@ impl Parser {
     }
 
     fn parse_interface_declaration(&mut self) -> Result<Statement, ParserError> {
-        let start_span = self.current_span();
         self.consume(TokenKind::Interface, "Expected 'interface'")?;
+        let interface = self.parse_interface_inner()?;
+        Ok(Statement::Interface(interface))
+    }
 
+    fn parse_interface_inner(&mut self) -> Result<InterfaceDeclaration, ParserError> {
+        let start_span = self.current_span();
         let name = self.parse_identifier()?;
 
         let type_parameters = if self.match_token(&[TokenKind::LessThan]) {
@@ -350,13 +365,13 @@ impl Parser {
         self.consume(TokenKind::RightBrace, "Expected '}' after interface body")?;
         let end_span = self.current_span();
 
-        Ok(Statement::Interface(InterfaceDeclaration {
+        Ok(InterfaceDeclaration {
             name,
             type_parameters,
             extends,
             members,
             span: start_span.combine(&end_span),
-        }))
+        })
     }
 
     fn parse_interface_members(&mut self) -> Result<Vec<InterfaceMember>, ParserError> {
@@ -460,9 +475,13 @@ impl Parser {
     }
 
     fn parse_type_alias_declaration(&mut self) -> Result<Statement, ParserError> {
-        let start_span = self.current_span();
         self.consume(TokenKind::Type, "Expected 'type'")?;
+        let type_alias = self.parse_type_alias_inner()?;
+        Ok(Statement::TypeAlias(type_alias))
+    }
 
+    fn parse_type_alias_inner(&mut self) -> Result<TypeAliasDeclaration, ParserError> {
+        let start_span = self.current_span();
         let name = self.parse_identifier()?;
 
         let type_parameters = if self.match_token(&[TokenKind::LessThan]) {
@@ -476,12 +495,12 @@ impl Parser {
         let type_annotation = self.parse_type()?;
         let end_span = type_annotation.span;
 
-        Ok(Statement::TypeAlias(TypeAliasDeclaration {
+        Ok(TypeAliasDeclaration {
             name,
             type_parameters,
             type_annotation,
             span: start_span.combine(&end_span),
-        }))
+        })
     }
 
     fn parse_enum_declaration(&mut self) -> Result<Statement, ParserError> {
@@ -691,6 +710,145 @@ impl Parser {
         Ok(specifiers)
     }
 
+    fn parse_declare_statement(&mut self) -> Result<Statement, ParserError> {
+        let start_span = self.current_span();
+        self.consume(TokenKind::Declare, "Expected 'declare'")?;
+
+        match &self.current().kind {
+            TokenKind::Function => self.parse_declare_function(),
+            TokenKind::Const => self.parse_declare_const(),
+            TokenKind::Namespace => self.parse_declare_namespace(),
+            TokenKind::Type => self.parse_declare_type(),
+            TokenKind::Interface => self.parse_declare_interface(),
+            _ => Err(ParserError {
+                message: "Expected 'function', 'const', 'namespace', 'type', or 'interface' after 'declare'".to_string(),
+                span: self.current_span(),
+            }),
+        }
+    }
+
+    fn parse_declare_function(&mut self) -> Result<Statement, ParserError> {
+        let start_span = self.current_span();
+        self.consume(TokenKind::Function, "Expected 'function'")?;
+
+        // Allow keywords as function names in declarations (e.g., type, string, etc.)
+        let name = self.parse_identifier_or_keyword()?;
+
+        let type_parameters = if self.match_token(&[TokenKind::LessThan]) {
+            Some(self.parse_type_parameters()?)
+        } else {
+            None
+        };
+
+        self.consume(TokenKind::LeftParen, "Expected '(' after function name")?;
+        let parameters = self.parse_parameter_list()?;
+        self.consume(TokenKind::RightParen, "Expected ')' after parameters")?;
+
+        let return_type = if self.match_token(&[TokenKind::Colon]) {
+            self.parse_type()?
+        } else {
+            Type::new(
+                TypeKind::Primitive(PrimitiveType::Void),
+                self.current_span(),
+            )
+        };
+
+        let end_span = self.current_span();
+
+        Ok(Statement::DeclareFunction(DeclareFunctionStatement {
+            name,
+            type_parameters,
+            parameters,
+            return_type,
+            is_export: false,
+            span: start_span.combine(&end_span),
+        }))
+    }
+
+    fn parse_declare_const(&mut self) -> Result<Statement, ParserError> {
+        let start_span = self.current_span();
+        self.consume(TokenKind::Const, "Expected 'const'")?;
+
+        let name = self.parse_identifier()?;
+
+        self.consume(TokenKind::Colon, "Expected ':' after const name")?;
+        let type_annotation = self.parse_type()?;
+
+        let end_span = self.current_span();
+
+        Ok(Statement::DeclareConst(DeclareConstStatement {
+            name,
+            type_annotation,
+            is_export: false,
+            span: start_span.combine(&end_span),
+        }))
+    }
+
+    fn parse_declare_namespace(&mut self) -> Result<Statement, ParserError> {
+        let start_span = self.current_span();
+        self.consume(TokenKind::Namespace, "Expected 'namespace'")?;
+
+        let name = self.parse_identifier()?;
+
+        self.consume(TokenKind::LeftBrace, "Expected '{' after namespace name")?;
+
+        let mut members = Vec::new();
+        while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
+            // Check for 'export' keyword inside namespace
+            let is_export = self.match_token(&[TokenKind::Export]);
+
+            let member = match &self.current().kind {
+                TokenKind::Function => {
+                    let mut func_stmt = self.parse_declare_function()?;
+                    // Mark as export if needed
+                    if let Statement::DeclareFunction(ref mut func) = func_stmt {
+                        func.is_export = is_export;
+                    }
+                    func_stmt
+                }
+                TokenKind::Const => {
+                    let mut const_stmt = self.parse_declare_const()?;
+                    if let Statement::DeclareConst(ref mut const_decl) = const_stmt {
+                        const_decl.is_export = is_export;
+                    }
+                    const_stmt
+                }
+                _ => {
+                    return Err(ParserError {
+                        message: "Expected 'function' or 'const' in namespace".to_string(),
+                        span: self.current_span(),
+                    });
+                }
+            };
+
+            members.push(member);
+        }
+
+        self.consume(TokenKind::RightBrace, "Expected '}' after namespace body")?;
+
+        let end_span = self.current_span();
+
+        Ok(Statement::DeclareNamespace(DeclareNamespaceStatement {
+            name,
+            members,
+            span: start_span.combine(&end_span),
+        }))
+    }
+
+    fn parse_declare_type(&mut self) -> Result<Statement, ParserError> {
+        // declare type is the same as type alias
+        self.consume(TokenKind::Type, "Expected 'type'")?;
+        let type_alias = self.parse_type_alias_inner()?;
+        Ok(Statement::DeclareType(type_alias))
+    }
+
+    fn parse_declare_interface(&mut self) -> Result<Statement, ParserError> {
+        // declare interface is the same as interface
+        self.consume(TokenKind::Interface, "Expected 'interface'")?;
+        let interface = self.parse_interface_inner()?;
+        Ok(Statement::DeclareInterface(interface))
+    }
+
     fn parse_class_declaration(&mut self) -> Result<Statement, ParserError> {
         let start_span = self.current_span();
 
@@ -723,11 +881,26 @@ impl Parser {
             }
         }
 
-        self.consume(TokenKind::LeftBrace, "Expected '{' after class header")?;
+        // Support both Lua-style (no braces, end with 'end') and TypeScript-style (braces)
+        let use_braces = self.check(&TokenKind::LeftBrace);
 
-        let members = Vec::new(); // TODO: Implement class member parsing
+        if use_braces {
+            self.consume(TokenKind::LeftBrace, "Expected '{' after class header")?;
+        }
 
-        self.consume(TokenKind::RightBrace, "Expected '}' after class body")?;
+        let mut members = Vec::new();
+        if use_braces {
+            while !self.check(&TokenKind::RightBrace) && !self.is_at_end() {
+                members.push(self.parse_class_member()?);
+            }
+            self.consume(TokenKind::RightBrace, "Expected '}' after class body")?;
+        } else {
+            while !self.check(&TokenKind::End) && !self.is_at_end() {
+                members.push(self.parse_class_member()?);
+            }
+            self.consume(TokenKind::End, "Expected 'end' after class body")?;
+        }
+
         let end_span = self.current_span();
 
         Ok(Statement::Class(ClassDeclaration {
@@ -738,6 +911,233 @@ impl Parser {
             extends,
             implements,
             members,
+            span: start_span.combine(&end_span),
+        }))
+    }
+
+    fn parse_class_member(&mut self) -> Result<ClassMember, ParserError> {
+        let decorators = self.parse_decorators()?;
+
+        // Check for access modifiers
+        let access = if self.match_token(&[TokenKind::Public]) {
+            Some(AccessModifier::Public)
+        } else if self.match_token(&[TokenKind::Private]) {
+            Some(AccessModifier::Private)
+        } else if self.match_token(&[TokenKind::Protected]) {
+            Some(AccessModifier::Protected)
+        } else {
+            None
+        };
+
+        let is_static = self.match_token(&[TokenKind::Static]);
+        let is_abstract = self.match_token(&[TokenKind::Abstract]);
+        let is_readonly = self.match_token(&[TokenKind::Readonly]);
+
+        // Check for getter/setter
+        if self.check(&TokenKind::Get) {
+            return self.parse_getter(decorators, access, is_static);
+        }
+        if self.check(&TokenKind::Set) {
+            return self.parse_setter(decorators, access, is_static);
+        }
+
+        // Check for constructor
+        if self.check(&TokenKind::Constructor) {
+            return self.parse_constructor(decorators);
+        }
+
+        let start_span = self.current_span();
+        let name = self.parse_identifier()?;
+
+        // Property or Method
+        if self.check(&TokenKind::Colon) {
+            // Property: name: Type = value
+            self.advance(); // consume ':'
+            let type_annotation = self.parse_type()?;
+
+            let initializer = if self.match_token(&[TokenKind::Equal]) {
+                Some(self.parse_expression()?)
+            } else {
+                None
+            };
+
+            // Optional semicolon after property
+            self.match_token(&[TokenKind::Semicolon]);
+
+            let end_span = self.current_span();
+
+            Ok(ClassMember::Property(PropertyDeclaration {
+                decorators,
+                access,
+                is_static,
+                is_readonly,
+                name,
+                type_annotation,
+                initializer,
+                span: start_span.combine(&end_span),
+            }))
+        } else if self.check(&TokenKind::LeftParen) {
+            // Method: name(params): ReturnType { body }
+            let type_parameters = if self.match_token(&[TokenKind::LessThan]) {
+                Some(self.parse_type_parameters()?)
+            } else {
+                None
+            };
+
+            self.consume(TokenKind::LeftParen, "Expected '('")?;
+            let parameters = self.parse_parameter_list()?;
+            self.consume(TokenKind::RightParen, "Expected ')'")?;
+
+            let return_type = if self.match_token(&[TokenKind::Colon]) {
+                Some(self.parse_type()?)
+            } else {
+                None
+            };
+
+            let body = if is_abstract {
+                // Abstract methods have no body, just a semicolon
+                self.match_token(&[TokenKind::Semicolon]); // Optional semicolon
+                None
+            } else {
+                // Support both { } and Lua-style ... end
+                let use_braces = self.check(&TokenKind::LeftBrace);
+                if use_braces {
+                    self.consume(TokenKind::LeftBrace, "Expected '{'")?;
+                }
+                let block = self.parse_block()?;
+                if use_braces {
+                    self.consume(TokenKind::RightBrace, "Expected '}' after method body")?;
+                } else {
+                    self.consume(TokenKind::End, "Expected 'end' after method body")?;
+                }
+                Some(block)
+            };
+
+            let end_span = self.current_span();
+
+            Ok(ClassMember::Method(MethodDeclaration {
+                decorators,
+                access,
+                is_static,
+                is_abstract,
+                name,
+                type_parameters,
+                parameters,
+                return_type,
+                body,
+                span: start_span.combine(&end_span),
+            }))
+        } else {
+            Err(ParserError {
+                message: "Expected ':' for property or '(' for method".into(),
+                span: self.current_span(),
+            })
+        }
+    }
+
+    fn parse_constructor(&mut self, decorators: Vec<Decorator>) -> Result<ClassMember, ParserError> {
+        let start_span = self.current_span();
+        self.consume(TokenKind::Constructor, "Expected 'constructor'")?;
+        self.consume(TokenKind::LeftParen, "Expected '('")?;
+        let parameters = self.parse_parameter_list()?;
+        self.consume(TokenKind::RightParen, "Expected ')'")?;
+
+        // Support both { } and Lua-style ... end
+        let use_braces = self.check(&TokenKind::LeftBrace);
+        if use_braces {
+            self.consume(TokenKind::LeftBrace, "Expected '{'")?;
+        }
+        let body = self.parse_block()?;
+        if use_braces {
+            self.consume(TokenKind::RightBrace, "Expected '}' after constructor body")?;
+        } else {
+            self.consume(TokenKind::End, "Expected 'end' after constructor body")?;
+        }
+        let end_span = self.current_span();
+
+        Ok(ClassMember::Constructor(ConstructorDeclaration {
+            decorators,
+            parameters,
+            body,
+            span: start_span.combine(&end_span),
+        }))
+    }
+
+    fn parse_getter(&mut self, decorators: Vec<Decorator>, access: Option<AccessModifier>, is_static: bool) -> Result<ClassMember, ParserError> {
+        let start_span = self.current_span();
+        self.consume(TokenKind::Get, "Expected 'get'")?;
+        let name = self.parse_identifier()?;
+        self.consume(TokenKind::LeftParen, "Expected '('")?;
+        self.consume(TokenKind::RightParen, "Expected ')'")?;
+        self.consume(TokenKind::Colon, "Expected ':' for getter return type")?;
+        let return_type = self.parse_type()?;
+
+        // Support both { } and Lua-style ... end
+        let use_braces = self.check(&TokenKind::LeftBrace);
+        if use_braces {
+            self.consume(TokenKind::LeftBrace, "Expected '{'")?;
+        }
+        let body = self.parse_block()?;
+        if use_braces {
+            self.consume(TokenKind::RightBrace, "Expected '}' after getter body")?;
+        } else {
+            self.consume(TokenKind::End, "Expected 'end' after getter body")?;
+        }
+        let end_span = self.current_span();
+
+        Ok(ClassMember::Getter(GetterDeclaration {
+            decorators,
+            access,
+            is_static,
+            name,
+            return_type,
+            body,
+            span: start_span.combine(&end_span),
+        }))
+    }
+
+    fn parse_setter(&mut self, decorators: Vec<Decorator>, access: Option<AccessModifier>, is_static: bool) -> Result<ClassMember, ParserError> {
+        let start_span = self.current_span();
+        self.consume(TokenKind::Set, "Expected 'set'")?;
+        let name = self.parse_identifier()?;
+        self.consume(TokenKind::LeftParen, "Expected '('")?;
+
+        let param_start = self.current_span();
+        let param_pattern = self.parse_pattern()?;
+        self.consume(TokenKind::Colon, "Expected ':' for setter parameter type")?;
+        let param_type = self.parse_type()?;
+
+        self.consume(TokenKind::RightParen, "Expected ')'")?;
+
+        // Support both { } and Lua-style ... end
+        let use_braces = self.check(&TokenKind::LeftBrace);
+        if use_braces {
+            self.consume(TokenKind::LeftBrace, "Expected '{'")?;
+        }
+        let body = self.parse_block()?;
+        if use_braces {
+            self.consume(TokenKind::RightBrace, "Expected '}' after setter body")?;
+        } else {
+            self.consume(TokenKind::End, "Expected 'end' after setter body")?;
+        }
+        let end_span = self.current_span();
+
+        let parameter = Parameter {
+            pattern: param_pattern,
+            type_annotation: Some(param_type),
+            default: None,
+            is_rest: false,
+            is_optional: false,
+            span: param_start,
+        };
+
+        Ok(ClassMember::Setter(SetterDeclaration {
+            decorators,
+            access,
+            is_static,
+            name,
+            parameter,
+            body,
             span: start_span.combine(&end_span),
         }))
     }
@@ -769,7 +1169,8 @@ impl Parser {
 
     fn parse_decorator_expression(&mut self) -> Result<DecoratorExpression, ParserError> {
         let start_span = self.current_span();
-        let name = self.parse_identifier()?;
+        // Allow keywords as decorator names (e.g., @readonly, @sealed)
+        let name = self.parse_identifier_or_keyword()?;
 
         let mut expr = DecoratorExpression::Identifier(name);
 
@@ -777,7 +1178,8 @@ impl Parser {
             match &self.current().kind {
                 TokenKind::Dot => {
                     self.advance();
-                    let property = self.parse_identifier()?;
+                    // Allow keywords as property names in decorators
+                    let property = self.parse_identifier_or_keyword()?;
                     let span = start_span.combine(&property.span);
                     expr = DecoratorExpression::Member {
                         object: Box::new(expr),
@@ -828,6 +1230,30 @@ impl Parser {
                 span: self.current_span(),
             }),
         }
+    }
+
+    // Parse identifier or keyword as identifier (for contexts like declare function type(...))
+    fn parse_identifier_or_keyword(&mut self) -> Result<Ident, ParserError> {
+        let span = self.current_span();
+        let name = match &self.current().kind {
+            TokenKind::Identifier(name) => name.clone(),
+            // Allow keywords as identifiers in certain contexts
+            kind if kind.is_keyword() => {
+                // Get the keyword string representation
+                kind.to_keyword_str()
+                    .unwrap_or_else(|| panic!("Keyword {:?} missing from to_keyword_str", kind))
+                    .to_string()
+            }
+            _ => {
+                return Err(ParserError {
+                    message: format!("Expected identifier or keyword, got {:?}", self.current().kind),
+                    span,
+                });
+            }
+        };
+
+        self.advance();
+        Ok(Spanned::new(name, span))
     }
 
     pub(super) fn parse_type_parameters(&mut self) -> Result<Vec<TypeParameter>, ParserError> {
@@ -881,6 +1307,9 @@ impl Parser {
 
             let pattern = self.parse_pattern()?;
 
+            // Check for optional marker (?)
+            let is_optional = self.match_token(&[TokenKind::Question]);
+
             let type_annotation = if self.match_token(&[TokenKind::Colon]) {
                 Some(self.parse_type()?)
             } else {
@@ -900,6 +1329,7 @@ impl Parser {
                 type_annotation,
                 default,
                 is_rest,
+                is_optional,
                 span: param_start.combine(&param_end),
             });
 
@@ -939,6 +1369,11 @@ impl Spannable for Statement {
             Statement::Break(s) | Statement::Continue(s) => *s,
             Statement::Expression(e) => e.span,
             Statement::Block(b) => b.span,
+            Statement::DeclareFunction(f) => f.span,
+            Statement::DeclareNamespace(n) => n.span,
+            Statement::DeclareType(t) => t.span,
+            Statement::DeclareInterface(i) => i.span,
+            Statement::DeclareConst(c) => c.span,
         }
     }
 }

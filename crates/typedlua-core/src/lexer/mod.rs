@@ -2,24 +2,31 @@ mod token;
 
 pub use token::{TemplatePart, Token, TokenKind};
 
-use crate::diagnostics::DiagnosticHandler;
+use crate::diagnostics::{Diagnostic, DiagnosticHandler};
 use crate::errors::LexerError;
 use crate::span::Span;
 use std::sync::Arc;
+use tracing::{debug, instrument};
 
 /// Lexer for TypedLua source code
 pub struct Lexer {
     source: Vec<char>,
-    position: usize,
-    line: usize,
-    column: usize,
+    position: u32,
+    line: u32,
+    column: u32,
     diagnostic_handler: Arc<dyn DiagnosticHandler>,
 }
 
 impl Lexer {
     pub fn new(source: &str, diagnostic_handler: Arc<dyn DiagnosticHandler>) -> Self {
+        // Pre-allocate Vec<char> to reduce reallocation overhead
+        // Most UTF-8 text averages ~1.5 bytes per char, so divide by 2 as estimate
+        let estimated_capacity = source.len() / 2 + 10;
+        let mut chars = Vec::with_capacity(estimated_capacity);
+        chars.extend(source.chars());
+
         Self {
-            source: source.chars().collect(),
+            source: chars,
             position: 0,
             line: 1,
             column: 1,
@@ -28,8 +35,12 @@ impl Lexer {
     }
 
     /// Tokenize the entire source
+    #[instrument(skip(self), fields(source_len = self.source.len()))]
     pub fn tokenize(&mut self) -> Result<Vec<Token>, LexerError> {
-        let mut tokens = Vec::new();
+        debug!("Starting tokenization of {} characters", self.source.len());
+        // Pre-allocate: estimate ~1 token per 5 characters
+        let estimated_tokens = self.source.len() / 5 + 10;
+        let mut tokens = Vec::with_capacity(estimated_tokens);
 
         while !self.is_at_end() {
             self.skip_whitespace();
@@ -47,6 +58,7 @@ impl Lexer {
         }
 
         tokens.push(Token::eof(self.position));
+        debug!("Tokenized into {} tokens", tokens.len());
         Ok(tokens)
     }
 
@@ -93,23 +105,56 @@ impl Lexer {
             }
             '+' => {
                 self.advance();
-                TokenKind::Plus
+                if self.current() == '=' {
+                    self.advance();
+                    TokenKind::PlusEqual
+                } else {
+                    TokenKind::Plus
+                }
             }
             '*' => {
                 self.advance();
-                TokenKind::Star
+                if self.current() == '=' {
+                    self.advance();
+                    TokenKind::StarEqual
+                } else {
+                    TokenKind::Star
+                }
             }
             '/' => {
                 self.advance();
-                TokenKind::Slash
+                if self.current() == '/' {
+                    self.advance();
+                    if self.current() == '=' {
+                        self.advance();
+                        TokenKind::SlashSlashEqual
+                    } else {
+                        TokenKind::SlashSlash
+                    }
+                } else if self.current() == '=' {
+                    self.advance();
+                    TokenKind::SlashEqual
+                } else {
+                    TokenKind::Slash
+                }
             }
             '%' => {
                 self.advance();
-                TokenKind::Percent
+                if self.current() == '=' {
+                    self.advance();
+                    TokenKind::PercentEqual
+                } else {
+                    TokenKind::Percent
+                }
             }
             '^' => {
                 self.advance();
-                TokenKind::Caret
+                if self.current() == '=' {
+                    self.advance();
+                    TokenKind::CaretEqual
+                } else {
+                    TokenKind::Caret
+                }
             }
             '#' => {
                 self.advance();
@@ -117,7 +162,12 @@ impl Lexer {
             }
             '&' => {
                 self.advance();
-                TokenKind::Ampersand
+                if self.current() == '=' {
+                    self.advance();
+                    TokenKind::AmpersandEqual
+                } else {
+                    TokenKind::Ampersand
+                }
             }
             '?' => {
                 self.advance();
@@ -143,6 +193,14 @@ impl Lexer {
                 if self.current() == '=' {
                     self.advance();
                     TokenKind::LessEqual
+                } else if self.current() == '<' {
+                    self.advance();
+                    if self.current() == '=' {
+                        self.advance();
+                        TokenKind::LessLessEqual
+                    } else {
+                        TokenKind::LessLess
+                    }
                 } else {
                     TokenKind::LessThan
                 }
@@ -152,6 +210,14 @@ impl Lexer {
                 if self.current() == '=' {
                     self.advance();
                     TokenKind::GreaterEqual
+                } else if self.current() == '>' {
+                    self.advance();
+                    if self.current() == '=' {
+                        self.advance();
+                        TokenKind::GreaterGreaterEqual
+                    } else {
+                        TokenKind::GreaterGreater
+                    }
                 } else {
                     TokenKind::GreaterThan
                 }
@@ -184,6 +250,9 @@ impl Lexer {
                     if self.current() == '.' {
                         self.advance();
                         TokenKind::DotDotDot
+                    } else if self.current() == '=' {
+                        self.advance();
+                        TokenKind::DotDotEqual
                     } else {
                         TokenKind::DotDot
                     }
@@ -205,6 +274,9 @@ impl Lexer {
                 if self.current() == '>' {
                     self.advance();
                     TokenKind::Arrow
+                } else if self.current() == '=' {
+                    self.advance();
+                    TokenKind::MinusEqual
                 } else {
                     TokenKind::Minus
                 }
@@ -214,6 +286,9 @@ impl Lexer {
                 if self.current() == '>' {
                     self.advance();
                     TokenKind::PipeOp
+                } else if self.current() == '=' {
+                    self.advance();
+                    TokenKind::PipeEqual
                 } else {
                     TokenKind::Pipe
                 }
@@ -232,9 +307,12 @@ impl Lexer {
 
             _ => {
                 self.advance();
-                self.diagnostic_handler.error(
-                    Span::new(start, self.position, start_line, start_column),
-                    &format!("Unexpected character: '{}'", ch),
+                self.diagnostic_handler.report(
+                    Diagnostic::error_with_code(
+                        Span::new(start, self.position, start_line, start_column),
+                        crate::error_codes::UNEXPECTED_CHAR,
+                        format!("Unexpected character: '{}'", ch),
+                    )
                 );
                 TokenKind::Unknown(ch)
             }
@@ -247,7 +325,8 @@ impl Lexer {
     }
 
     fn read_identifier(&mut self) -> TokenKind {
-        let mut ident = String::new();
+        // Pre-allocate: most identifiers are < 16 chars
+        let mut ident = String::with_capacity(16);
 
         while !self.is_at_end() && (self.current().is_alphanumeric() || self.current() == '_') {
             ident.push(self.current());
@@ -258,7 +337,8 @@ impl Lexer {
     }
 
     fn read_number(&mut self) -> Result<TokenKind, LexerError> {
-        let mut number = String::new();
+        // Pre-allocate: most numbers are < 16 chars
+        let mut number = String::with_capacity(16);
 
         // Handle hex numbers (0x...)
         if self.current() == '0' && self.peek() == Some('x') {
@@ -330,7 +410,8 @@ impl Lexer {
     fn read_string(&mut self, quote: char) -> Result<TokenKind, LexerError> {
         self.advance(); // Skip opening quote
 
-        let mut string = String::new();
+        // Pre-allocate: most strings are < 32 chars
+        let mut string = String::with_capacity(32);
 
         while !self.is_at_end() && self.current() != quote {
             if self.current() == '\\' {
@@ -373,15 +454,16 @@ impl Lexer {
 
         self.advance(); // Skip opening `
 
-        let mut parts = Vec::new();
-        let mut current_string = String::new();
+        // Pre-allocate: most templates have 3-5 parts
+        let mut parts = Vec::with_capacity(4);
+        // Pre-allocate: most string parts are < 32 chars
+        let mut current_string = String::with_capacity(32);
 
         while !self.is_at_end() && self.current() != '`' {
             if self.current() == '$' && self.peek() == Some('{') {
                 // Save current string part
                 if !current_string.is_empty() {
-                    parts.push(TemplatePart::String(current_string.clone()));
-                    current_string.clear();
+                    parts.push(TemplatePart::String(std::mem::take(&mut current_string)));
                 }
 
                 self.advance(); // Skip $
@@ -452,53 +534,80 @@ impl Lexer {
     }
 
     fn try_skip_comment(&mut self) -> bool {
-        // Single-line comment: //
-        if self.current() == '/' && self.peek() == Some('/') {
-            while !self.is_at_end() && self.current() != '\n' {
-                self.advance();
-            }
-            return true;
-        }
+        // Single-line comment: --
+        if self.current() == '-' && self.peek() == Some('-') {
+            // Check if it's a multi-line comment: --[[
+            if ((self.position + 2) as usize) < self.source.len()
+                && self.source[(self.position + 2) as usize] == '['
+                && ((self.position + 3) as usize) < self.source.len()
+                && self.source[(self.position + 3) as usize] == '[' {
+                // Multi-line comment: --[[ ... ]]--
+                self.advance(); // Skip first -
+                self.advance(); // Skip second -
+                self.advance(); // Skip first [
+                self.advance(); // Skip second [
 
-        // Multi-line comment: /* ... */
-        if self.current() == '/' && self.peek() == Some('*') {
-            self.advance(); // Skip /
-            self.advance(); // Skip *
-
-            while !self.is_at_end() {
-                if self.current() == '*' && self.peek() == Some('/') {
-                    self.advance(); // Skip *
-                    self.advance(); // Skip /
-                    return true;
+                while !self.is_at_end() {
+                    if self.current() == ']' && self.peek() == Some(']') {
+                        self.advance(); // Skip first ]
+                        self.advance(); // Skip second ]
+                        // Optionally skip trailing --
+                        if self.current() == '-' && self.peek() == Some('-') {
+                            self.advance();
+                            self.advance();
+                        }
+                        return true;
+                    }
+                    self.advance();
                 }
-                self.advance();
-            }
 
-            // Unterminated comment
-            self.diagnostic_handler.error(
-                Span::new(self.position, self.position, self.line, self.column),
-                "Unterminated comment",
-            );
-            return true;
+                // Unterminated comment
+                self.diagnostic_handler.report(
+                    Diagnostic::error_with_code(
+                        Span::new(self.position, self.position, self.line, self.column),
+                        crate::error_codes::UNTERMINATED_COMMENT,
+                        "Unterminated multi-line comment",
+                    ).with_suggestion(
+                        Span::new(self.position, self.position, self.line, self.column),
+                        "]]--".to_string(),
+                        "Add closing delimiter ']]--'",
+                    )
+                );
+                return true;
+            } else {
+                // Single-line comment
+                while !self.is_at_end() && self.current() != '\n' {
+                    self.advance();
+                }
+                return true;
+            }
         }
 
         false
     }
 
+    #[inline]
     fn skip_whitespace(&mut self) {
-        while !self.is_at_end() && self.current().is_whitespace() {
-            self.advance();
+        // Fast path for common ASCII whitespace characters
+        while !self.is_at_end() {
+            match self.current() {
+                ' ' | '\t' | '\r' | '\n' => self.advance(),
+                _ => break,
+            }
         }
     }
 
+    #[inline(always)]
     fn current(&self) -> char {
-        self.source.get(self.position).copied().unwrap_or('\0')
+        self.source.get(self.position as usize).copied().unwrap_or('\0')
     }
 
+    #[inline(always)]
     fn peek(&self) -> Option<char> {
-        self.source.get(self.position + 1).copied()
+        self.source.get((self.position + 1) as usize).copied()
     }
 
+    #[inline]
     fn advance(&mut self) {
         if !self.is_at_end() {
             if self.current() == '\n' {
@@ -511,8 +620,9 @@ impl Lexer {
         }
     }
 
+    #[inline(always)]
     fn is_at_end(&self) -> bool {
-        self.position >= self.source.len()
+        (self.position as usize) >= self.source.len()
     }
 }
 
@@ -641,7 +751,7 @@ mod tests {
 
     #[test]
     fn test_single_line_comment() {
-        let tokens = lex("const x = 5 // this is a comment\nlocal y = 10");
+        let tokens = lex("const x = 5 -- this is a comment\nlocal y = 10");
         assert_eq!(tokens[0].kind, TokenKind::Const);
         assert!(matches!(&tokens[1].kind, TokenKind::Identifier(s) if s == "x"));
         assert_eq!(tokens[2].kind, TokenKind::Equal);
@@ -651,7 +761,7 @@ mod tests {
 
     #[test]
     fn test_multi_line_comment() {
-        let tokens = lex("const x = 5 /* this is\n a multi-line\n comment */ local y = 10");
+        let tokens = lex("const x = 5 --[[ this is\n a multi-line\n comment ]]-- local y = 10");
         assert_eq!(tokens[0].kind, TokenKind::Const);
         assert!(matches!(&tokens[1].kind, TokenKind::Identifier(s) if s == "x"));
         assert_eq!(tokens[2].kind, TokenKind::Equal);

@@ -36,6 +36,9 @@ pub enum TypeKind {
     TemplateLiteral(TemplateLiteralType),
     Nullable(Box<Type>),
     Parenthesized(Box<Type>),
+    Infer(Ident),  // infer R - captures type in conditional
+    TypePredicate(TypePredicate),  // x is T - type guard predicate
+    Variadic(Box<Type>),  // ...T[] - variadic return type
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,4 +111,11 @@ pub struct TemplateLiteralType {
 pub enum TemplateLiteralTypePart {
     String(String),
     Type(Type),
+}
+
+#[derive(Debug, Clone)]
+pub struct TypePredicate {
+    pub parameter_name: Ident,
+    pub type_annotation: Box<Type>,
+    pub span: Span,
 }

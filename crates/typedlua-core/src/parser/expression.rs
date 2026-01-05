@@ -57,6 +57,7 @@ impl Parser {
                 type_annotation: None,
                 default: None,
                 is_rest: false,
+                is_optional: false,
                 span: start_span,
             }]
         } else {
@@ -454,6 +455,13 @@ impl Parser {
             TokenKind::Function => self.parse_function_expression(),
             TokenKind::Match => self.parse_match_expression(),
             TokenKind::TemplateString(parts) => self.parse_template_literal(parts.clone(), start_span),
+            TokenKind::Super => {
+                self.advance();
+                Ok(Expression {
+                    kind: ExpressionKind::SuperKeyword,
+                    span: start_span,
+                })
+            }
             _ => Err(ParserError {
                 message: format!("Unexpected token in expression: {:?}", self.current().kind),
                 span: start_span,
@@ -483,9 +491,15 @@ impl Parser {
                 let span = start_span.combine(&value.span);
                 properties.push(ObjectProperty::Computed { key, value, span });
             } else {
-                // Regular property: key = value
+                // Regular property: key = value or key: value
                 let key = self.parse_identifier()?;
-                self.consume(TokenKind::Equal, "Expected '=' after property key")?;
+                // Accept both = (Lua-style) and : (TypeScript-style)
+                if !self.match_token(&[TokenKind::Equal, TokenKind::Colon]) {
+                    return Err(ParserError {
+                        message: "Expected '=' or ':' after property key".to_string(),
+                        span: self.current_span(),
+                    });
+                }
                 let value = self.parse_expression()?;
                 let span = key.span.combine(&value.span);
                 properties.push(ObjectProperty::Property { key, value, span });
@@ -697,7 +711,19 @@ impl Parser {
     fn match_assignment_op(&mut self) -> Option<AssignmentOp> {
         let op = match &self.current().kind {
             TokenKind::Equal => Some(AssignmentOp::Assign),
-            _ => None, // TODO: Add compound assignment operators
+            TokenKind::PlusEqual => Some(AssignmentOp::AddAssign),
+            TokenKind::MinusEqual => Some(AssignmentOp::SubtractAssign),
+            TokenKind::StarEqual => Some(AssignmentOp::MultiplyAssign),
+            TokenKind::SlashEqual => Some(AssignmentOp::DivideAssign),
+            TokenKind::PercentEqual => Some(AssignmentOp::ModuloAssign),
+            TokenKind::CaretEqual => Some(AssignmentOp::PowerAssign),
+            TokenKind::DotDotEqual => Some(AssignmentOp::ConcatenateAssign),
+            TokenKind::AmpersandEqual => Some(AssignmentOp::BitwiseAndAssign),
+            TokenKind::PipeEqual => Some(AssignmentOp::BitwiseOrAssign),
+            TokenKind::SlashSlashEqual => Some(AssignmentOp::FloorDivideAssign),
+            TokenKind::LessLessEqual => Some(AssignmentOp::LeftShiftAssign),
+            TokenKind::GreaterGreaterEqual => Some(AssignmentOp::RightShiftAssign),
+            _ => None,
         };
 
         if op.is_some() {
@@ -738,8 +764,17 @@ impl Parser {
     }
 
     fn match_shift_op(&mut self) -> Option<BinaryOp> {
-        // TODO: Add shift operators when we have << and >> tokens
-        None
+        let op = match &self.current().kind {
+            TokenKind::LessLess => Some(BinaryOp::ShiftLeft),
+            TokenKind::GreaterGreater => Some(BinaryOp::ShiftRight),
+            _ => None,
+        };
+
+        if op.is_some() {
+            self.advance();
+        }
+
+        op
     }
 
     fn match_additive_op(&mut self) -> Option<BinaryOp> {
@@ -760,6 +795,7 @@ impl Parser {
         let op = match &self.current().kind {
             TokenKind::Star => Some(BinaryOp::Multiply),
             TokenKind::Slash => Some(BinaryOp::Divide),
+            TokenKind::SlashSlash => Some(BinaryOp::IntegerDivide),
             TokenKind::Percent => Some(BinaryOp::Modulo),
             _ => None,
         };
