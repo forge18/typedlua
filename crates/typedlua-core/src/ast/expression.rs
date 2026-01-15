@@ -1,9 +1,10 @@
 use super::{pattern::Pattern, statement::TypeParameter, types::Type, Ident};
 use crate::span::Span;
+use serde::{Deserialize, Serialize};
 
 use super::statement::{Block, Parameter};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Expression {
     pub kind: ExpressionKind,
     pub span: Span,
@@ -15,7 +16,7 @@ impl Expression {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ExpressionKind {
     Identifier(String),
     Literal(Literal),
@@ -38,9 +39,10 @@ pub enum ExpressionKind {
     SuperKeyword,
     Template(TemplateLiteral),
     TypeAssertion(Box<Expression>, Type),
+    New(Box<Expression>, Vec<Argument>),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Literal {
     Nil,
     Boolean(bool),
@@ -49,7 +51,7 @@ pub enum Literal {
     String(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BinaryOp {
     Add,
     Subtract,
@@ -75,7 +77,7 @@ pub enum BinaryOp {
     Instanceof,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UnaryOp {
     Not,
     Negate,
@@ -83,37 +85,37 @@ pub enum UnaryOp {
     BitwiseNot,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AssignmentOp {
-    Assign,              // =
-    AddAssign,           // +=
-    SubtractAssign,      // -=
-    MultiplyAssign,      // *=
-    DivideAssign,        // /=
-    ModuloAssign,        // %=
-    PowerAssign,         // ^=
-    ConcatenateAssign,   // ..=
-    BitwiseAndAssign,    // &=
-    BitwiseOrAssign,     // |=
-    FloorDivideAssign,   // //=
-    LeftShiftAssign,     // <<=
-    RightShiftAssign,    // >>=
+    Assign,            // =
+    AddAssign,         // +=
+    SubtractAssign,    // -=
+    MultiplyAssign,    // *=
+    DivideAssign,      // /=
+    ModuloAssign,      // %=
+    PowerAssign,       // ^=
+    ConcatenateAssign, // ..=
+    BitwiseAndAssign,  // &=
+    BitwiseOrAssign,   // |=
+    FloorDivideAssign, // //=
+    LeftShiftAssign,   // <<=
+    RightShiftAssign,  // >>=
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Argument {
     pub value: Expression,
     pub is_spread: bool,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ArrayElement {
     Expression(Expression),
     Spread(Expression),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ObjectProperty {
     Property {
         key: Ident,
@@ -131,7 +133,7 @@ pub enum ObjectProperty {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionExpression {
     pub type_parameters: Option<Vec<TypeParameter>>,
     pub parameters: Vec<Parameter>,
@@ -140,7 +142,7 @@ pub struct FunctionExpression {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArrowFunction {
     pub parameters: Vec<Parameter>,
     pub return_type: Option<Type>,
@@ -148,20 +150,20 @@ pub struct ArrowFunction {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ArrowBody {
     Expression(Box<Expression>),
     Block(Block),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MatchExpression {
     pub value: Box<Expression>,
     pub arms: Vec<MatchArm>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MatchArm {
     pub pattern: Pattern,
     pub guard: Option<Expression>,
@@ -169,19 +171,19 @@ pub struct MatchArm {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MatchArmBody {
     Expression(Expression),
     Block(Block),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TemplateLiteral {
     pub parts: Vec<TemplatePart>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TemplatePart {
     String(String),
     Expression(Expression),

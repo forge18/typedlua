@@ -1,25 +1,32 @@
+use std::sync::Arc;
+use typedlua_core::codegen::CodeGenerator;
 use typedlua_core::config::CompilerOptions;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::lexer::Lexer;
 use typedlua_core::parser::Parser;
 use typedlua_core::typechecker::TypeChecker;
-use typedlua_core::codegen::CodeGenerator;
-use std::sync::Arc;
 
 fn compile_and_check(source: &str) -> Result<String, String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
 
     // Lex
     let mut lexer = Lexer::new(source, handler.clone());
-    let tokens = lexer.tokenize().map_err(|e| format!("Lexing failed: {:?}", e))?;
+    let tokens = lexer
+        .tokenize()
+        .map_err(|e| format!("Lexing failed: {:?}", e))?;
 
     // Parse
     let mut parser = Parser::new(tokens, handler.clone());
-    let program = parser.parse().map_err(|e| format!("Parsing failed: {:?}", e))?;
+    let program = parser
+        .parse()
+        .map_err(|e| format!("Parsing failed: {:?}", e))?;
 
     // Type check
-    let mut type_checker = TypeChecker::new(handler.clone()).with_options(CompilerOptions::default());
-    type_checker.check_program(&program).map_err(|e| e.message)?;
+    let mut type_checker =
+        TypeChecker::new(handler.clone()).with_options(CompilerOptions::default());
+    type_checker
+        .check_program(&program)
+        .map_err(|e| e.message)?;
 
     // Generate code
     let mut codegen = CodeGenerator::new();
@@ -58,7 +65,10 @@ fn test_array_destructuring_with_rest() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Array destructuring with rest should compile");
+    assert!(
+        result.is_ok(),
+        "Array destructuring with rest should compile"
+    );
     let output = result.unwrap();
 
     assert!(output.contains("local first = __temp[1]"));
@@ -74,7 +84,10 @@ fn test_array_destructuring_with_holes() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Array destructuring with holes should compile");
+    assert!(
+        result.is_ok(),
+        "Array destructuring with holes should compile"
+    );
     let output = result.unwrap();
 
     // Should skip the second element
@@ -141,7 +154,10 @@ fn test_object_destructuring_with_rename() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Object destructuring with rename should compile");
+    assert!(
+        result.is_ok(),
+        "Object destructuring with rename should compile"
+    );
     let output = result.unwrap();
 
     assert!(output.contains("local userName = __temp.name"));
@@ -173,7 +189,10 @@ fn test_object_destructuring_type_check() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Object destructuring type check should pass");
+    assert!(
+        result.is_ok(),
+        "Object destructuring type check should pass"
+    );
 }
 
 // ============================================================================
@@ -188,7 +207,10 @@ fn test_object_with_nested_array() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Object with nested array destructuring should compile");
+    assert!(
+        result.is_ok(),
+        "Object with nested array destructuring should compile"
+    );
     let output = result.unwrap();
 
     assert!(output.contains("local __temp_coords = __temp.coords"));
@@ -227,7 +249,10 @@ fn test_complex_nested_destructuring() {
     if let Err(ref e) = result {
         eprintln!("Error: {}", e);
     }
-    assert!(result.is_ok(), "Complex nested destructuring should compile");
+    assert!(
+        result.is_ok(),
+        "Complex nested destructuring should compile"
+    );
     let output = result.unwrap();
 
     assert!(output.contains("local __temp_user = __temp.user"));
@@ -250,7 +275,10 @@ fn test_array_destructure_non_array() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_err(), "Destructuring non-array should fail type check");
+    assert!(
+        result.is_err(),
+        "Destructuring non-array should fail type check"
+    );
     let error = result.unwrap_err();
     assert!(error.contains("Cannot destructure non-array"));
 }
@@ -263,7 +291,10 @@ fn test_object_destructure_non_object() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_err(), "Destructuring non-object should fail type check");
+    assert!(
+        result.is_err(),
+        "Destructuring non-object should fail type check"
+    );
     let error = result.unwrap_err();
     assert!(error.contains("Cannot destructure non-object"));
 }
@@ -297,7 +328,10 @@ fn test_multiple_destructuring_statements() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Multiple destructuring statements should work");
+    assert!(
+        result.is_ok(),
+        "Multiple destructuring statements should work"
+    );
 }
 
 #[test]
@@ -311,7 +345,10 @@ fn test_destructuring_const_and_local() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Destructuring with const and local should work");
+    assert!(
+        result.is_ok(),
+        "Destructuring with const and local should work"
+    );
 }
 
 #[test]
@@ -322,7 +359,10 @@ fn test_destructuring_with_type_annotations() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Destructuring with type annotations should work");
+    assert!(
+        result.is_ok(),
+        "Destructuring with type annotations should work"
+    );
 }
 
 #[test]
@@ -335,5 +375,8 @@ fn test_destructuring_preserves_types() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Destructured variables should preserve types");
+    assert!(
+        result.is_ok(),
+        "Destructured variables should preserve types"
+    );
 }

@@ -141,6 +141,7 @@ fn substitute_type(typ: &Type, substitutions: &FxHashMap<String, Type>) -> Resul
 
             Ok(Type::new(
                 TypeKind::Function(crate::ast::types::FunctionType {
+                    type_parameters: None, // Type parameters are gone after substitution
                     parameters: substituted_params?,
                     return_type: Box::new(substituted_return),
                     span: func_type.span,
@@ -295,7 +296,8 @@ fn infer_from_types(
                 // Names should match
                 if type_ref.name.node == arg_ref.name.node {
                     if let (Some(param_args), Some(arg_args)) =
-                        (&type_ref.type_arguments, &arg_ref.type_arguments) {
+                        (&type_ref.type_arguments, &arg_ref.type_arguments)
+                    {
                         // Infer from each type argument pair
                         for (p, a) in param_args.iter().zip(arg_args.iter()) {
                             infer_from_types(p, a, inferred)?;
@@ -350,16 +352,16 @@ mod tests {
         );
 
         // Type argument: number
-        let number_type = Type::new(
-            TypeKind::Primitive(PrimitiveType::Number),
-            span,
-        );
+        let number_type = Type::new(TypeKind::Primitive(PrimitiveType::Number), span);
 
         // Instantiate T with number
         let result = instantiate_type(&type_ref_t, &[type_param], &[number_type.clone()]).unwrap();
 
         // Result should be number
-        assert!(matches!(result.kind, TypeKind::Primitive(PrimitiveType::Number)));
+        assert!(matches!(
+            result.kind,
+            TypeKind::Primitive(PrimitiveType::Number)
+        ));
     }
 
     #[test]
@@ -388,10 +390,7 @@ mod tests {
         );
 
         // Type argument: string
-        let string_type = Type::new(
-            TypeKind::Primitive(PrimitiveType::String),
-            span,
-        );
+        let string_type = Type::new(TypeKind::Primitive(PrimitiveType::String), span);
 
         // Instantiate Array<T> with string
         let result = instantiate_type(&array_t, &[type_param], &[string_type]).unwrap();
@@ -399,7 +398,10 @@ mod tests {
         // Result should be Array<string>
         match &result.kind {
             TypeKind::Array(elem) => {
-                assert!(matches!(elem.kind, TypeKind::Primitive(PrimitiveType::String)));
+                assert!(matches!(
+                    elem.kind,
+                    TypeKind::Primitive(PrimitiveType::String)
+                ));
             }
             _ => panic!("Expected array type"),
         }
@@ -426,22 +428,12 @@ mod tests {
             span,
         );
 
-        let number_type = Type::new(
-            TypeKind::Primitive(PrimitiveType::Number),
-            span,
-        );
+        let number_type = Type::new(TypeKind::Primitive(PrimitiveType::Number), span);
 
-        let string_type = Type::new(
-            TypeKind::Primitive(PrimitiveType::String),
-            span,
-        );
+        let string_type = Type::new(TypeKind::Primitive(PrimitiveType::String), span);
 
         // Try to instantiate with wrong number of type arguments
-        let result = instantiate_type(
-            &type_ref_t,
-            &[type_param],
-            &[number_type, string_type],
-        );
+        let result = instantiate_type(&type_ref_t, &[type_param], &[number_type, string_type]);
 
         assert!(result.is_err());
     }
@@ -487,7 +479,10 @@ mod tests {
         assert!(result.is_ok());
         let inferred = result.unwrap();
         assert_eq!(inferred.len(), 1);
-        assert!(matches!(inferred[0].kind, TypeKind::Primitive(PrimitiveType::Number)));
+        assert!(matches!(
+            inferred[0].kind,
+            TypeKind::Primitive(PrimitiveType::Number)
+        ));
     }
 
     #[test]
@@ -540,7 +535,10 @@ mod tests {
         assert!(result.is_ok());
         let inferred = result.unwrap();
         assert_eq!(inferred.len(), 1);
-        assert!(matches!(inferred[0].kind, TypeKind::Primitive(PrimitiveType::String)));
+        assert!(matches!(
+            inferred[0].kind,
+            TypeKind::Primitive(PrimitiveType::String)
+        ));
     }
 
     #[test]

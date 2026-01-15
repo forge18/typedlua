@@ -93,7 +93,10 @@ impl Parser {
             }
 
             if !self.check(&TokenKind::RightBracket) {
-                self.consume(TokenKind::Comma, "Expected ',' between array pattern elements")?;
+                self.consume(
+                    TokenKind::Comma,
+                    "Expected ',' between array pattern elements",
+                )?;
             }
         }
 
@@ -156,7 +159,10 @@ impl Parser {
             });
 
             if !self.check(&TokenKind::RightBrace) {
-                self.consume(TokenKind::Comma, "Expected ',' between object pattern properties")?;
+                self.consume(
+                    TokenKind::Comma,
+                    "Expected ',' between object pattern properties",
+                )?;
             }
         }
 

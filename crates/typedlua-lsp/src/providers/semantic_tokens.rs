@@ -1,10 +1,10 @@
 use crate::document::Document;
+use lsp_types::*;
 use std::sync::Arc;
-use lsp_types::{*, Uri};
-use typedlua_core::diagnostics::CollectingDiagnosticHandler;
-use typedlua_core::ast::statement::{Statement, VariableKind, ClassMember};
 use typedlua_core::ast::expression::{Expression, ExpressionKind};
 use typedlua_core::ast::pattern::Pattern;
+use typedlua_core::ast::statement::{ClassMember, Statement, VariableKind};
+use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::{Lexer, Parser, Span};
 
 /// Provides semantic tokens for syntax highlighting based on semantic analysis
@@ -51,13 +51,23 @@ impl SemanticTokensProvider {
         let mut lexer = Lexer::new(&document.text, handler.clone());
         let tokens = match lexer.tokenize() {
             Ok(t) => t,
-            Err(_) => return SemanticTokens { result_id: None, data: vec![] },
+            Err(_) => {
+                return SemanticTokens {
+                    result_id: None,
+                    data: vec![],
+                }
+            }
         };
 
         let mut parser = Parser::new(tokens, handler);
         let ast = match parser.parse() {
             Ok(a) => a,
-            Err(_) => return SemanticTokens { result_id: None, data: vec![] },
+            Err(_) => {
+                return SemanticTokens {
+                    result_id: None,
+                    data: vec![],
+                }
+            }
         };
 
         // Collect semantic tokens from AST
@@ -66,18 +76,28 @@ impl SemanticTokensProvider {
         let mut last_char = 0;
 
         for stmt in &ast.statements {
-            self.collect_tokens_from_statement(stmt, &mut tokens_data, &mut last_line, &mut last_char);
+            self.collect_tokens_from_statement(
+                stmt,
+                &mut tokens_data,
+                &mut last_line,
+                &mut last_char,
+            );
         }
 
         SemanticTokens {
-            result_id: Some(format!("{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs())),
+            result_id: Some(format!(
+                "{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs()
+            )),
             data: tokens_data,
         }
     }
 
     /// Provide semantic tokens for a specific range in the document
     pub fn provide_range(&self, _document: &Document, _range: Range) -> SemanticTokens {
-        
         // This is useful for visible viewport optimization
 
         SemanticTokens {
@@ -92,8 +112,6 @@ impl SemanticTokensProvider {
         _document: &Document,
         _previous_result_id: String,
     ) -> SemanticTokensDelta {
-        
-        
         // This is for efficient incremental updates
 
         SemanticTokensDelta {
@@ -172,7 +190,10 @@ impl SemanticTokensProvider {
             Statement::Variable(var_decl) => {
                 if let Pattern::Identifier(ident) = &var_decl.pattern {
                     let modifiers = if var_decl.kind == VariableKind::Const {
-                        vec![SemanticTokenModifier::DECLARATION, SemanticTokenModifier::READONLY]
+                        vec![
+                            SemanticTokenModifier::DECLARATION,
+                            SemanticTokenModifier::READONLY,
+                        ]
                     } else {
                         vec![SemanticTokenModifier::DECLARATION]
                     };
@@ -251,12 +272,22 @@ impl SemanticTokensProvider {
                 self.collect_tokens_from_expression(expr, tokens, last_line, last_char);
             }
             Statement::If(if_stmt) => {
-                self.collect_tokens_from_expression(&if_stmt.condition, tokens, last_line, last_char);
+                self.collect_tokens_from_expression(
+                    &if_stmt.condition,
+                    tokens,
+                    last_line,
+                    last_char,
+                );
                 for stmt in &if_stmt.then_block.statements {
                     self.collect_tokens_from_statement(stmt, tokens, last_line, last_char);
                 }
                 for else_if in &if_stmt.else_ifs {
-                    self.collect_tokens_from_expression(&else_if.condition, tokens, last_line, last_char);
+                    self.collect_tokens_from_expression(
+                        &else_if.condition,
+                        tokens,
+                        last_line,
+                        last_char,
+                    );
                     for stmt in &else_if.block.statements {
                         self.collect_tokens_from_statement(stmt, tokens, last_line, last_char);
                     }
@@ -268,7 +299,12 @@ impl SemanticTokensProvider {
                 }
             }
             Statement::While(while_stmt) => {
-                self.collect_tokens_from_expression(&while_stmt.condition, tokens, last_line, last_char);
+                self.collect_tokens_from_expression(
+                    &while_stmt.condition,
+                    tokens,
+                    last_line,
+                    last_char,
+                );
                 for stmt in &while_stmt.body.statements {
                     self.collect_tokens_from_statement(stmt, tokens, last_line, last_char);
                 }
@@ -343,7 +379,10 @@ impl SemanticTokensProvider {
                 self.add_token(
                     &setter.name.span,
                     &SemanticTokenType::PROPERTY,
-                    &[SemanticTokenModifier::DECLARATION, SemanticTokenModifier::MODIFICATION],
+                    &[
+                        SemanticTokenModifier::DECLARATION,
+                        SemanticTokenModifier::MODIFICATION,
+                    ],
                     tokens,
                     last_line,
                     last_char,
@@ -362,7 +401,7 @@ impl SemanticTokensProvider {
         last_char: &mut u32,
     ) {
         match &expr.kind {
-            ExpressionKind::Identifier(name) => {
+            ExpressionKind::Identifier(_name) => {
                 self.add_token(
                     &expr.span,
                     &SemanticTokenType::VARIABLE,
@@ -474,11 +513,7 @@ mod tests {
         let provider = SemanticTokensProvider::new();
 
         // Test basic variable declaration
-        let doc = Document {
-            text: "local x = 42".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("local x = 42".to_string(), 1);
         let result = provider.provide_full(&doc);
 
         // Should have at least one token for the variable 'x'
@@ -498,11 +533,10 @@ mod tests {
     fn test_function_declaration_tokens() {
         let provider = SemanticTokensProvider::new();
 
-        let doc = Document {
-            text: "function calculateSum(a, b) return a + b end".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test(
+            "function calculateSum(a, b) return a + b end".to_string(),
+            1,
+        );
         let result = provider.provide_full(&doc);
 
         // Should have tokens for the function name
@@ -517,7 +551,8 @@ mod tests {
         assert_eq!(function_token.token_type, function_type_index);
 
         // Should have DECLARATION modifier
-        let declaration_modifiers = provider.encode_modifiers(&[SemanticTokenModifier::DECLARATION]);
+        let declaration_modifiers =
+            provider.encode_modifiers(&[SemanticTokenModifier::DECLARATION]);
         assert_eq!(function_token.token_modifiers_bitset, declaration_modifiers);
     }
 
@@ -525,11 +560,7 @@ mod tests {
     fn test_class_declaration_tokens() {
         let provider = SemanticTokensProvider::new();
 
-        let doc = Document {
-            text: "class Point end".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("class Point end".to_string(), 1);
         let result = provider.provide_full(&doc);
 
         // Should have at least one token for 'Point'
@@ -543,7 +574,8 @@ mod tests {
         assert_eq!(class_token.token_type, class_type_index);
 
         // Should have DECLARATION modifier
-        let declaration_modifiers = provider.encode_modifiers(&[SemanticTokenModifier::DECLARATION]);
+        let declaration_modifiers =
+            provider.encode_modifiers(&[SemanticTokenModifier::DECLARATION]);
         assert_eq!(class_token.token_modifiers_bitset, declaration_modifiers);
     }
 
@@ -552,11 +584,7 @@ mod tests {
         let provider = SemanticTokensProvider::new();
 
         // Test const variable
-        let doc = Document {
-            text: "const PI = 3.14159".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("const PI = 3.14159".to_string(), 1);
         let result = provider.provide_full(&doc);
 
         assert!(!result.data.is_empty());
@@ -570,11 +598,7 @@ mod tests {
         assert_eq!(const_token.token_modifiers_bitset, expected_modifiers);
 
         // Test local (mutable) variable
-        let doc = Document {
-            text: "local mutable = 42".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("local mutable = 42".to_string(), 1);
         let result = provider.provide_full(&doc);
 
         assert!(!result.data.is_empty());
@@ -596,11 +620,7 @@ mod tests {
     fn test_multiline_tokens() {
         let provider = SemanticTokensProvider::new();
 
-        let doc = Document {
-            text: "local x = 10\nlocal y = 20".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("local x = 10\nlocal y = 20".to_string(), 1);
         let result = provider.provide_full(&doc);
 
         // Should have tokens for both variables

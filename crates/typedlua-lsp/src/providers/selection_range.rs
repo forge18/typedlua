@@ -1,5 +1,5 @@
 use crate::document::Document;
-use lsp_types::{*, Uri};
+use lsp_types::*;
 
 /// Provides smart selection ranges (expand/shrink selection)
 pub struct SelectionRangeProvider;
@@ -23,9 +23,6 @@ impl SelectionRangeProvider {
         document: &Document,
         position: Position,
     ) -> Option<SelectionRange> {
-        
-        
-        
         //
         // Selection hierarchy (from innermost to outermost):
         // 1. Identifier/literal
@@ -56,7 +53,11 @@ impl SelectionRangeProvider {
         // Expand to surrounding brackets/parentheses
         if let Some(bracket_range) = self.get_bracket_range(text, offset) {
             let bracket_selection = SelectionRange {
-                range: self.offset_range_to_lsp_range(document, bracket_range.0, bracket_range.1)?,
+                range: self.offset_range_to_lsp_range(
+                    document,
+                    bracket_range.0,
+                    bracket_range.1,
+                )?,
                 parent: Some(Box::new(line_selection)),
             };
             return Some(bracket_selection);
@@ -251,14 +252,13 @@ mod tests {
     fn test_word_selection() {
         let provider = SelectionRangeProvider::new();
 
-        let doc = Document {
-            text: "local my_variable = 42".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("local my_variable = 42".to_string(), 1);
 
         // Cursor on 'my_variable' at position (0, 8)
-        let position = Position { line: 0, character: 8 };
+        let position = Position {
+            line: 0,
+            character: 8,
+        };
         let result = provider.get_selection_range_at_position(&doc, position);
 
         assert!(result.is_some());
@@ -277,14 +277,13 @@ mod tests {
     fn test_expression_selection() {
         let provider = SelectionRangeProvider::new();
 
-        let doc = Document {
-            text: "local x = foo(bar(1, 2), 3)".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("local x = foo(bar(1, 2), 3)".to_string(), 1);
 
         // Cursor somewhere in the expression
-        let position = Position { line: 0, character: 15 };
+        let position = Position {
+            line: 0,
+            character: 15,
+        };
         let result = provider.get_selection_range_at_position(&doc, position);
 
         assert!(result.is_some());
@@ -298,14 +297,13 @@ mod tests {
     fn test_bracket_selection() {
         let provider = SelectionRangeProvider::new();
 
-        let doc = Document {
-            text: "local t = { x = 1, y = 2 }".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("local t = { x = 1, y = 2 }".to_string(), 1);
 
         // Cursor inside the table literal
-        let position = Position { line: 0, character: 15 };
+        let position = Position {
+            line: 0,
+            character: 15,
+        };
         let result = provider.get_selection_range_at_position(&doc, position);
 
         // May or may not find selection depending on exact position
@@ -318,14 +316,13 @@ mod tests {
     fn test_nested_selection() {
         let provider = SelectionRangeProvider::new();
 
-        let doc = Document {
-            text: "function foo() local x = 1 end".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("function foo() local x = 1 end".to_string(), 1);
 
         // Cursor on 'x'
-        let position = Position { line: 0, character: 21 };
+        let position = Position {
+            line: 0,
+            character: 21,
+        };
         let result = provider.get_selection_range_at_position(&doc, position);
 
         assert!(result.is_some());
@@ -350,14 +347,13 @@ mod tests {
     fn test_string_selection() {
         let provider = SelectionRangeProvider::new();
 
-        let doc = Document {
-            text: "local s = \"hello world\"".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("local s = \"hello world\"".to_string(), 1);
 
         // Cursor inside the string
-        let position = Position { line: 0, character: 15 };
+        let position = Position {
+            line: 0,
+            character: 15,
+        };
         let result = provider.get_selection_range_at_position(&doc, position);
 
         assert!(result.is_some());

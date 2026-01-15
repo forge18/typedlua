@@ -307,13 +307,11 @@ impl Lexer {
 
             _ => {
                 self.advance();
-                self.diagnostic_handler.report(
-                    Diagnostic::error_with_code(
-                        Span::new(start, self.position, start_line, start_column),
-                        crate::error_codes::UNEXPECTED_CHAR,
-                        format!("Unexpected character: '{}'", ch),
-                    )
-                );
+                self.diagnostic_handler.report(Diagnostic::error_with_code(
+                    Span::new(start, self.position, start_line, start_column),
+                    crate::error_codes::UNEXPECTED_CHAR,
+                    format!("Unexpected character: '{}'", ch),
+                ));
                 TokenKind::Unknown(ch)
             }
         };
@@ -540,7 +538,8 @@ impl Lexer {
             if ((self.position + 2) as usize) < self.source.len()
                 && self.source[(self.position + 2) as usize] == '['
                 && ((self.position + 3) as usize) < self.source.len()
-                && self.source[(self.position + 3) as usize] == '[' {
+                && self.source[(self.position + 3) as usize] == '['
+            {
                 // Multi-line comment: --[[ ... ]]--
                 self.advance(); // Skip first -
                 self.advance(); // Skip second -
@@ -551,7 +550,7 @@ impl Lexer {
                     if self.current() == ']' && self.peek() == Some(']') {
                         self.advance(); // Skip first ]
                         self.advance(); // Skip second ]
-                        // Optionally skip trailing --
+                                        // Optionally skip trailing --
                         if self.current() == '-' && self.peek() == Some('-') {
                             self.advance();
                             self.advance();
@@ -567,11 +566,12 @@ impl Lexer {
                         Span::new(self.position, self.position, self.line, self.column),
                         crate::error_codes::UNTERMINATED_COMMENT,
                         "Unterminated multi-line comment",
-                    ).with_suggestion(
+                    )
+                    .with_suggestion(
                         Span::new(self.position, self.position, self.line, self.column),
                         "]]--".to_string(),
                         "Add closing delimiter ']]--'",
-                    )
+                    ),
                 );
                 return true;
             } else {
@@ -599,7 +599,10 @@ impl Lexer {
 
     #[inline(always)]
     fn current(&self) -> char {
-        self.source.get(self.position as usize).copied().unwrap_or('\0')
+        self.source
+            .get(self.position as usize)
+            .copied()
+            .unwrap_or('\0')
     }
 
     #[inline(always)]

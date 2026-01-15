@@ -83,7 +83,7 @@ fn test_parse_for_numeric() {
     assert_eq!(program.statements.len(), 1);
 
     match &program.statements[0] {
-        crate::ast::statement::Statement::For(for_stmt) => match for_stmt {
+        crate::ast::statement::Statement::For(for_stmt) => match for_stmt.as_ref() {
             crate::ast::statement::ForStatement::Numeric(numeric) => {
                 assert!(numeric.step.is_some());
             }
@@ -104,7 +104,7 @@ fn test_parse_for_generic() {
     assert_eq!(program.statements.len(), 1);
 
     match &program.statements[0] {
-        crate::ast::statement::Statement::For(for_stmt) => match for_stmt {
+        crate::ast::statement::Statement::For(for_stmt) => match for_stmt.as_ref() {
             crate::ast::statement::ForStatement::Generic(generic) => {
                 assert_eq!(generic.variables.len(), 2);
                 assert_eq!(generic.iterators.len(), 1);
@@ -202,14 +202,12 @@ fn test_parse_array_literal() {
     assert_eq!(program.statements.len(), 1);
 
     match &program.statements[0] {
-        crate::ast::statement::Statement::Variable(decl) => {
-            match &decl.initializer.kind {
-                crate::ast::expression::ExpressionKind::Array(elements) => {
-                    assert_eq!(elements.len(), 3);
-                }
-                _ => panic!("Expected array literal"),
+        crate::ast::statement::Statement::Variable(decl) => match &decl.initializer.kind {
+            crate::ast::expression::ExpressionKind::Array(elements) => {
+                assert_eq!(elements.len(), 3);
             }
-        }
+            _ => panic!("Expected array literal"),
+        },
         _ => panic!("Expected variable declaration"),
     }
 }
@@ -221,14 +219,12 @@ fn test_parse_object_literal() {
     assert_eq!(program.statements.len(), 1);
 
     match &program.statements[0] {
-        crate::ast::statement::Statement::Variable(decl) => {
-            match &decl.initializer.kind {
-                crate::ast::expression::ExpressionKind::Object(properties) => {
-                    assert_eq!(properties.len(), 2);
-                }
-                _ => panic!("Expected object literal"),
+        crate::ast::statement::Statement::Variable(decl) => match &decl.initializer.kind {
+            crate::ast::expression::ExpressionKind::Object(properties) => {
+                assert_eq!(properties.len(), 2);
             }
-        }
+            _ => panic!("Expected object literal"),
+        },
         _ => panic!("Expected variable declaration"),
     }
 }
@@ -275,14 +271,12 @@ fn test_parse_array_pattern() {
     assert_eq!(program.statements.len(), 1);
 
     match &program.statements[0] {
-        crate::ast::statement::Statement::Variable(decl) => {
-            match &decl.pattern {
-                crate::ast::pattern::Pattern::Array(arr_pattern) => {
-                    assert_eq!(arr_pattern.elements.len(), 3);
-                }
-                _ => panic!("Expected array pattern"),
+        crate::ast::statement::Statement::Variable(decl) => match &decl.pattern {
+            crate::ast::pattern::Pattern::Array(arr_pattern) => {
+                assert_eq!(arr_pattern.elements.len(), 3);
             }
-        }
+            _ => panic!("Expected array pattern"),
+        },
         _ => panic!("Expected variable declaration"),
     }
 }
@@ -294,14 +288,12 @@ fn test_parse_object_pattern() {
     assert_eq!(program.statements.len(), 1);
 
     match &program.statements[0] {
-        crate::ast::statement::Statement::Variable(decl) => {
-            match &decl.pattern {
-                crate::ast::pattern::Pattern::Object(obj_pattern) => {
-                    assert_eq!(obj_pattern.properties.len(), 2);
-                }
-                _ => panic!("Expected object pattern"),
+        crate::ast::statement::Statement::Variable(decl) => match &decl.pattern {
+            crate::ast::pattern::Pattern::Object(obj_pattern) => {
+                assert_eq!(obj_pattern.properties.len(), 2);
             }
-        }
+            _ => panic!("Expected object pattern"),
+        },
         _ => panic!("Expected variable declaration"),
     }
 }
@@ -313,17 +305,15 @@ fn test_parse_union_type() {
     assert_eq!(program.statements.len(), 1);
 
     match &program.statements[0] {
-        crate::ast::statement::Statement::Variable(decl) => {
-            match &decl.type_annotation {
-                Some(ty) => match &ty.kind {
-                    crate::ast::types::TypeKind::Union(types) => {
-                        assert_eq!(types.len(), 2);
-                    }
-                    _ => panic!("Expected union type"),
-                },
-                None => panic!("Expected type annotation"),
-            }
-        }
+        crate::ast::statement::Statement::Variable(decl) => match &decl.type_annotation {
+            Some(ty) => match &ty.kind {
+                crate::ast::types::TypeKind::Union(types) => {
+                    assert_eq!(types.len(), 2);
+                }
+                _ => panic!("Expected union type"),
+            },
+            None => panic!("Expected type annotation"),
+        },
         _ => panic!("Expected variable declaration"),
     }
 }
@@ -335,15 +325,13 @@ fn test_parse_array_type() {
     assert_eq!(program.statements.len(), 1);
 
     match &program.statements[0] {
-        crate::ast::statement::Statement::Variable(decl) => {
-            match &decl.type_annotation {
-                Some(ty) => match &ty.kind {
-                    crate::ast::types::TypeKind::Array(_) => {}
-                    _ => panic!("Expected array type"),
-                },
-                None => panic!("Expected type annotation"),
-            }
-        }
+        crate::ast::statement::Statement::Variable(decl) => match &decl.type_annotation {
+            Some(ty) => match &ty.kind {
+                crate::ast::types::TypeKind::Array(_) => {}
+                _ => panic!("Expected array type"),
+            },
+            None => panic!("Expected type annotation"),
+        },
         _ => panic!("Expected variable declaration"),
     }
 }
@@ -396,7 +384,10 @@ fn test_parse_arrow_function() {
             crate::ast::expression::ExpressionKind::Arrow(arrow) => {
                 assert_eq!(arrow.parameters.len(), 2);
                 assert!(arrow.return_type.is_some());
-                assert!(matches!(arrow.body, crate::ast::expression::ArrowBody::Expression(_)));
+                assert!(matches!(
+                    arrow.body,
+                    crate::ast::expression::ArrowBody::Expression(_)
+                ));
             }
             _ => panic!("Expected arrow function"),
         },
@@ -460,7 +451,9 @@ fn test_parse_decorator_with_args() {
         crate::ast::statement::Statement::Class(class_decl) => {
             assert_eq!(class_decl.decorators.len(), 1);
             match &class_decl.decorators[0].expression {
-                crate::ast::statement::DecoratorExpression::Call { callee, arguments, .. } => {
+                crate::ast::statement::DecoratorExpression::Call {
+                    callee, arguments, ..
+                } => {
                     assert_eq!(arguments.len(), 1);
                     match &**callee {
                         crate::ast::statement::DecoratorExpression::Identifier(name) => {
@@ -555,14 +548,12 @@ fn test_parse_compound_assignment_operators() {
         assert_eq!(program.statements.len(), 1);
 
         match &program.statements[0] {
-            crate::ast::statement::Statement::Expression(expr) => {
-                match &expr.kind {
-                    crate::ast::expression::ExpressionKind::Assignment(_, op, _) => {
-                        assert_eq!(*op, expected_op, "Failed for: {}", source);
-                    }
-                    _ => panic!("Expected assignment expression for: {}", source),
+            crate::ast::statement::Statement::Expression(expr) => match &expr.kind {
+                crate::ast::expression::ExpressionKind::Assignment(_, op, _) => {
+                    assert_eq!(*op, expected_op, "Failed for: {}", source);
                 }
-            }
+                _ => panic!("Expected assignment expression for: {}", source),
+            },
             _ => panic!("Expected expression statement for: {}", source),
         }
     }

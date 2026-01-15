@@ -18,7 +18,27 @@ use std::sync::Arc;
 struct ClassMemberInfo {
     name: String,
     access: AccessModifier,
-    _is_static: bool,  // Reserved for future static access checking
+    _is_static: bool,
+    kind: ClassMemberKind,
+    is_final: bool,
+}
+
+#[derive(Clone)]
+#[allow(dead_code)] // Fields are used in check_method_override for signature validation
+enum ClassMemberKind {
+    Property {
+        type_annotation: Type,
+    },
+    Method {
+        parameters: Vec<Parameter>,
+        return_type: Option<Type>,
+    },
+    Getter {
+        return_type: Type,
+    },
+    Setter {
+        parameter_type: Type,
+    },
 }
 
 /// Context for tracking the current class during type checking
@@ -38,10 +58,19 @@ pub struct TypeChecker {
     current_class: Option<ClassContext>,
     /// Map from class name to its members with access modifiers
     class_members: FxHashMap<String, Vec<ClassMemberInfo>>,
+    /// Map from class name to whether it is final
+    final_classes: FxHashMap<String, bool>,
+    /// Module registry for multi-module compilation
+    module_registry: Option<Arc<crate::module_resolver::ModuleRegistry>>,
+    /// Current module ID
+    current_module_id: Option<crate::module_resolver::ModuleId>,
+    /// Module resolver for imports
+    module_resolver: Option<Arc<crate::module_resolver::ModuleResolver>>,
+    diagnostic_handler: Arc<dyn DiagnosticHandler>,
 }
 
 impl TypeChecker {
-    pub fn new(_diagnostic_handler: Arc<dyn DiagnosticHandler>) -> Self {
+    pub fn new(diagnostic_handler: Arc<dyn DiagnosticHandler>) -> Self {
         let mut checker = Self {
             symbol_table: SymbolTable::new(),
             type_env: TypeEnvironment::new(),
@@ -50,6 +79,11 @@ impl TypeChecker {
             options: CompilerOptions::default(),
             current_class: None,
             class_members: FxHashMap::default(),
+            final_classes: FxHashMap::default(),
+            module_registry: None,
+            current_module_id: None,
+            module_resolver: None,
+            diagnostic_handler,
         };
 
         // Load standard library with default Lua version
@@ -74,6 +108,7 @@ impl TypeChecker {
             self.symbol_table = SymbolTable::new();
             self.type_env = TypeEnvironment::new();
             self.class_members.clear();
+            self.final_classes.clear();
 
             // Reload stdlib with the new target version
             if let Err(e) = self.load_stdlib() {
@@ -84,11 +119,25 @@ impl TypeChecker {
         self
     }
 
+    /// Create a TypeChecker with module support for multi-module compilation
+    pub fn new_with_module_support(
+        diagnostic_handler: Arc<dyn DiagnosticHandler>,
+        registry: Arc<crate::module_resolver::ModuleRegistry>,
+        module_id: crate::module_resolver::ModuleId,
+        resolver: Arc<crate::module_resolver::ModuleResolver>,
+    ) -> Self {
+        let mut checker = Self::new(diagnostic_handler);
+        checker.module_registry = Some(registry);
+        checker.current_module_id = Some(module_id);
+        checker.module_resolver = Some(resolver);
+        checker
+    }
+
     /// Load the standard library for the configured Lua version
     fn load_stdlib(&mut self) -> Result<(), String> {
-        use crate::stdlib;
         use crate::lexer::Lexer;
         use crate::parser::Parser;
+        use crate::stdlib;
 
         // Get stdlib files for the target version
         let stdlib_files = stdlib::get_all_stdlib(self.options.target);
@@ -97,7 +146,8 @@ impl TypeChecker {
             // Parse the stdlib file
             let handler = Arc::new(crate::diagnostics::CollectingDiagnosticHandler::new());
             let mut lexer = Lexer::new(source, handler.clone());
-            let tokens = lexer.tokenize()
+            let tokens = lexer
+                .tokenize()
                 .map_err(|e| format!("Failed to lex {}: {:?}", filename, e))?;
 
             let mut parser = Parser::new(tokens, handler.clone());
@@ -152,14 +202,17 @@ impl TypeChecker {
             // Declaration file statements - register them in the symbol table
             Statement::DeclareFunction(func) => self.register_declare_function(func),
             Statement::DeclareNamespace(ns) => self.register_declare_namespace(ns),
-            Statement::DeclareType(alias) => self.check_type_alias(alias),  // Reuse existing logic
-            Statement::DeclareInterface(iface) => self.check_interface_declaration(iface),  // Reuse existing logic
+            Statement::DeclareType(alias) => self.check_type_alias(alias), // Reuse existing logic
+            Statement::DeclareInterface(iface) => self.check_interface_declaration(iface), // Reuse existing logic
             Statement::DeclareConst(const_decl) => self.register_declare_const(const_decl),
         }
     }
 
     /// Check variable declaration
-    fn check_variable_declaration(&mut self, decl: &VariableDeclaration) -> Result<(), TypeCheckError> {
+    fn check_variable_declaration(
+        &mut self,
+        decl: &VariableDeclaration,
+    ) -> Result<(), TypeCheckError> {
         // Infer the type of the initializer
         let init_type = self.infer_expression_type(&decl.initializer)?;
 
@@ -210,13 +263,6 @@ impl TypeChecker {
                 Ok(())
             }
             Pattern::Array(array_pattern) => {
-                // Check if FP features are enabled for destructuring
-                if !self.options.enable_fp {
-                    return Err(TypeCheckError::new(
-                        "Array destructuring requires FP features. Enable 'enableFP' in your configuration.".to_string(),
-                        span,
-                    ));
-                }
                 // Extract element type from array type
                 if let TypeKind::Array(elem_type) = &typ.kind {
                     for elem in &array_pattern.elements {
@@ -226,8 +272,10 @@ impl TypeChecker {
                             }
                             ArrayPatternElement::Rest(ident) => {
                                 // Rest gets array type
-                                let array_type = Type::new(TypeKind::Array(elem_type.clone()), span);
-                                let symbol = Symbol::new(ident.node.clone(), kind, array_type, span);
+                                let array_type =
+                                    Type::new(TypeKind::Array(elem_type.clone()), span);
+                                let symbol =
+                                    Symbol::new(ident.node.clone(), kind, array_type, span);
                                 self.symbol_table
                                     .declare(symbol)
                                     .map_err(|e| TypeCheckError::new(e, span))?;
@@ -246,34 +294,27 @@ impl TypeChecker {
                 Ok(())
             }
             Pattern::Object(obj_pattern) => {
-                // Check if FP features are enabled for destructuring
-                if !self.options.enable_fp {
-                    return Err(TypeCheckError::new(
-                        "Object destructuring requires FP features. Enable 'enableFP' in your configuration.".to_string(),
-                        span,
-                    ));
-                }
                 // Extract properties from object type
                 if let TypeKind::Object(obj_type) = &typ.kind {
                     for prop_pattern in &obj_pattern.properties {
                         // Find matching property in type
-                        let prop_type = obj_type
-                            .members
-                            .iter()
-                            .find_map(|member| {
-                                if let ObjectTypeMember::Property(prop) = member {
-                                    if prop.name.node == prop_pattern.key.node {
-                                        return Some(prop.type_annotation.clone());
-                                    }
+                        let prop_type = obj_type.members.iter().find_map(|member| {
+                            if let ObjectTypeMember::Property(prop) = member {
+                                if prop.name.node == prop_pattern.key.node {
+                                    return Some(prop.type_annotation.clone());
                                 }
-                                None
-                            });
+                            }
+                            None
+                        });
 
                         let prop_type = match prop_type {
                             Some(t) => t,
                             None => {
                                 return Err(TypeCheckError::new(
-                                    format!("Property '{}' does not exist on type", prop_pattern.key.node),
+                                    format!(
+                                        "Property '{}' does not exist on type",
+                                        prop_pattern.key.node
+                                    ),
                                     span,
                                 ));
                             }
@@ -283,7 +324,8 @@ impl TypeChecker {
                             self.declare_pattern(value_pattern, prop_type, kind, span)?;
                         } else {
                             // Shorthand: { x } means { x: x }
-                            let symbol = Symbol::new(prop_pattern.key.node.clone(), kind, prop_type, span);
+                            let symbol =
+                                Symbol::new(prop_pattern.key.node.clone(), kind, prop_type, span);
                             self.symbol_table
                                 .declare(symbol)
                                 .map_err(|e| TypeCheckError::new(e, span))?;
@@ -305,7 +347,10 @@ impl TypeChecker {
     }
 
     /// Check function declaration
-    fn check_function_declaration(&mut self, decl: &FunctionDeclaration) -> Result<(), TypeCheckError> {
+    fn check_function_declaration(
+        &mut self,
+        decl: &FunctionDeclaration,
+    ) -> Result<(), TypeCheckError> {
         // For generic functions, we still declare them in the symbol table
         // but we'll instantiate their type parameters when they're called
 
@@ -336,20 +381,24 @@ impl TypeChecker {
         // Create function type
         let func_type = Type::new(
             TypeKind::Function(FunctionType {
+                type_parameters: decl.type_parameters.clone(),
                 parameters: decl.parameters.clone(),
-                return_type: Box::new(
-                    decl.return_type
-                        .clone()
-                        .unwrap_or_else(|| Type::new(TypeKind::Primitive(PrimitiveType::Void), decl.span)),
-                ),
+                return_type: Box::new(decl.return_type.clone().unwrap_or_else(|| {
+                    Type::new(TypeKind::Primitive(PrimitiveType::Void), decl.span)
+                })),
                 span: decl.span,
             }),
             decl.span,
         );
 
         // Declare function in symbol table
-        
-        let symbol = Symbol::new(decl.name.node.clone(), SymbolKind::Function, func_type, decl.span);
+
+        let symbol = Symbol::new(
+            decl.name.node.clone(),
+            SymbolKind::Function,
+            func_type,
+            decl.span,
+        );
         self.symbol_table
             .declare(symbol)
             .map_err(|e| TypeCheckError::new(e, decl.span))?;
@@ -381,14 +430,6 @@ impl TypeChecker {
 
         // Declare parameters
         for (i, param) in decl.parameters.iter().enumerate() {
-            // Check if FP features are enabled for rest parameters
-            if param.is_rest && !self.options.enable_fp {
-                return Err(TypeCheckError::new(
-                    "Rest parameters require FP features. Enable 'enableFP' in your configuration.".to_string(),
-                    param.span,
-                ));
-            }
-
             // Check if rest parameter is in the correct position
             if param.is_rest && i != decl.parameters.len() - 1 {
                 return Err(TypeCheckError::new(
@@ -399,21 +440,24 @@ impl TypeChecker {
 
             let param_type = if param.is_rest {
                 // Rest parameters are arrays
-                let elem_type = param
-                    .type_annotation
-                    .clone()
-                    .unwrap_or_else(|| Type::new(TypeKind::Primitive(PrimitiveType::Unknown), param.span));
+                let elem_type = param.type_annotation.clone().unwrap_or_else(|| {
+                    Type::new(TypeKind::Primitive(PrimitiveType::Unknown), param.span)
+                });
 
                 // Wrap in array type
                 Type::new(TypeKind::Array(Box::new(elem_type)), param.span)
             } else {
-                param
-                    .type_annotation
-                    .clone()
-                    .unwrap_or_else(|| Type::new(TypeKind::Primitive(PrimitiveType::Unknown), param.span))
+                param.type_annotation.clone().unwrap_or_else(|| {
+                    Type::new(TypeKind::Primitive(PrimitiveType::Unknown), param.span)
+                })
             };
 
-            self.declare_pattern(&param.pattern, param_type, SymbolKind::Parameter, param.span)?;
+            self.declare_pattern(
+                &param.pattern,
+                param_type,
+                SymbolKind::Parameter,
+                param.span,
+            )?;
         }
 
         // Set current function return type for return statement checking
@@ -500,7 +544,8 @@ impl TypeChecker {
                 self.symbol_table.enter_scope();
 
                 // Declare loop variable as number
-                let number_type = Type::new(TypeKind::Primitive(PrimitiveType::Number), numeric.span);
+                let number_type =
+                    Type::new(TypeKind::Primitive(PrimitiveType::Number), numeric.span);
                 let symbol = Symbol::new(
                     numeric.variable.node.clone(),
                     SymbolKind::Variable,
@@ -525,8 +570,9 @@ impl TypeChecker {
                 self.symbol_table.enter_scope();
 
                 // Declare loop variables with unknown type
-                
-                let unknown_type = Type::new(TypeKind::Primitive(PrimitiveType::Unknown), generic.span);
+
+                let unknown_type =
+                    Type::new(TypeKind::Primitive(PrimitiveType::Unknown), generic.span);
                 for var in &generic.variables {
                     let symbol = Symbol::new(
                         var.node.clone(),
@@ -552,7 +598,10 @@ impl TypeChecker {
     }
 
     /// Check repeat statement
-    fn check_repeat_statement(&mut self, repeat_stmt: &RepeatStatement) -> Result<(), TypeCheckError> {
+    fn check_repeat_statement(
+        &mut self,
+        repeat_stmt: &RepeatStatement,
+    ) -> Result<(), TypeCheckError> {
         self.symbol_table.enter_scope();
         self.check_block(&repeat_stmt.body)?;
         self.infer_expression_type(&repeat_stmt.until)?;
@@ -561,10 +610,14 @@ impl TypeChecker {
     }
 
     /// Check return statement
-    fn check_return_statement(&mut self, return_stmt: &ReturnStatement) -> Result<(), TypeCheckError> {
+    fn check_return_statement(
+        &mut self,
+        return_stmt: &ReturnStatement,
+    ) -> Result<(), TypeCheckError> {
         if !return_stmt.values.is_empty() {
             // Infer types for all return values
-            let return_types: Result<Vec<_>, _> = return_stmt.values
+            let return_types: Result<Vec<_>, _> = return_stmt
+                .values
                 .iter()
                 .map(|expr| self.infer_expression_type(expr))
                 .collect();
@@ -580,13 +633,18 @@ impl TypeChecker {
             // Check against expected return type
             if let Some(expected_type) = &self.current_function_return_type {
                 // Type predicates have an implicit boolean return type
-                let effective_expected_type = if matches!(expected_type.kind, TypeKind::TypePredicate(_)) {
-                    Type::new(TypeKind::Primitive(PrimitiveType::Boolean), expected_type.span)
-                } else {
-                    expected_type.clone()
-                };
+                let effective_expected_type =
+                    if matches!(expected_type.kind, TypeKind::TypePredicate(_)) {
+                        Type::new(
+                            TypeKind::Primitive(PrimitiveType::Boolean),
+                            expected_type.span,
+                        )
+                    } else {
+                        expected_type.clone()
+                    };
 
-                if !TypeCompatibility::is_assignable(&actual_return_type, &effective_expected_type) {
+                if !TypeCompatibility::is_assignable(&actual_return_type, &effective_expected_type)
+                {
                     return Err(TypeCheckError::new(
                         "Return type mismatch",
                         return_stmt.span,
@@ -596,7 +654,8 @@ impl TypeChecker {
         } else {
             // Check that void return is allowed
             if let Some(expected_type) = &self.current_function_return_type {
-                let void_type = Type::new(TypeKind::Primitive(PrimitiveType::Void), return_stmt.span);
+                let void_type =
+                    Type::new(TypeKind::Primitive(PrimitiveType::Void), return_stmt.span);
                 if !TypeCompatibility::is_assignable(&void_type, expected_type) {
                     return Err(TypeCheckError::new(
                         "Function expects a return value",
@@ -619,18 +678,10 @@ impl TypeChecker {
     }
 
     /// Check interface declaration
-    fn check_interface_declaration(&mut self, iface: &InterfaceDeclaration) -> Result<(), TypeCheckError> {
-        // Check if OOP is enabled
-        if !self.options.enable_oop {
-            return Err(TypeCheckError::new(
-                format!(
-                    "Interface '{}' cannot be used because OOP features are disabled. Enable 'enableOOP' in your configuration.",
-                    iface.name.node
-                ),
-                iface.name.span,
-            ));
-        }
-
+    fn check_interface_declaration(
+        &mut self,
+        iface: &InterfaceDeclaration,
+    ) -> Result<(), TypeCheckError> {
         // For generic interfaces, we need to register them differently
         // For now, we'll register generic interfaces similar to generic type aliases
         // They will be instantiated when referenced with type arguments
@@ -638,17 +689,23 @@ impl TypeChecker {
         if let Some(_type_params) = &iface.type_parameters {
             // Generic interface - we can't fully type check it yet
             // Just register it as a generic type so it can be instantiated later
-            
+
             // For now, we'll create a placeholder object type
             let obj_type = Type::new(
                 TypeKind::Object(ObjectType {
-                    members: iface.members.iter().map(|member| {
-                        match member {
-                            InterfaceMember::Property(prop) => ObjectTypeMember::Property(prop.clone()),
-                            InterfaceMember::Method(method) => ObjectTypeMember::Method(method.clone()),
+                    members: iface
+                        .members
+                        .iter()
+                        .map(|member| match member {
+                            InterfaceMember::Property(prop) => {
+                                ObjectTypeMember::Property(prop.clone())
+                            }
+                            InterfaceMember::Method(method) => {
+                                ObjectTypeMember::Method(method.clone())
+                            }
                             InterfaceMember::Index(index) => ObjectTypeMember::Index(index.clone()),
-                        }
-                    }).collect(),
+                        })
+                        .collect(),
                     span: iface.span,
                 }),
                 iface.span,
@@ -663,13 +720,15 @@ impl TypeChecker {
 
         // Non-generic interface - full checking
         // Convert interface members to object type members
-        let mut members: Vec<ObjectTypeMember> = iface.members.iter().map(|member| {
-            match member {
+        let mut members: Vec<ObjectTypeMember> = iface
+            .members
+            .iter()
+            .map(|member| match member {
                 InterfaceMember::Property(prop) => ObjectTypeMember::Property(prop.clone()),
                 InterfaceMember::Method(method) => ObjectTypeMember::Method(method.clone()),
                 InterfaceMember::Index(index) => ObjectTypeMember::Index(index.clone()),
-            }
-        }).collect();
+            })
+            .collect();
 
         // Handle extends clause - merge parent interface members
         for parent_type in &iface.extends {
@@ -688,12 +747,10 @@ impl TypeChecker {
                                 };
 
                                 if let Some(name) = member_name {
-                                    let is_overridden = members.iter().any(|m| {
-                                        match m {
-                                            ObjectTypeMember::Property(p) => &p.name.node == name,
-                                            ObjectTypeMember::Method(m) => &m.name.node == name,
-                                            ObjectTypeMember::Index(_) => false,
-                                        }
+                                    let is_overridden = members.iter().any(|m| match m {
+                                        ObjectTypeMember::Property(p) => &p.name.node == name,
+                                        ObjectTypeMember::Method(m) => &m.name.node == name,
+                                        ObjectTypeMember::Index(_) => false,
                                     });
 
                                     if !is_overridden {
@@ -740,7 +797,11 @@ impl TypeChecker {
     }
 
     /// Validate interface members for correctness
-    fn validate_interface_members(&self, members: &[ObjectTypeMember], span: Span) -> Result<(), TypeCheckError> {
+    fn validate_interface_members(
+        &self,
+        members: &[ObjectTypeMember],
+        span: Span,
+    ) -> Result<(), TypeCheckError> {
         // Check for duplicate property names
         let mut seen_names = std::collections::HashSet::new();
 
@@ -767,7 +828,8 @@ impl TypeChecker {
     /// Check type alias
     fn check_type_alias(&mut self, alias: &TypeAliasDeclaration) -> Result<(), TypeCheckError> {
         // Evaluate special types before registering
-        let typ_to_register = self.evaluate_type(&alias.type_annotation)
+        let typ_to_register = self
+            .evaluate_type(&alias.type_annotation)
             .map_err(|e| TypeCheckError::new(e, alias.span))?;
 
         // Check if this is a generic type alias
@@ -797,20 +859,21 @@ impl TypeChecker {
     }
 
     /// Check enum declaration
-    fn check_enum_declaration(&mut self, enum_decl: &EnumDeclaration) -> Result<(), TypeCheckError> {
+    fn check_enum_declaration(
+        &mut self,
+        enum_decl: &EnumDeclaration,
+    ) -> Result<(), TypeCheckError> {
         // Register enum as a union of its literal values
         let mut variants = Vec::new();
         for member in &enum_decl.members {
             if let Some(value) = &member.value {
                 let literal_type = match value {
-                    EnumValue::Number(n) => Type::new(
-                        TypeKind::Literal(Literal::Number(*n)),
-                        member.span,
-                    ),
-                    EnumValue::String(s) => Type::new(
-                        TypeKind::Literal(Literal::String(s.clone())),
-                        member.span,
-                    ),
+                    EnumValue::Number(n) => {
+                        Type::new(TypeKind::Literal(Literal::Number(*n)), member.span)
+                    }
+                    EnumValue::String(s) => {
+                        Type::new(TypeKind::Literal(Literal::String(s.clone())), member.span)
+                    }
                 };
                 variants.push(literal_type);
             }
@@ -831,7 +894,6 @@ impl TypeChecker {
         Ok(())
     }
 
-
     /// Resolve a type reference, handling utility types and generic type application
     #[allow(dead_code)]
     fn resolve_type_reference(&self, type_ref: &TypeReference) -> Result<Type, TypeCheckError> {
@@ -841,7 +903,8 @@ impl TypeChecker {
         // Check if it's a utility type
         if let Some(type_args) = &type_ref.type_arguments {
             if TypeEnvironment::is_utility_type(name) {
-                return self.type_env
+                return self
+                    .type_env
                     .resolve_utility_type(name, type_args, span)
                     .map_err(|e| TypeCheckError::new(e, span));
             }
@@ -869,18 +932,10 @@ impl TypeChecker {
     }
 
     /// Check class declaration
-    fn check_class_declaration(&mut self, class_decl: &ClassDeclaration) -> Result<(), TypeCheckError> {
-        // Check if OOP is enabled
-        if !self.options.enable_oop {
-            return Err(TypeCheckError::new(
-                format!(
-                    "Class '{}' cannot be used because OOP features are disabled. Enable 'enableOOP' in your configuration.",
-                    class_decl.name.node
-                ),
-                class_decl.name.span,
-            ));
-        }
-
+    fn check_class_declaration(
+        &mut self,
+        class_decl: &ClassDeclaration,
+    ) -> Result<(), TypeCheckError> {
         // Check decorators
         self.check_decorators(&class_decl.decorators)?;
 
@@ -908,9 +963,17 @@ impl TypeChecker {
         // Check extends clause - validate base class exists and is a class
         if let Some(extends_type) = &class_decl.extends {
             if let TypeKind::Reference(_type_ref) = &extends_type.kind {
+                // Check if parent class is final
+                if let Some(&is_final) = self.final_classes.get(&_type_ref.name.node) {
+                    if is_final {
+                        return Err(TypeCheckError::new(
+                            format!("Cannot extend final class {}", _type_ref.name.node),
+                            class_decl.span,
+                        ));
+                    }
+                }
                 // Verify the base class exists
                 // For now, we'll just ensure it's a valid type reference
-                
             } else {
                 return Err(TypeCheckError::new(
                     "Class can only extend another class (type reference)",
@@ -938,8 +1001,59 @@ impl TypeChecker {
             }
         }
 
+        // Process primary constructor parameters - they become class properties
+        let mut primary_constructor_properties = Vec::new();
+        if let Some(primary_params) = &class_decl.primary_constructor {
+            for param in primary_params {
+                // Validate: ensure no member with same name exists
+                let param_name = &param.name.node;
+                if class_decl.members.iter().any(|m| match m {
+                    ClassMember::Property(p) => &p.name.node == param_name,
+                    ClassMember::Method(m) => &m.name.node == param_name,
+                    ClassMember::Getter(g) => &g.name.node == param_name,
+                    ClassMember::Setter(s) => &s.name.node == param_name,
+                    ClassMember::Constructor(_) => false,
+                }) {
+                    return Err(TypeCheckError::new(
+                        format!(
+                            "Primary constructor parameter '{}' conflicts with existing class member",
+                            param_name
+                        ),
+                        param.span,
+                    ));
+                }
+
+                primary_constructor_properties.push(param);
+            }
+        }
+
+        // Validate parent constructor arguments if present
+        if let Some(parent_args) = &class_decl.parent_constructor_args {
+            // Type check each parent constructor argument
+            for arg in parent_args {
+                self.infer_expression_type(arg)?;
+            }
+
+            // TODO: Validate argument count and types match parent constructor
+            // This requires tracking constructor signatures, which we'll add later
+        }
+
         // Collect class members for access checking
         let mut member_infos = Vec::new();
+
+        // Add primary constructor parameters as properties
+        for param in &primary_constructor_properties {
+            member_infos.push(ClassMemberInfo {
+                name: param.name.node.clone(),
+                access: param.access.unwrap_or(AccessModifier::Public),
+                _is_static: false,
+                kind: ClassMemberKind::Property {
+                    type_annotation: param.type_annotation.clone(),
+                },
+                is_final: param.is_readonly, // readonly maps to final for properties
+            });
+        }
+
         for member in &class_decl.members {
             match member {
                 ClassMember::Property(prop) => {
@@ -947,6 +1061,10 @@ impl TypeChecker {
                         name: prop.name.node.clone(),
                         access: prop.access.unwrap_or(AccessModifier::Public),
                         _is_static: prop.is_static,
+                        kind: ClassMemberKind::Property {
+                            type_annotation: prop.type_annotation.clone(),
+                        },
+                        is_final: false,
                     });
                 }
                 ClassMember::Method(method) => {
@@ -954,6 +1072,11 @@ impl TypeChecker {
                         name: method.name.node.clone(),
                         access: method.access.unwrap_or(AccessModifier::Public),
                         _is_static: method.is_static,
+                        kind: ClassMemberKind::Method {
+                            parameters: method.parameters.clone(),
+                            return_type: method.return_type.clone(),
+                        },
+                        is_final: method.is_final,
                     });
                 }
                 ClassMember::Getter(getter) => {
@@ -961,6 +1084,10 @@ impl TypeChecker {
                         name: getter.name.node.clone(),
                         access: getter.access.unwrap_or(AccessModifier::Public),
                         _is_static: getter.is_static,
+                        kind: ClassMemberKind::Getter {
+                            return_type: getter.return_type.clone(),
+                        },
+                        is_final: false,
                     });
                 }
                 ClassMember::Setter(setter) => {
@@ -968,6 +1095,19 @@ impl TypeChecker {
                         name: setter.name.node.clone(),
                         access: setter.access.unwrap_or(AccessModifier::Public),
                         _is_static: setter.is_static,
+                        kind: ClassMemberKind::Setter {
+                            parameter_type: setter
+                                .parameter
+                                .type_annotation
+                                .clone()
+                                .unwrap_or_else(|| {
+                                    Type::new(
+                                        TypeKind::Primitive(PrimitiveType::Unknown),
+                                        setter.span,
+                                    )
+                                }),
+                        },
+                        is_final: false,
                     });
                 }
                 ClassMember::Constructor(_) => {
@@ -977,7 +1117,12 @@ impl TypeChecker {
         }
 
         // Store class members for access checking
-        self.class_members.insert(class_decl.name.node.clone(), member_infos);
+        self.class_members
+            .insert(class_decl.name.node.clone(), member_infos);
+
+        // Store whether the class is final
+        self.final_classes
+            .insert(class_decl.name.node.clone(), class_decl.is_final);
 
         // Set current class context
         let parent = class_decl.extends.as_ref().and_then(|ext| {
@@ -1017,7 +1162,10 @@ impl TypeChecker {
                     if method.is_abstract {
                         if !class_decl.is_abstract {
                             return Err(TypeCheckError::new(
-                                format!("Abstract method '{}' can only be in abstract class", method.name.node),
+                                format!(
+                                    "Abstract method '{}' can only be in abstract class",
+                                    method.name.node
+                                ),
                                 method.span,
                             ));
                         }
@@ -1108,7 +1256,9 @@ impl TypeChecker {
                                 }
 
                                 // Check parameter types
-                                for (i, (class_param, req_param)) in class_method.parameters.iter()
+                                for (i, (class_param, req_param)) in class_method
+                                    .parameters
+                                    .iter()
                                     .zip(req_method.parameters.iter())
                                     .enumerate()
                                 {
@@ -1131,7 +1281,10 @@ impl TypeChecker {
                                 // MethodSignature has return_type: Type (not Option)
                                 // MethodDeclaration has return_type: Option<Type>
                                 if let Some(class_return) = &class_method.return_type {
-                                    if !TypeCompatibility::is_assignable(class_return, &req_method.return_type) {
+                                    if !TypeCompatibility::is_assignable(
+                                        class_return,
+                                        &req_method.return_type,
+                                    ) {
                                         return Err(TypeCheckError::new(
                                             format!(
                                                 "Method '{}' has incompatible return type",
@@ -1164,7 +1317,10 @@ impl TypeChecker {
     }
 
     /// Check decorators
-    fn check_decorators(&mut self, decorators: &[crate::ast::statement::Decorator]) -> Result<(), TypeCheckError> {
+    fn check_decorators(
+        &mut self,
+        decorators: &[crate::ast::statement::Decorator],
+    ) -> Result<(), TypeCheckError> {
         // Check if decorators are enabled
         if !decorators.is_empty() && !self.options.enable_decorators {
             return Err(TypeCheckError::new(
@@ -1188,7 +1344,10 @@ impl TypeChecker {
     }
 
     /// Check a decorator expression
-    fn check_decorator_expression(&mut self, expr: &crate::ast::statement::DecoratorExpression) -> Result<(), TypeCheckError> {
+    fn check_decorator_expression(
+        &mut self,
+        expr: &crate::ast::statement::DecoratorExpression,
+    ) -> Result<(), TypeCheckError> {
         use crate::ast::statement::DecoratorExpression;
 
         match expr {
@@ -1201,7 +1360,9 @@ impl TypeChecker {
                 }
                 Ok(())
             }
-            DecoratorExpression::Call { callee, arguments, .. } => {
+            DecoratorExpression::Call {
+                callee, arguments, ..
+            } => {
                 // Check the callee
                 self.check_decorator_expression(callee)?;
 
@@ -1251,12 +1412,16 @@ impl TypeChecker {
 
         // Declare parameters
         for param in &ctor.parameters {
-            let param_type = param
-                .type_annotation
-                .clone()
-                .unwrap_or_else(|| Type::new(TypeKind::Primitive(PrimitiveType::Unknown), param.span));
+            let param_type = param.type_annotation.clone().unwrap_or_else(|| {
+                Type::new(TypeKind::Primitive(PrimitiveType::Unknown), param.span)
+            });
 
-            self.declare_pattern(&param.pattern, param_type, SymbolKind::Parameter, param.span)?;
+            self.declare_pattern(
+                &param.pattern,
+                param_type,
+                SymbolKind::Parameter,
+                param.span,
+            )?;
         }
 
         // Check constructor body
@@ -1273,6 +1438,27 @@ impl TypeChecker {
         // Check decorators
         self.check_decorators(&method.decorators)?;
 
+        // Check override keyword if present
+        if method.is_override {
+            self.check_method_override(method)?;
+        } else if let Some(class_context) = &self.current_class {
+            // Check if method shadows a parent method without override keyword
+            if let Some(parent_name) = &class_context.parent {
+                if let Some(parent_members) = self.class_members.get(parent_name) {
+                    if parent_members.iter().any(|m| m.name == method.name.node) {
+                        self.diagnostic_handler.warning(
+                            method.span,
+                            &format!(
+                                "Method '{}' overrides a method from parent class '{}' but is missing the 'override' keyword",
+                                method.name.node,
+                                parent_name
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+
         // Abstract methods don't have a body to check
         if method.is_abstract {
             if method.body.is_some() {
@@ -1287,7 +1473,10 @@ impl TypeChecker {
         // Non-abstract methods must have a body
         if method.body.is_none() {
             return Err(TypeCheckError::new(
-                format!("Non-abstract method '{}' must have a body", method.name.node),
+                format!(
+                    "Non-abstract method '{}' must have a body",
+                    method.name.node
+                ),
                 method.span,
             ));
         }
@@ -1315,12 +1504,16 @@ impl TypeChecker {
 
         // Declare parameters
         for param in &method.parameters {
-            let param_type = param
-                .type_annotation
-                .clone()
-                .unwrap_or_else(|| Type::new(TypeKind::Primitive(PrimitiveType::Unknown), param.span));
+            let param_type = param.type_annotation.clone().unwrap_or_else(|| {
+                Type::new(TypeKind::Primitive(PrimitiveType::Unknown), param.span)
+            });
 
-            self.declare_pattern(&param.pattern, param_type, SymbolKind::Parameter, param.span)?;
+            self.declare_pattern(
+                &param.pattern,
+                param_type,
+                SymbolKind::Parameter,
+                param.span,
+            )?;
         }
 
         // Set current function return type for return statement checking
@@ -1374,11 +1567,12 @@ impl TypeChecker {
         self.symbol_table.enter_scope();
 
         // Declare the parameter
-        let param_type = setter
-            .parameter
-            .type_annotation
-            .clone()
-            .unwrap_or_else(|| Type::new(TypeKind::Primitive(PrimitiveType::Unknown), setter.parameter.span));
+        let param_type = setter.parameter.type_annotation.clone().unwrap_or_else(|| {
+            Type::new(
+                TypeKind::Primitive(PrimitiveType::Unknown),
+                setter.parameter.span,
+            )
+        });
 
         self.declare_pattern(
             &setter.parameter.pattern,
@@ -1394,6 +1588,167 @@ impl TypeChecker {
         self.symbol_table.exit_scope();
 
         Ok(())
+    }
+
+    /// Check that an override method properly overrides a parent method
+    fn check_method_override(&self, method: &MethodDeclaration) -> Result<(), TypeCheckError> {
+        // Get current class context
+        let class_ctx = self.current_class.as_ref().ok_or_else(|| {
+            TypeCheckError::new(
+                "Override keyword used outside of class context",
+                method.span,
+            )
+        })?;
+
+        // Check if class has a parent
+        let parent_name = class_ctx.parent.as_ref().ok_or_else(|| {
+            TypeCheckError::new(
+                format!(
+                    "Method '{}' uses override but class '{}' has no parent class",
+                    method.name.node, class_ctx.name
+                ),
+                method.span,
+            )
+        })?;
+
+        // Get parent class members
+        let parent_members = self.class_members.get(parent_name).ok_or_else(|| {
+            TypeCheckError::new(
+                format!(
+                    "Parent class '{}' not found or not yet type-checked",
+                    parent_name
+                ),
+                method.span,
+            )
+        })?;
+
+        // Find the method in parent class
+        let parent_method = parent_members.iter().find(|m| m.name == method.name.node);
+
+        let parent_method = parent_method.ok_or_else(|| {
+            TypeCheckError::new(
+                format!("Method '{}' marked as override but parent class '{}' does not have this method",
+                    method.name.node, parent_name),
+                method.span,
+            )
+        })?;
+
+        // Verify that parent member is also a method
+        // Check if parent method is final
+        if parent_method.is_final {
+            return Err(TypeCheckError::new(
+                format!(
+                    "Cannot override final method {} from parent class {}",
+                    method.name.node, parent_name
+                ),
+                method.span,
+            ));
+        }
+
+        match &parent_method.kind {
+            ClassMemberKind::Method {
+                parameters: parent_params,
+                return_type: parent_return,
+            } => {
+                // Check parameter count
+                if method.parameters.len() != parent_params.len() {
+                    return Err(TypeCheckError::new(
+                        format!(
+                            "Method '{}' has {} parameters but overridden method has {} parameters",
+                            method.name.node,
+                            method.parameters.len(),
+                            parent_params.len()
+                        ),
+                        method.span,
+                    ));
+                }
+
+                // Check parameter types (contravariance)
+                for (i, (child_param, parent_param)) in method
+                    .parameters
+                    .iter()
+                    .zip(parent_params.iter())
+                    .enumerate()
+                {
+                    let child_type = child_param.type_annotation.as_ref()
+                        .ok_or_else(|| TypeCheckError::new(
+                            format!("Override method '{}' parameter {} must have explicit type annotation",
+                                method.name.node, i + 1),
+                            child_param.span,
+                        ))?;
+
+                    let parent_type = parent_param.type_annotation.as_ref().ok_or_else(|| {
+                        TypeCheckError::new(
+                            format!(
+                                "Parent method '{}' parameter {} has no type annotation",
+                                method.name.node,
+                                i + 1
+                            ),
+                            parent_param.span,
+                        )
+                    })?;
+
+                    // Parameters should have the same type (we could allow contravariance here)
+                    if !TypeCompatibility::is_assignable(parent_type, child_type)
+                        || !TypeCompatibility::is_assignable(child_type, parent_type)
+                    {
+                        return Err(TypeCheckError::new(
+                            format!("Method '{}' parameter {} type '{}' is incompatible with parent parameter type",
+                                method.name.node, i + 1, self.type_to_string(child_type)),
+                            child_param.span,
+                        ));
+                    }
+                }
+
+                // Check return type (covariance)
+                if let Some(child_return) = &method.return_type {
+                    if let Some(parent_ret) = parent_return {
+                        // Child return type must be assignable to parent return type
+                        if !TypeCompatibility::is_assignable(parent_ret, child_return) {
+                            return Err(TypeCheckError::new(
+                                format!("Method '{}' return type is incompatible with parent return type",
+                                    method.name.node),
+                                method.span,
+                            ));
+                        }
+                    }
+                } else if parent_return.is_some() {
+                    return Err(TypeCheckError::new(
+                        format!(
+                            "Method '{}' must have return type to match parent method",
+                            method.name.node
+                        ),
+                        method.span,
+                    ));
+                }
+
+                Ok(())
+            }
+            _ => Err(TypeCheckError::new(
+                format!(
+                    "Cannot override '{}' - parent member is not a method",
+                    method.name.node
+                ),
+                method.span,
+            )),
+        }
+    }
+
+    /// Convert type to string for error messages
+    fn type_to_string(&self, typ: &Type) -> String {
+        match &typ.kind {
+            TypeKind::Primitive(prim) => format!("{:?}", prim).to_lowercase(),
+            TypeKind::Reference(type_ref) => type_ref.name.node.clone(),
+            TypeKind::Array(elem) => format!("{}[]", self.type_to_string(elem)),
+            TypeKind::Union(types) => {
+                let type_strings: Vec<String> =
+                    types.iter().map(|t| self.type_to_string(t)).collect();
+                type_strings.join(" | ")
+            }
+            TypeKind::Function(_) => "function".to_string(),
+            TypeKind::Object(_) => "object".to_string(),
+            _ => format!("{:?}", typ.kind),
+        }
     }
 
     /// Infer the type of an expression
@@ -1413,7 +1768,10 @@ impl TypeChecker {
                 if let Some(symbol) = self.symbol_table.lookup(name) {
                     Ok(symbol.typ.clone())
                 } else {
-                    Err(TypeCheckError::new(format!("Undefined variable '{}'", name), span))
+                    Err(TypeCheckError::new(
+                        format!("Undefined variable '{}'", name),
+                        span,
+                    ))
                 }
             }
 
@@ -1466,13 +1824,6 @@ impl TypeChecker {
                             element_types.push(elem_type);
                         }
                         ArrayElement::Spread(expr) => {
-                            // Check if FP features are enabled
-                            if !self.options.enable_fp {
-                                return Err(TypeCheckError::new(
-                                    "Spread operator requires FP features. Enable 'enableFP' in your configuration.".to_string(),
-                                    expr.span,
-                                ));
-                            }
                             // Spread expression should be an array
                             let spread_type = self.infer_expression_type(expr)?;
                             match &spread_type.kind {
@@ -1482,7 +1833,10 @@ impl TypeChecker {
                                 }
                                 _ => {
                                     return Err(TypeCheckError::new(
-                                        format!("Cannot spread non-array type: {:?}", spread_type.kind),
+                                        format!(
+                                            "Cannot spread non-array type: {:?}",
+                                            spread_type.kind
+                                        ),
                                         expr.span,
                                     ));
                                 }
@@ -1505,11 +1859,15 @@ impl TypeChecker {
                 let mut result_type = element_types[0].clone();
                 for elem_type in &element_types[1..] {
                     if !TypeCompatibility::is_assignable(&result_type, elem_type)
-                        && !TypeCompatibility::is_assignable(elem_type, &result_type) {
+                        && !TypeCompatibility::is_assignable(elem_type, &result_type)
+                    {
                         // Types are incompatible, create union
                         match &mut result_type.kind {
                             TypeKind::Union(types) => {
-                                if !types.iter().any(|t| TypeCompatibility::is_assignable(t, elem_type)) {
+                                if !types
+                                    .iter()
+                                    .any(|t| TypeCompatibility::is_assignable(t, elem_type))
+                                {
                                     types.push(elem_type.clone());
                                 }
                             }
@@ -1532,7 +1890,11 @@ impl TypeChecker {
 
                 for prop in props {
                     match prop {
-                        ObjectProperty::Property { key, value, span: prop_span } => {
+                        ObjectProperty::Property {
+                            key,
+                            value,
+                            span: prop_span,
+                        } => {
                             // Infer the type of the value
                             let value_type = self.infer_expression_type(value)?;
 
@@ -1547,7 +1909,11 @@ impl TypeChecker {
 
                             members.push(ObjectTypeMember::Property(prop_sig));
                         }
-                        ObjectProperty::Computed { key, value, span: computed_span } => {
+                        ObjectProperty::Computed {
+                            key,
+                            value,
+                            span: computed_span,
+                        } => {
                             // Type check the key expression - should be string or number
                             let key_type = self.infer_expression_type(key)?;
                             match &key_type.kind {
@@ -1571,14 +1937,10 @@ impl TypeChecker {
                             // Note: We can't add computed properties to the static object type
                             // since we don't know the key at compile time, but we still validate them
                         }
-                        ObjectProperty::Spread { value, span: spread_span } => {
-                            // Check if FP features are enabled
-                            if !self.options.enable_fp {
-                                return Err(TypeCheckError::new(
-                                    "Spread operator requires FP features. Enable 'enableFP' in your configuration.".to_string(),
-                                    *spread_span,
-                                ));
-                            }
+                        ObjectProperty::Spread {
+                            value,
+                            span: spread_span,
+                        } => {
                             // Spread object properties
                             let spread_type = self.infer_expression_type(value)?;
                             match &spread_type.kind {
@@ -1590,7 +1952,10 @@ impl TypeChecker {
                                 }
                                 _ => {
                                     return Err(TypeCheckError::new(
-                                        format!("Cannot spread non-object type: {:?}", spread_type.kind),
+                                        format!(
+                                            "Cannot spread non-object type: {:?}",
+                                            spread_type.kind
+                                        ),
                                         *spread_span,
                                     ));
                                 }
@@ -1606,7 +1971,6 @@ impl TypeChecker {
             }
 
             ExpressionKind::Function(_) | ExpressionKind::Arrow(_) => {
-                
                 Ok(Type::new(TypeKind::Primitive(PrimitiveType::Unknown), span))
             }
 
@@ -1621,32 +1985,13 @@ impl TypeChecker {
                 } else if TypeCompatibility::is_assignable(&else_type, &then_type) {
                     Ok(then_type)
                 } else {
-                    Ok(Type::new(
-                        TypeKind::Union(vec![then_type, else_type]),
-                        span,
-                    ))
+                    Ok(Type::new(TypeKind::Union(vec![then_type, else_type]), span))
                 }
             }
 
-            ExpressionKind::Match(match_expr) => {
-                // Check if FP features are enabled
-                if !self.options.enable_fp {
-                    return Err(TypeCheckError::new(
-                        "Match expressions require FP features. Enable 'enableFP' in your configuration.".to_string(),
-                        span,
-                    ));
-                }
-                self.check_match_expression(match_expr)
-            }
+            ExpressionKind::Match(match_expr) => self.check_match_expression(match_expr),
 
             ExpressionKind::Pipe(left_expr, right_expr) => {
-                // Check if FP features are enabled
-                if !self.options.enable_fp {
-                    return Err(TypeCheckError::new(
-                        "Pipe operator requires FP features. Enable 'enableFP' in your configuration.".to_string(),
-                        span,
-                    ));
-                }
                 // Pipe operator: left |> right
                 // The right side should be a function, and we apply left as the first argument
                 let _left_type = self.infer_expression_type(left_expr)?;
@@ -1674,8 +2019,13 @@ impl TypeChecker {
         span: Span,
     ) -> Result<Type, TypeCheckError> {
         match op {
-            BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide
-            | BinaryOp::Modulo | BinaryOp::Power | BinaryOp::IntegerDivide => {
+            BinaryOp::Add
+            | BinaryOp::Subtract
+            | BinaryOp::Multiply
+            | BinaryOp::Divide
+            | BinaryOp::Modulo
+            | BinaryOp::Power
+            | BinaryOp::IntegerDivide => {
                 // Arithmetic operations return number
                 Ok(Type::new(TypeKind::Primitive(PrimitiveType::Number), span))
             }
@@ -1683,8 +2033,13 @@ impl TypeChecker {
                 // String concatenation returns string
                 Ok(Type::new(TypeKind::Primitive(PrimitiveType::String), span))
             }
-            BinaryOp::Equal | BinaryOp::NotEqual | BinaryOp::LessThan | BinaryOp::LessThanOrEqual
-            | BinaryOp::GreaterThan | BinaryOp::GreaterThanOrEqual | BinaryOp::Instanceof => {
+            BinaryOp::Equal
+            | BinaryOp::NotEqual
+            | BinaryOp::LessThan
+            | BinaryOp::LessThanOrEqual
+            | BinaryOp::GreaterThan
+            | BinaryOp::GreaterThanOrEqual
+            | BinaryOp::Instanceof => {
                 // Comparison operations return boolean
                 Ok(Type::new(TypeKind::Primitive(PrimitiveType::Boolean), span))
             }
@@ -1693,8 +2048,11 @@ impl TypeChecker {
                 // For now, return unknown
                 Ok(Type::new(TypeKind::Primitive(PrimitiveType::Unknown), span))
             }
-            BinaryOp::BitwiseAnd | BinaryOp::BitwiseOr | BinaryOp::BitwiseXor
-            | BinaryOp::ShiftLeft | BinaryOp::ShiftRight => {
+            BinaryOp::BitwiseAnd
+            | BinaryOp::BitwiseOr
+            | BinaryOp::BitwiseXor
+            | BinaryOp::ShiftLeft
+            | BinaryOp::ShiftRight => {
                 // Bitwise operations return number
                 Ok(Type::new(TypeKind::Primitive(PrimitiveType::Number), span))
             }
@@ -1702,7 +2060,12 @@ impl TypeChecker {
     }
 
     /// Infer type of unary operation
-    fn infer_unary_op_type(&self, op: UnaryOp, _operand: &Type, span: Span) -> Result<Type, TypeCheckError> {
+    fn infer_unary_op_type(
+        &self,
+        op: UnaryOp,
+        _operand: &Type,
+        span: Span,
+    ) -> Result<Type, TypeCheckError> {
         match op {
             UnaryOp::Negate => Ok(Type::new(TypeKind::Primitive(PrimitiveType::Number), span)),
             UnaryOp::Not => Ok(Type::new(TypeKind::Primitive(PrimitiveType::Boolean), span)),
@@ -1712,12 +2075,14 @@ impl TypeChecker {
     }
 
     /// Infer type of function call
-    fn infer_call_type(&self, callee_type: &Type, _args: &[Argument], span: Span) -> Result<Type, TypeCheckError> {
+    fn infer_call_type(
+        &self,
+        callee_type: &Type,
+        _args: &[Argument],
+        span: Span,
+    ) -> Result<Type, TypeCheckError> {
         match &callee_type.kind {
-            TypeKind::Function(func_type) => {
-                
-                Ok((*func_type.return_type).clone())
-            }
+            TypeKind::Function(func_type) => Ok((*func_type.return_type).clone()),
             _ => {
                 // Non-function called - return unknown
                 Ok(Type::new(TypeKind::Primitive(PrimitiveType::Unknown), span))
@@ -1733,7 +2098,8 @@ impl TypeChecker {
         span: Span,
     ) -> Result<(), TypeCheckError> {
         // Get the member info
-        let member_info = self.class_members
+        let member_info = self
+            .class_members
             .get(class_name)
             .and_then(|members| members.iter().find(|m| m.name == member_name));
 
@@ -1821,7 +2187,12 @@ impl TypeChecker {
     }
 
     /// Infer type of member access
-    fn infer_member_type(&self, obj_type: &Type, member: &str, span: Span) -> Result<Type, TypeCheckError> {
+    fn infer_member_type(
+        &self,
+        obj_type: &Type,
+        member: &str,
+        span: Span,
+    ) -> Result<Type, TypeCheckError> {
         match &obj_type.kind {
             TypeKind::Reference(type_ref) => {
                 // Check access modifiers for class members
@@ -1846,15 +2217,20 @@ impl TypeChecker {
                         }
                         ObjectTypeMember::Method(method) => {
                             if method.name.node == member {
-
-                                return Ok(Type::new(TypeKind::Primitive(PrimitiveType::Unknown), span));
+                                return Ok(Type::new(
+                                    TypeKind::Primitive(PrimitiveType::Unknown),
+                                    span,
+                                ));
                             }
                         }
                         _ => {}
                     }
                 }
                 // Member not found
-                Err(TypeCheckError::new(format!("Property '{}' does not exist", member), span))
+                Err(TypeCheckError::new(
+                    format!("Property '{}' does not exist", member),
+                    span,
+                ))
             }
             _ => {
                 // Non-object member access - return unknown
@@ -1868,7 +2244,6 @@ impl TypeChecker {
         match &obj_type.kind {
             TypeKind::Array(elem_type) => Ok((**elem_type).clone()),
             TypeKind::Tuple(types) => {
-                
                 // For now, return union of all tuple types
                 if types.is_empty() {
                     Ok(Type::new(TypeKind::Primitive(PrimitiveType::Never), span))
@@ -1883,7 +2258,10 @@ impl TypeChecker {
     }
 
     /// Type check match expression
-    fn check_match_expression(&mut self, match_expr: &MatchExpression) -> Result<Type, TypeCheckError> {
+    fn check_match_expression(
+        &mut self,
+        match_expr: &MatchExpression,
+    ) -> Result<Type, TypeCheckError> {
         // Type check the value being matched
         let value_type = self.infer_expression_type(&match_expr.value)?;
 
@@ -1914,8 +2292,9 @@ impl TypeChecker {
             if let Some(guard) = &arm.guard {
                 let guard_type = self.infer_expression_type(guard)?;
                 // Guard should be boolean (primitive or literal)
-                let is_boolean = matches!(guard_type.kind, TypeKind::Primitive(PrimitiveType::Boolean))
-                    || matches!(guard_type.kind, TypeKind::Literal(Literal::Boolean(_)));
+                let is_boolean =
+                    matches!(guard_type.kind, TypeKind::Primitive(PrimitiveType::Boolean))
+                        || matches!(guard_type.kind, TypeKind::Literal(Literal::Boolean(_)));
 
                 if !is_boolean {
                     return Err(TypeCheckError::new(
@@ -1934,7 +2313,7 @@ impl TypeChecker {
                         self.check_statement(stmt)?;
                     }
                     // Return type is void for blocks without explicit return
-                    
+
                     Type::new(TypeKind::Primitive(PrimitiveType::Void), block.span)
                 }
             };
@@ -1947,7 +2326,10 @@ impl TypeChecker {
 
         // All arms should have compatible types - return a union
         if arm_types.is_empty() {
-            return Ok(Type::new(TypeKind::Primitive(PrimitiveType::Never), match_expr.span));
+            return Ok(Type::new(
+                TypeKind::Primitive(PrimitiveType::Never),
+                match_expr.span,
+            ));
         }
 
         // Find the common type or create a union
@@ -1977,7 +2359,11 @@ impl TypeChecker {
     }
 
     /// Check a pattern and bind variables
-    fn check_pattern(&mut self, pattern: &Pattern, expected_type: &Type) -> Result<(), TypeCheckError> {
+    fn check_pattern(
+        &mut self,
+        pattern: &Pattern,
+        expected_type: &Type,
+    ) -> Result<(), TypeCheckError> {
         match pattern {
             Pattern::Identifier(ident) => {
                 // Bind the identifier to the expected type
@@ -1987,7 +2373,8 @@ impl TypeChecker {
                     expected_type.clone(),
                     ident.span,
                 );
-                self.symbol_table.declare(symbol)
+                self.symbol_table
+                    .declare(symbol)
                     .map_err(|e| TypeCheckError::new(e, ident.span))?;
                 Ok(())
             }
@@ -1995,7 +2382,7 @@ impl TypeChecker {
                 // Literal patterns are allowed as long as they match the general type
                 // We don't enforce exact literal matching at type check time
                 // The pattern match will handle the runtime check
-                
+
                 Ok(())
             }
             Pattern::Wildcard(_) => {
@@ -2019,7 +2406,8 @@ impl TypeChecker {
                                         expected_type.clone(),
                                         ident.span,
                                     );
-                                    self.symbol_table.declare(symbol)
+                                    self.symbol_table
+                                        .declare(symbol)
                                         .map_err(|e| TypeCheckError::new(e, ident.span))?;
                                 }
                                 ArrayPatternElement::Hole => {
@@ -2030,7 +2418,10 @@ impl TypeChecker {
                         Ok(())
                     }
                     _ => Err(TypeCheckError::new(
-                        format!("Array pattern requires array type, found {:?}", expected_type.kind),
+                        format!(
+                            "Array pattern requires array type, found {:?}",
+                            expected_type.kind
+                        ),
                         array_pattern.span,
                     )),
                 }
@@ -2041,7 +2432,9 @@ impl TypeChecker {
                     TypeKind::Object(obj_type) => {
                         for prop in &object_pattern.properties {
                             // Find the property type in the object
-                            let prop_type = obj_type.members.iter()
+                            let prop_type = obj_type
+                                .members
+                                .iter()
                                 .find_map(|member| {
                                     if let ObjectTypeMember::Property(prop_sig) = member {
                                         if prop_sig.name.node == prop.key.node {
@@ -2051,7 +2444,10 @@ impl TypeChecker {
                                     None
                                 })
                                 .unwrap_or_else(|| {
-                                    Type::new(TypeKind::Primitive(PrimitiveType::Unknown), prop.span)
+                                    Type::new(
+                                        TypeKind::Primitive(PrimitiveType::Unknown),
+                                        prop.span,
+                                    )
                                 });
 
                             if let Some(value_pattern) = &prop.value {
@@ -2064,7 +2460,8 @@ impl TypeChecker {
                                     prop_type,
                                     prop.key.span,
                                 );
-                                self.symbol_table.declare(symbol)
+                                self.symbol_table
+                                    .declare(symbol)
                                     .map_err(|e| TypeCheckError::new(e, prop.key.span))?;
                             }
                         }
@@ -2074,7 +2471,8 @@ impl TypeChecker {
                         // If it's not an object type, accept any object pattern for now
                         // This handles cases like Table type
                         for prop in &object_pattern.properties {
-                            let prop_type = Type::new(TypeKind::Primitive(PrimitiveType::Unknown), prop.span);
+                            let prop_type =
+                                Type::new(TypeKind::Primitive(PrimitiveType::Unknown), prop.span);
 
                             if let Some(value_pattern) = &prop.value {
                                 self.check_pattern(value_pattern, &prop_type)?;
@@ -2085,7 +2483,8 @@ impl TypeChecker {
                                     prop_type,
                                     prop.key.span,
                                 );
-                                self.symbol_table.declare(symbol)
+                                self.symbol_table
+                                    .declare(symbol)
                                     .map_err(|e| TypeCheckError::new(e, prop.key.span))?;
                             }
                         }
@@ -2097,10 +2496,16 @@ impl TypeChecker {
     }
 
     /// Check if match arms are exhaustive for the given type
-    fn check_exhaustiveness(&self, arms: &[MatchArm], value_type: &Type, span: Span) -> Result<(), TypeCheckError> {
+    fn check_exhaustiveness(
+        &self,
+        arms: &[MatchArm],
+        value_type: &Type,
+        span: Span,
+    ) -> Result<(), TypeCheckError> {
         // If there's a wildcard or identifier pattern without a guard, it's exhaustive
         let has_wildcard = arms.iter().any(|arm| {
-            matches!(arm.pattern, Pattern::Wildcard(_) | Pattern::Identifier(_)) && arm.guard.is_none()
+            matches!(arm.pattern, Pattern::Wildcard(_) | Pattern::Identifier(_))
+                && arm.guard.is_none()
         });
 
         if has_wildcard {
@@ -2178,22 +2583,24 @@ impl TypeChecker {
     fn pattern_could_match(&self, pattern: &Pattern, typ: &Type) -> bool {
         match pattern {
             Pattern::Wildcard(_) | Pattern::Identifier(_) => true,
-            Pattern::Literal(lit, _) => {
-                match &typ.kind {
-                    TypeKind::Literal(type_lit) => lit == type_lit,
-                    TypeKind::Primitive(PrimitiveType::Boolean) => matches!(lit, Literal::Boolean(_)),
-                    TypeKind::Primitive(PrimitiveType::Number) => matches!(lit, Literal::Number(_)),
-                    TypeKind::Primitive(PrimitiveType::String) => matches!(lit, Literal::String(_)),
-                    _ => false,
-                }
-            }
+            Pattern::Literal(lit, _) => match &typ.kind {
+                TypeKind::Literal(type_lit) => lit == type_lit,
+                TypeKind::Primitive(PrimitiveType::Boolean) => matches!(lit, Literal::Boolean(_)),
+                TypeKind::Primitive(PrimitiveType::Number) => matches!(lit, Literal::Number(_)),
+                TypeKind::Primitive(PrimitiveType::String) => matches!(lit, Literal::String(_)),
+                _ => false,
+            },
             Pattern::Array(_) => matches!(typ.kind, TypeKind::Array(_) | TypeKind::Tuple(_)),
             Pattern::Object(_) => matches!(typ.kind, TypeKind::Object(_)),
         }
     }
 
     /// Narrow the type based on the pattern
-    fn narrow_type_by_pattern(&self, pattern: &Pattern, typ: &Type) -> Result<Type, TypeCheckError> {
+    fn narrow_type_by_pattern(
+        &self,
+        pattern: &Pattern,
+        typ: &Type,
+    ) -> Result<Type, TypeCheckError> {
         match pattern {
             Pattern::Wildcard(_) | Pattern::Identifier(_) => {
                 // No narrowing for wildcard or identifier
@@ -2302,10 +2709,14 @@ impl TypeChecker {
     }
 
     /// Register a declare function statement in the global scope
-    fn register_declare_function(&mut self, func: &DeclareFunctionStatement) -> Result<(), TypeCheckError> {
+    fn register_declare_function(
+        &mut self,
+        func: &DeclareFunctionStatement,
+    ) -> Result<(), TypeCheckError> {
         // Create function type from the declaration
         let func_type = Type::new(
             TypeKind::Function(FunctionType {
+                type_parameters: func.type_parameters.clone(),
                 parameters: func.parameters.clone(),
                 return_type: Box::new(func.return_type.clone()),
                 span: func.span,
@@ -2314,14 +2725,22 @@ impl TypeChecker {
         );
 
         // Declare function in symbol table
-        let symbol = Symbol::new(func.name.node.clone(), SymbolKind::Function, func_type, func.span);
+        let symbol = Symbol::new(
+            func.name.node.clone(),
+            SymbolKind::Function,
+            func_type,
+            func.span,
+        );
         self.symbol_table
             .declare(symbol)
             .map_err(|e| TypeCheckError::new(e, func.span))
     }
 
     /// Register a declare const statement in the global scope
-    fn register_declare_const(&mut self, const_decl: &DeclareConstStatement) -> Result<(), TypeCheckError> {
+    fn register_declare_const(
+        &mut self,
+        const_decl: &DeclareConstStatement,
+    ) -> Result<(), TypeCheckError> {
         // Declare constant in symbol table
         let symbol = Symbol::new(
             const_decl.name.node.clone(),
@@ -2337,7 +2756,10 @@ impl TypeChecker {
     }
 
     /// Register a declare namespace statement in the global scope
-    fn register_declare_namespace(&mut self, ns: &DeclareNamespaceStatement) -> Result<(), TypeCheckError> {
+    fn register_declare_namespace(
+        &mut self,
+        ns: &DeclareNamespaceStatement,
+    ) -> Result<(), TypeCheckError> {
         // Create object type from namespace members
         let mut members = Vec::new();
 
@@ -2356,7 +2778,7 @@ impl TypeChecker {
                 Statement::DeclareConst(const_decl) if const_decl.is_export => {
                     // Add as property to the namespace object
                     members.push(ObjectTypeMember::Property(PropertySignature {
-                        is_readonly: true,  // Constants are readonly
+                        is_readonly: true, // Constants are readonly
                         name: const_decl.name.clone(),
                         is_optional: false,
                         type_annotation: const_decl.type_annotation.clone(),
@@ -2392,9 +2814,9 @@ impl TypeChecker {
 
     /// Register minimal stdlib (fallback when full stdlib fails to parse)
     fn register_minimal_stdlib(&mut self) {
-        use crate::ast::types::*;
-        use crate::ast::statement::Parameter;
         use crate::ast::pattern::Pattern;
+        use crate::ast::statement::Parameter;
+        use crate::ast::types::*;
         use crate::ast::Spanned;
         use crate::span::Span;
 
@@ -2407,7 +2829,10 @@ impl TypeChecker {
                 type_parameters: None,
                 parameters: vec![Parameter {
                     pattern: Pattern::Identifier(Spanned::new("s".to_string(), span)),
-                    type_annotation: Some(Type::new(TypeKind::Primitive(PrimitiveType::String), span)),
+                    type_annotation: Some(Type::new(
+                        TypeKind::Primitive(PrimitiveType::String),
+                        span,
+                    )),
                     default: None,
                     is_rest: false,
                     is_optional: false,
@@ -2421,7 +2846,10 @@ impl TypeChecker {
                 type_parameters: None,
                 parameters: vec![Parameter {
                     pattern: Pattern::Identifier(Spanned::new("s".to_string(), span)),
-                    type_annotation: Some(Type::new(TypeKind::Primitive(PrimitiveType::String), span)),
+                    type_annotation: Some(Type::new(
+                        TypeKind::Primitive(PrimitiveType::String),
+                        span,
+                    )),
                     default: None,
                     is_rest: false,
                     is_optional: false,
@@ -2461,7 +2889,10 @@ impl TypeChecker {
                 type_parameters: None,
                 parameters: vec![Parameter {
                     pattern: Pattern::Identifier(Spanned::new("x".to_string(), span)),
-                    type_annotation: Some(Type::new(TypeKind::Primitive(PrimitiveType::Number), span)),
+                    type_annotation: Some(Type::new(
+                        TypeKind::Primitive(PrimitiveType::Number),
+                        span,
+                    )),
                     default: None,
                     is_rest: false,
                     is_optional: false,
@@ -2506,6 +2937,117 @@ impl TypeChecker {
     /// Lookup a type by name
     pub fn lookup_type(&self, name: &str) -> Option<&Type> {
         self.type_env.lookup_type(name)
+    }
+
+    /// Extract exports from a program for module system
+    pub fn extract_exports(&self, program: &Program) -> crate::module_resolver::ModuleExports {
+        use crate::module_resolver::{ExportedSymbol, ModuleExports};
+
+        let mut exports = ModuleExports::new();
+
+        for stmt in &program.statements {
+            if let Statement::Export(export_decl) = stmt {
+                match &export_decl.kind {
+                    ExportKind::Declaration(decl) => {
+                        // Extract symbol(s) from the declaration
+                        match &**decl {
+                            Statement::Variable(var_decl) => {
+                                // Extract identifier from pattern
+                                if let Pattern::Identifier(ident) = &var_decl.pattern {
+                                    if let Some(symbol) = self.symbol_table.lookup(&ident.node) {
+                                        exports.add_named(
+                                            ident.node.clone(),
+                                            ExportedSymbol::new(symbol.clone(), false),
+                                        );
+                                    }
+                                }
+                            }
+                            Statement::Function(func_decl) => {
+                                if let Some(symbol) = self.symbol_table.lookup(&func_decl.name.node)
+                                {
+                                    exports.add_named(
+                                        func_decl.name.node.clone(),
+                                        ExportedSymbol::new(symbol.clone(), false),
+                                    );
+                                }
+                            }
+                            Statement::Class(class_decl) => {
+                                if let Some(symbol) =
+                                    self.symbol_table.lookup(&class_decl.name.node)
+                                {
+                                    exports.add_named(
+                                        class_decl.name.node.clone(),
+                                        ExportedSymbol::new(symbol.clone(), false),
+                                    );
+                                }
+                            }
+                            Statement::TypeAlias(type_alias) => {
+                                if let Some(symbol) =
+                                    self.symbol_table.lookup(&type_alias.name.node)
+                                {
+                                    exports.add_named(
+                                        type_alias.name.node.clone(),
+                                        ExportedSymbol::new(symbol.clone(), true),
+                                    );
+                                }
+                            }
+                            Statement::Interface(interface_decl) => {
+                                if let Some(symbol) =
+                                    self.symbol_table.lookup(&interface_decl.name.node)
+                                {
+                                    exports.add_named(
+                                        interface_decl.name.node.clone(),
+                                        ExportedSymbol::new(symbol.clone(), true),
+                                    );
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    ExportKind::Named { specifiers, .. } => {
+                        // Export existing symbols: export { foo, bar as baz }
+                        for spec in specifiers {
+                            if let Some(symbol) = self.symbol_table.lookup(&spec.local.node) {
+                                let export_name = spec
+                                    .exported
+                                    .as_ref()
+                                    .map(|e| e.node.clone())
+                                    .unwrap_or_else(|| spec.local.node.clone());
+
+                                // Check if it's a type-only export
+                                let is_type_only = matches!(
+                                    symbol.kind,
+                                    SymbolKind::TypeAlias | SymbolKind::Interface
+                                );
+
+                                exports.add_named(
+                                    export_name,
+                                    ExportedSymbol::new(symbol.clone(), is_type_only),
+                                );
+                            }
+                        }
+                    }
+                    ExportKind::Default(_expr) => {
+                        // For default exports, we create a synthetic symbol
+                        // In the future, we might want to infer the type of the expression
+                        let default_symbol = Symbol {
+                            name: "default".to_string(),
+                            typ: Type::new(
+                                TypeKind::Primitive(PrimitiveType::Unknown),
+                                export_decl.span,
+                            ),
+                            kind: SymbolKind::Variable,
+                            span: export_decl.span,
+                            is_exported: true,
+                            references: Vec::new(),
+                        };
+                        exports.set_default(ExportedSymbol::new(default_symbol, false));
+                    }
+                }
+            }
+        }
+
+        exports
     }
 }
 
@@ -2928,7 +3470,10 @@ mod tests {
         if let Err(ref e) = result {
             eprintln!("Error: {}", e.message);
         }
-        assert!(result.is_ok(), "Built-in functions should be available from stdlib");
+        assert!(
+            result.is_ok(),
+            "Built-in functions should be available from stdlib"
+        );
     }
 
     #[test]
@@ -2942,7 +3487,10 @@ mod tests {
         if let Err(ref e) = result {
             eprintln!("Error: {}", e.message);
         }
-        assert!(result.is_ok(), "String library should be available from stdlib");
+        assert!(
+            result.is_ok(),
+            "String library should be available from stdlib"
+        );
     }
 
     #[test]
@@ -2956,6 +3504,9 @@ mod tests {
         if let Err(ref e) = result {
             eprintln!("Error: {}", e.message);
         }
-        assert!(result.is_ok(), "Math library should be available from stdlib");
+        assert!(
+            result.is_ok(),
+            "Math library should be available from stdlib"
+        );
     }
 }

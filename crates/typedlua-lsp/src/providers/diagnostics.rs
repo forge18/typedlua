@@ -1,6 +1,6 @@
 use crate::document::Document;
+use lsp_types::*;
 use std::sync::Arc;
-use lsp_types::{*, Uri};
 use typedlua_core::diagnostics::{CollectingDiagnosticHandler, DiagnosticLevel};
 use typedlua_core::typechecker::TypeChecker;
 use typedlua_core::{DiagnosticHandler, Lexer, Parser, Span};

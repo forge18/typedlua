@@ -7,7 +7,7 @@ use crate::ast::Program;
 pub use sourcemap::{SourceMap, SourceMapBuilder};
 
 /// Target Lua version for code generation
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LuaTarget {
     /// Lua 5.1 (widespread compatibility)
     Lua51,
@@ -16,13 +16,8 @@ pub enum LuaTarget {
     /// Lua 5.3 (added integers, bitwise operators)
     Lua53,
     /// Lua 5.4 (added const, to-be-closed)
+    #[default]
     Lua54,
-}
-
-impl Default for LuaTarget {
-    fn default() -> Self {
-        LuaTarget::Lua54
-    }
 }
 
 impl LuaTarget {
@@ -57,6 +52,18 @@ impl LuaTarget {
     }
 }
 
+/// Code generation mode for modules
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CodeGenMode {
+    /// Generate separate files with require() calls
+    Require,
+    /// Bundle all modules into a single file
+    Bundle {
+        /// The canonical path of this module in the bundle
+        module_id: String,
+    },
+}
+
 /// Code generator for TypedLua to Lua
 pub struct CodeGenerator {
     output: String,
@@ -66,6 +73,16 @@ pub struct CodeGenerator {
     target: LuaTarget,
     current_class_parent: Option<String>,
     uses_built_in_decorators: bool,
+    /// Module generation mode
+    mode: CodeGenMode,
+    /// Track exported symbols for module mode
+    exports: Vec<String>,
+    /// Track if there's a default export
+    has_default_export: bool,
+    /// Import source to module ID mapping (for bundle mode)
+    import_map: std::collections::HashMap<String, String>,
+    /// Current source index for multi-source source maps (bundle mode)
+    current_source_index: usize,
 }
 
 impl CodeGenerator {
@@ -78,6 +95,11 @@ impl CodeGenerator {
             target: LuaTarget::default(),
             current_class_parent: None,
             uses_built_in_decorators: false,
+            mode: CodeGenMode::Require,
+            exports: Vec::new(),
+            has_default_export: false,
+            import_map: std::collections::HashMap::new(),
+            current_source_index: 0,
         }
     }
 
@@ -91,6 +113,11 @@ impl CodeGenerator {
         self
     }
 
+    pub fn with_mode(mut self, mode: CodeGenMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
     pub fn generate(&mut self, program: &Program) -> String {
         // First pass: check if any decorators are used
         self.detect_decorators(program);
@@ -100,10 +127,195 @@ impl CodeGenerator {
             self.embed_runtime_library();
         }
 
+        // Always embed bitwise helpers for Lua 5.1
+        // (They are small and only defined if used due to local function scope)
+        if self.target == LuaTarget::Lua51 {
+            self.embed_bitwise_helpers();
+        }
+
         for statement in &program.statements {
             self.generate_statement(statement);
         }
+
+        // Finalize module exports if any
+        self.finalize_module();
+
         self.output.clone()
+    }
+
+    /// Generate a bundle from multiple modules
+    ///
+    /// This creates a single Lua file with a custom module system that:
+    /// - Stores all modules as functions in __modules table
+    /// - Implements __require() with caching
+    /// - Executes the entry point module
+    ///
+    /// # Parameters
+    /// * `modules` - List of (module_id, program, import_map) tuples
+    ///   - `module_id` - Canonical path identifier for the module
+    ///   - `program` - The parsed AST
+    ///   - `import_map` - Map from import source strings to resolved module IDs
+    /// * `entry_module_id` - The module ID to execute as entry point
+    /// * `target` - Target Lua version
+    /// * `with_source_map` - Whether to generate source map
+    /// * `output_file` - Optional output file name for source map reference
+    ///
+    /// # Returns
+    /// Returns a tuple of (generated_code, optional_source_map)
+    pub fn generate_bundle(
+        modules: &[(String, &Program, std::collections::HashMap<String, String>)],
+        entry_module_id: &str,
+        target: LuaTarget,
+        with_source_map: bool,
+        output_file: Option<String>,
+    ) -> (String, Option<SourceMap>) {
+        let mut output = String::new();
+
+        // Initialize source map builder if requested
+        let mut source_map_builder = if with_source_map {
+            let source_files: Vec<String> = modules.iter().map(|(id, _, _)| id.clone()).collect();
+            let mut builder = SourceMapBuilder::new_multi_source(source_files);
+            if let Some(ref file) = output_file {
+                builder.set_file(file.clone());
+            }
+            Some(builder)
+        } else {
+            None
+        };
+
+        // Helper to advance source map
+        let mut advance = |text: &str, builder: &mut Option<SourceMapBuilder>| {
+            output.push_str(text);
+            if let Some(ref mut b) = builder {
+                b.advance(text);
+            }
+        };
+
+        // Runtime header (no source mappings for runtime code)
+        advance("-- TypedLua Bundle\n", &mut source_map_builder);
+        advance(
+            "-- Generated by TypedLua compiler\n",
+            &mut source_map_builder,
+        );
+        advance("\n", &mut source_map_builder);
+        advance("-- Module registry and cache\n", &mut source_map_builder);
+        advance("local __modules = {}\n", &mut source_map_builder);
+        advance("local __cache = {}\n", &mut source_map_builder);
+        advance("\n", &mut source_map_builder);
+        advance(
+            "-- Custom require function for bundled modules\n",
+            &mut source_map_builder,
+        );
+        advance("local function __require(name)\n", &mut source_map_builder);
+        advance("    if __cache[name] then\n", &mut source_map_builder);
+        advance("        return __cache[name]\n", &mut source_map_builder);
+        advance("    end\n", &mut source_map_builder);
+        advance("    \n", &mut source_map_builder);
+        advance("    if not __modules[name] then\n", &mut source_map_builder);
+        advance(
+            "        error(\"Module not found: \" .. name)\n",
+            &mut source_map_builder,
+        );
+        advance("    end\n", &mut source_map_builder);
+        advance("    \n", &mut source_map_builder);
+        advance(
+            "    local exports = __modules[name]()\n",
+            &mut source_map_builder,
+        );
+        advance("    __cache[name] = exports\n", &mut source_map_builder);
+        advance("    return exports\n", &mut source_map_builder);
+        advance("end\n", &mut source_map_builder);
+        advance("\n", &mut source_map_builder);
+
+        // Generate each module as a function
+        for (source_index, (module_id, program, import_map)) in modules.iter().enumerate() {
+            advance(
+                &format!("-- Module: {}\n", module_id),
+                &mut source_map_builder,
+            );
+            advance(
+                &format!("__modules[\"{}\"] = function()\n", module_id),
+                &mut source_map_builder,
+            );
+
+            // Add a mapping for the start of this module (line 0, column 0 of source)
+            if let Some(ref mut builder) = source_map_builder {
+                builder.add_mapping_with_source(
+                    crate::span::Span::new(0, 0, 0, 0),
+                    source_index,
+                    None,
+                );
+            }
+
+            // Generate module code with source map support
+            let mut generator =
+                CodeGenerator::new()
+                    .with_target(target)
+                    .with_mode(CodeGenMode::Bundle {
+                        module_id: (*module_id).clone(),
+                    });
+
+            // Set the import map so imports can be resolved to module IDs
+            generator.import_map = import_map.clone();
+
+            // Set source index for this module
+            generator.current_source_index = source_index;
+
+            // If we're building a source map, enable it for the generator
+            if with_source_map {
+                // Create a temporary source map builder for this module
+                generator.source_map = Some(SourceMapBuilder::new(module_id.clone()));
+            }
+
+            let module_code = generator.generate(program);
+
+            // Get the source map mappings from the module generator
+            let _module_mappings = if with_source_map {
+                generator.take_source_map()
+            } else {
+                None
+            };
+
+            // Indent the module code and add mappings
+            for line in module_code.lines() {
+                if !line.is_empty() {
+                    advance("    ", &mut source_map_builder);
+                }
+                advance(line, &mut source_map_builder);
+                advance("\n", &mut source_map_builder);
+            }
+
+            // TODO: Merge module_mappings into source_map_builder with proper source_index
+            // This is complex because we need to offset the generated line/column positions
+            // and update the source_index for each mapping
+            //
+            // KNOWN LIMITATION (Low Priority):
+            // Bundle mode source maps currently don't accurately map back to individual module
+            // source files. The source_map_builder tracks positions in the bundled output, but
+            // the module_mappings (which map back to original files) are not merged in.
+            // This means debugging bundled code will show the bundle structure rather than
+            // the original file locations. Single-file compilation works correctly.
+            //
+            // To fix: Need to transform each mapping in module_mappings by:
+            //   1. Adding the line offset of where the module appears in the bundle
+            //   2. Adjusting column positions for the module wrapper indentation
+            //   3. Setting the correct source_index for each module's original file
+            //   4. Inserting these transformed mappings into source_map_builder
+
+            advance("end\n", &mut source_map_builder);
+            advance("\n", &mut source_map_builder);
+        }
+
+        // Execute entry point
+        advance("-- Execute entry point\n", &mut source_map_builder);
+        advance(
+            &format!("__require(\"{}\")\n", entry_module_id),
+            &mut source_map_builder,
+        );
+
+        let source_map = source_map_builder.map(|builder| builder.build());
+
+        (output, source_map)
     }
 
     pub fn take_source_map(&mut self) -> Option<SourceMap> {
@@ -148,7 +360,7 @@ impl CodeGenerator {
             Statement::Function(decl) => self.generate_function_declaration(decl),
             Statement::If(if_stmt) => self.generate_if_statement(if_stmt),
             Statement::While(while_stmt) => self.generate_while_statement(while_stmt),
-            Statement::For(for_stmt) => self.generate_for_statement(for_stmt),
+            Statement::For(for_stmt) => self.generate_for_statement(for_stmt.as_ref()),
             Statement::Repeat(repeat_stmt) => self.generate_repeat_statement(repeat_stmt),
             Statement::Return(return_stmt) => self.generate_return_statement(return_stmt),
             Statement::Break(_) => {
@@ -169,9 +381,8 @@ impl CodeGenerator {
                 // Type-only declarations are erased
             }
             Statement::Class(class_decl) => self.generate_class_declaration(class_decl),
-            Statement::Import(_) | Statement::Export(_) => {
-                // Module system not yet implemented
-            }
+            Statement::Import(import) => self.generate_import(import),
+            Statement::Export(export) => self.generate_export(export),
             // Declaration file statements - these are type-only and erased
             Statement::DeclareFunction(_)
             | Statement::DeclareNamespace(_)
@@ -558,9 +769,17 @@ impl CodeGenerator {
         }
 
         // Generate constructor
-        let has_constructor = class_decl.members.iter().any(|m| matches!(m, ClassMember::Constructor(_)));
+        let has_constructor = class_decl
+            .members
+            .iter()
+            .any(|m| matches!(m, ClassMember::Constructor(_)));
 
-        if has_constructor {
+        let has_primary_constructor = class_decl.primary_constructor.is_some();
+
+        if has_primary_constructor {
+            // Generate constructor from primary constructor parameters
+            self.generate_primary_constructor(class_decl, class_name, &base_class_name);
+        } else if has_constructor {
             for member in &class_decl.members {
                 if let ClassMember::Constructor(ctor) = member {
                     self.generate_class_constructor(class_name, ctor);
@@ -731,6 +950,117 @@ impl CodeGenerator {
         }
     }
 
+    fn generate_primary_constructor(
+        &mut self,
+        class_decl: &ClassDeclaration,
+        class_name: &str,
+        base_class_name: &Option<String>,
+    ) {
+        let primary_params = class_decl.primary_constructor.as_ref().unwrap();
+
+        // Generate _init method for use by child classes
+        self.writeln("");
+        self.write_indent();
+        self.write("function ");
+        self.write(class_name);
+        self.write("._init(self");
+
+        // Generate parameters
+        for param in primary_params {
+            self.write(", ");
+            self.write(&param.name.node);
+        }
+        self.writeln(")");
+
+        self.indent();
+
+        // Call parent constructor if parent_constructor_args is provided
+        if let Some(parent_args) = &class_decl.parent_constructor_args {
+            if let Some(parent_name) = base_class_name {
+                self.write_indent();
+                self.write(parent_name);
+                self.write("._init(self");
+                for arg in parent_args {
+                    self.write(", ");
+                    self.generate_expression(arg);
+                }
+                self.writeln(")");
+            }
+        }
+
+        // Initialize properties from primary constructor parameters
+        for param in primary_params {
+            self.write_indent();
+
+            // Apply access modifier naming (private → _name)
+            if let Some(access) = &param.access {
+                match access {
+                    crate::ast::statement::AccessModifier::Private => {
+                        self.write("self._");
+                        self.write(&param.name.node);
+                    }
+                    _ => {
+                        self.write("self.");
+                        self.write(&param.name.node);
+                    }
+                }
+            } else {
+                self.write("self.");
+                self.write(&param.name.node);
+            }
+
+            self.write(" = ");
+            self.write(&param.name.node);
+            self.writeln("");
+        }
+
+        self.dedent();
+        self.write_indent();
+        self.writeln("end");
+
+        // Generate .new constructor that creates instance and calls _init
+        self.writeln("");
+        self.write_indent();
+        self.write("function ");
+        self.write(class_name);
+        self.write(".new(");
+
+        // Generate parameters
+        for (i, param) in primary_params.iter().enumerate() {
+            if i > 0 {
+                self.write(", ");
+            }
+            self.write(&param.name.node);
+        }
+        self.writeln(")");
+
+        self.indent();
+
+        // Create instance with metatable
+        self.write_indent();
+        self.write("local self = setmetatable({}, ");
+        self.write(class_name);
+        self.writeln(")");
+
+        // Call _init
+        self.write_indent();
+        self.write(class_name);
+        self.write("._init(self");
+        for param in primary_params {
+            self.write(", ");
+            self.write(&param.name.node);
+        }
+        self.writeln(")");
+
+        // Return the instance
+        self.write_indent();
+        self.writeln("return self");
+
+        self.dedent();
+        self.write_indent();
+        self.writeln("end");
+    }
+
     fn generate_class_method(&mut self, class_name: &str, method: &MethodDeclaration) {
         // Skip abstract methods - they have no implementation
         if method.is_abstract {
@@ -775,11 +1105,7 @@ impl CodeGenerator {
             for decorator in &method.decorators {
                 self.write_indent();
                 self.write(class_name);
-                if method.is_static {
-                    self.write(".");
-                } else {
-                    self.write(".");
-                }
+                self.write(".");
                 self.write(&method.name.node);
                 self.write(" = ");
 
@@ -843,7 +1169,11 @@ impl CodeGenerator {
     /// Generate a decorator call
     /// Decorators in Lua are applied as function calls that wrap/modify the target
     /// Example: @log becomes target = log(target)
-    fn generate_decorator_call(&mut self, decorator: &crate::ast::statement::Decorator, target: &str) {
+    fn generate_decorator_call(
+        &mut self,
+        decorator: &crate::ast::statement::Decorator,
+        target: &str,
+    ) {
         use crate::ast::statement::DecoratorExpression;
 
         match &decorator.expression {
@@ -854,7 +1184,9 @@ impl CodeGenerator {
                 self.write(target);
                 self.write(")");
             }
-            DecoratorExpression::Call { callee, arguments, .. } => {
+            DecoratorExpression::Call {
+                callee, arguments, ..
+            } => {
                 // Decorator with arguments: @decorator(arg1, arg2) -> target = decorator(arg1, arg2)(target)
                 self.generate_decorator_expression(callee);
                 self.write("(");
@@ -868,7 +1200,9 @@ impl CodeGenerator {
                 self.write(target);
                 self.write(")");
             }
-            DecoratorExpression::Member { object, property, .. } => {
+            DecoratorExpression::Member {
+                object, property, ..
+            } => {
                 // Member decorator: @namespace.decorator -> target = namespace.decorator(target)
                 self.generate_decorator_expression(object);
                 self.write(".");
@@ -888,7 +1222,9 @@ impl CodeGenerator {
             DecoratorExpression::Identifier(name) => {
                 self.write(&name.node);
             }
-            DecoratorExpression::Call { callee, arguments, .. } => {
+            DecoratorExpression::Call {
+                callee, arguments, ..
+            } => {
                 self.generate_decorator_expression(callee);
                 self.write("(");
                 for (i, arg) in arguments.iter().enumerate() {
@@ -899,7 +1235,9 @@ impl CodeGenerator {
                 }
                 self.write(")");
             }
-            DecoratorExpression::Member { object, property, .. } => {
+            DecoratorExpression::Member {
+                object, property, ..
+            } => {
                 self.generate_decorator_expression(object);
                 self.write(".");
                 self.write(&property.node);
@@ -968,7 +1306,9 @@ impl CodeGenerator {
                     false
                 }
             }
-            DecoratorExpression::Member { object, property, .. } => {
+            DecoratorExpression::Member {
+                object, property, ..
+            } => {
                 // Check if it's TypedLua.readonly, TypedLua.sealed, or TypedLua.deprecated
                 if let DecoratorExpression::Identifier(obj_name) = &**object {
                     obj_name.node == "TypedLua" && self.is_built_in_decorator(&property.node)
@@ -983,6 +1323,81 @@ impl CodeGenerator {
     fn embed_runtime_library(&mut self) {
         const RUNTIME_LUA: &str = include_str!("../../../../runtime/typedlua_runtime.lua");
         self.writeln(RUNTIME_LUA);
+        self.writeln("");
+    }
+
+    /// Embed bitwise helper functions for Lua 5.1
+    /// These are always included when targeting Lua 5.1 since they are small
+    /// and defined as local functions (no global namespace pollution)
+    fn embed_bitwise_helpers(&mut self) {
+        self.writeln("-- Bitwise operation helpers for Lua 5.1");
+        self.writeln("local function _bit_band(a, b)");
+        self.writeln("    local result = 0");
+        self.writeln("    local bitval = 1");
+        self.writeln("    while a > 0 and b > 0 do");
+        self.writeln("        if a % 2 == 1 and b % 2 == 1 then");
+        self.writeln("            result = result + bitval");
+        self.writeln("        end");
+        self.writeln("        bitval = bitval * 2");
+        self.writeln("        a = math.floor(a / 2)");
+        self.writeln("        b = math.floor(b / 2)");
+        self.writeln("    end");
+        self.writeln("    return result");
+        self.writeln("end");
+        self.writeln("");
+
+        self.writeln("local function _bit_bor(a, b)");
+        self.writeln("    local result = 0");
+        self.writeln("    local bitval = 1");
+        self.writeln("    while a > 0 or b > 0 do");
+        self.writeln("        if a % 2 == 1 or b % 2 == 1 then");
+        self.writeln("            result = result + bitval");
+        self.writeln("        end");
+        self.writeln("        bitval = bitval * 2");
+        self.writeln("        a = math.floor(a / 2)");
+        self.writeln("        b = math.floor(b / 2)");
+        self.writeln("    end");
+        self.writeln("    return result");
+        self.writeln("end");
+        self.writeln("");
+
+        self.writeln("local function _bit_bxor(a, b)");
+        self.writeln("    local result = 0");
+        self.writeln("    local bitval = 1");
+        self.writeln("    while a > 0 or b > 0 do");
+        self.writeln("        if (a % 2) ~= (b % 2) then");
+        self.writeln("            result = result + bitval");
+        self.writeln("        end");
+        self.writeln("        bitval = bitval * 2");
+        self.writeln("        a = math.floor(a / 2)");
+        self.writeln("        b = math.floor(b / 2)");
+        self.writeln("    end");
+        self.writeln("    return result");
+        self.writeln("end");
+        self.writeln("");
+
+        self.writeln("local function _bit_bnot(a)");
+        self.writeln("    local result = 0");
+        self.writeln("    local bitval = 1");
+        self.writeln("    for i = 0, 31 do");
+        self.writeln("        if a % 2 == 0 then");
+        self.writeln("            result = result + bitval");
+        self.writeln("        end");
+        self.writeln("        bitval = bitval * 2");
+        self.writeln("        a = math.floor(a / 2)");
+        self.writeln("    end");
+        self.writeln("    return result");
+        self.writeln("end");
+        self.writeln("");
+
+        self.writeln("local function _bit_lshift(a, b)");
+        self.writeln("    return math.floor(a) * (2 ^ b)");
+        self.writeln("end");
+        self.writeln("");
+
+        self.writeln("local function _bit_rshift(a, b)");
+        self.writeln("    return math.floor(math.floor(a) / (2 ^ b))");
+        self.writeln("end");
         self.writeln("");
     }
 
@@ -1139,6 +1554,19 @@ impl CodeGenerator {
                 }
                 self.write(")");
             }
+            ExpressionKind::New(constructor, args) => {
+                // Generate: ClassName.new(args)
+                // In Lua, classes have a .new() method that creates instances
+                self.generate_expression(constructor);
+                self.write(".new(");
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        self.write(", ");
+                    }
+                    self.generate_argument(arg);
+                }
+                self.write(")");
+            }
             ExpressionKind::Member(object, member) => {
                 // Check if this is super.method - translate to ParentClass.method
                 if matches!(object.kind, ExpressionKind::SuperKeyword) {
@@ -1164,7 +1592,9 @@ impl CodeGenerator {
             }
             ExpressionKind::Array(elements) => {
                 // Check if there are any spreads
-                let has_spread = elements.iter().any(|elem| matches!(elem, ArrayElement::Spread(_)));
+                let has_spread = elements
+                    .iter()
+                    .any(|elem| matches!(elem, ArrayElement::Spread(_)));
 
                 if !has_spread {
                     // Simple case: no spreads
@@ -1203,7 +1633,9 @@ impl CodeGenerator {
             }
             ExpressionKind::Object(props) => {
                 // Check if there are any spreads
-                let has_spread = props.iter().any(|prop| matches!(prop, ObjectProperty::Spread { .. }));
+                let has_spread = props
+                    .iter()
+                    .any(|prop| matches!(prop, ObjectProperty::Spread { .. }));
 
                 if !has_spread {
                     // Simple case: no spreads
@@ -1443,11 +1875,21 @@ impl CodeGenerator {
     fn generate_binary_expression(&mut self, op: BinaryOp, left: &Expression, right: &Expression) {
         match op {
             // Standard operators that work everywhere
-            BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide
-            | BinaryOp::Modulo | BinaryOp::Power | BinaryOp::Concatenate
-            | BinaryOp::Equal | BinaryOp::NotEqual | BinaryOp::LessThan
-            | BinaryOp::LessThanOrEqual | BinaryOp::GreaterThan | BinaryOp::GreaterThanOrEqual
-            | BinaryOp::And | BinaryOp::Or => {
+            BinaryOp::Add
+            | BinaryOp::Subtract
+            | BinaryOp::Multiply
+            | BinaryOp::Divide
+            | BinaryOp::Modulo
+            | BinaryOp::Power
+            | BinaryOp::Concatenate
+            | BinaryOp::Equal
+            | BinaryOp::NotEqual
+            | BinaryOp::LessThan
+            | BinaryOp::LessThanOrEqual
+            | BinaryOp::GreaterThan
+            | BinaryOp::GreaterThanOrEqual
+            | BinaryOp::And
+            | BinaryOp::Or => {
                 self.write("(");
                 self.generate_expression(left);
                 self.write(" ");
@@ -1469,8 +1911,11 @@ impl CodeGenerator {
             }
 
             // Bitwise operators - native in Lua 5.3+
-            BinaryOp::BitwiseAnd | BinaryOp::BitwiseOr | BinaryOp::BitwiseXor
-            | BinaryOp::ShiftLeft | BinaryOp::ShiftRight
+            BinaryOp::BitwiseAnd
+            | BinaryOp::BitwiseOr
+            | BinaryOp::BitwiseXor
+            | BinaryOp::ShiftLeft
+            | BinaryOp::ShiftRight
                 if self.target.supports_bitwise_ops() =>
             {
                 self.write("(");
@@ -1535,12 +1980,7 @@ impl CodeGenerator {
         }
     }
 
-    fn generate_bitwise_library_call(
-        &mut self,
-        func: &str,
-        left: &Expression,
-        right: &Expression,
-    ) {
+    fn generate_bitwise_library_call(&mut self, func: &str, left: &Expression, right: &Expression) {
         if let Some(lib) = self.target.bit_library_name() {
             self.write(lib);
             self.write(".");
@@ -1571,7 +2011,6 @@ impl CodeGenerator {
             UnaryOp::BitwiseNot => "~",
         }
     }
-
 
     fn generate_match_expression(&mut self, match_expr: &MatchExpression) {
         // Generate match as an immediately invoked function that returns a value
@@ -1762,6 +2201,203 @@ impl CodeGenerator {
             }
         }
     }
+
+    // Module System Code Generation
+
+    fn generate_import(&mut self, import: &ImportDeclaration) {
+        // Determine the require function and module path based on mode
+        let (require_fn, module_path) = match &self.mode {
+            CodeGenMode::Bundle { .. } => {
+                // In bundle mode, use __require with resolved module ID
+                let resolved_id = self
+                    .import_map
+                    .get(&import.source)
+                    .cloned()
+                    .unwrap_or_else(|| import.source.clone());
+                ("__require", resolved_id)
+            }
+            CodeGenMode::Require => {
+                // In require mode, use standard require with original source
+                ("require", import.source.clone())
+            }
+        };
+
+        match &import.clause {
+            ImportClause::TypeOnly(_) => {
+                // Type-only imports are completely erased
+            }
+            ImportClause::Named(specs) => {
+                // Generate: local _mod = require("source") or __require("module_id")
+                // Then: local foo, bar = _mod.foo, _mod.bar
+                self.write_indent();
+                self.write("local _mod = ");
+                self.write(require_fn);
+                self.write("(\"");
+                self.write(&module_path);
+                self.writeln("\")");
+
+                self.write_indent();
+                self.write("local ");
+                for (i, spec) in specs.iter().enumerate() {
+                    if i > 0 {
+                        self.write(", ");
+                    }
+                    let local_name = spec.local.as_ref().unwrap_or(&spec.imported);
+                    self.write(&local_name.node);
+                }
+                self.write(" = ");
+                for (i, spec) in specs.iter().enumerate() {
+                    if i > 0 {
+                        self.write(", ");
+                    }
+                    self.write("_mod.");
+                    self.write(&spec.imported.node);
+                }
+                self.writeln("");
+            }
+            ImportClause::Default(ident) => {
+                // Generate: local foo = require("source") or __require("module_id")
+                self.write_indent();
+                self.write("local ");
+                self.write(&ident.node);
+                self.write(" = ");
+                self.write(require_fn);
+                self.write("(\"");
+                self.write(&module_path);
+                self.writeln("\")");
+            }
+            ImportClause::Namespace(ident) => {
+                // Generate: local foo = require("source") or __require("module_id")
+                self.write_indent();
+                self.write("local ");
+                self.write(&ident.node);
+                self.write(" = ");
+                self.write(require_fn);
+                self.write("(\"");
+                self.write(&module_path);
+                self.writeln("\")");
+            }
+        }
+    }
+
+    fn generate_export(&mut self, export: &ExportDeclaration) {
+        match &export.kind {
+            ExportKind::Declaration(stmt) => {
+                // Generate the declaration normally
+                self.generate_statement(stmt);
+
+                // Track the exported symbol name
+                if let Some(name) = self.get_declaration_name(stmt) {
+                    self.exports.push(name);
+                }
+            }
+            ExportKind::Named { specifiers, source } => {
+                if let Some(source_path) = source {
+                    // Re-export: export { foo } from './bar'
+                    // Generate: local _mod = require("bar")
+                    //           local foo = _mod.foo
+                    self.generate_re_export(specifiers, source_path);
+                } else {
+                    // Regular named export
+                    // Track exported symbols
+                    for spec in specifiers {
+                        self.exports.push(spec.local.node.clone());
+                    }
+                }
+            }
+            ExportKind::Default(expr) => {
+                // Generate: local _default = expr
+                self.write_indent();
+                self.write("local _default = ");
+                self.generate_expression(expr);
+                self.writeln("");
+                self.has_default_export = true;
+            }
+        }
+    }
+
+    fn generate_re_export(&mut self, specifiers: &[ExportSpecifier], source: &str) {
+        // Determine the require function and module path based on mode
+        let (require_fn, module_path) = match &self.mode {
+            CodeGenMode::Bundle { .. } => {
+                // In bundle mode, use __require with resolved module ID
+                let resolved_id = self
+                    .import_map
+                    .get(source)
+                    .cloned()
+                    .unwrap_or_else(|| source.to_string());
+                ("__require", resolved_id)
+            }
+            CodeGenMode::Require => {
+                // In require mode, use standard require with original source
+                ("require", source.to_string())
+            }
+        };
+
+        // Generate: local _mod = require("source") or __require("module_id")
+        self.write_indent();
+        self.write("local _mod = ");
+        self.write(require_fn);
+        self.write("(\"");
+        self.write(&module_path);
+        self.writeln("\")");
+
+        // Import each symbol and track for export
+        for spec in specifiers {
+            // Generate: local foo = _mod.foo
+            self.write_indent();
+            self.write("local ");
+            self.write(&spec.local.node);
+            self.write(" = _mod.");
+            self.write(&spec.local.node);
+            self.writeln("");
+
+            // Track the symbol for export
+            self.exports.push(spec.local.node.clone());
+        }
+    }
+
+    fn finalize_module(&mut self) {
+        // If there are exports or default export, create module table
+        if !self.exports.is_empty() || self.has_default_export {
+            self.writeln("");
+            self.writeln("local M = {}");
+
+            // Add named exports (clone to avoid borrow checker issues)
+            let exports = self.exports.clone();
+            for name in &exports {
+                self.write("M.");
+                self.write(name);
+                self.write(" = ");
+                self.writeln(name);
+            }
+
+            // Add default export
+            if self.has_default_export {
+                self.writeln("M.default = _default");
+            }
+
+            self.writeln("return M");
+        }
+    }
+
+    fn get_declaration_name(&self, stmt: &Statement) -> Option<String> {
+        match stmt {
+            Statement::Variable(decl) => {
+                if let Pattern::Identifier(ident) = &decl.pattern {
+                    Some(ident.node.clone())
+                } else {
+                    None
+                }
+            }
+            Statement::Function(decl) => Some(decl.name.node.clone()),
+            Statement::Class(decl) => Some(decl.name.node.clone()),
+            Statement::Interface(decl) => Some(decl.name.node.clone()),
+            Statement::TypeAlias(decl) => Some(decl.name.node.clone()),
+            Statement::Enum(decl) => Some(decl.name.node.clone()),
+            _ => None,
+        }
+    }
 }
 
 impl Default for CodeGenerator {
@@ -1855,7 +2491,6 @@ mod tests {
         let output = generate_code_with_target(source, LuaTarget::Lua52);
         assert!(output.contains("local x = bit32.band(a, b)"));
     }
-
 
     #[test]
     fn test_bitwise_lua51() {

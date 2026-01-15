@@ -79,10 +79,6 @@ impl Parser {
         })
     }
 
-    fn peek(&self, offset: usize) -> Option<&Token> {
-        self.tokens.get(self.position + offset)
-    }
-
     fn is_at_end(&self) -> bool {
         matches!(self.current().kind, TokenKind::Eof)
     }
@@ -133,26 +129,54 @@ impl Parser {
         // Assign error codes and add helpful suggestions based on message patterns
         let diagnostic = if message.contains("Classes are disabled") {
             Diagnostic::error_with_code(span, error_codes::CLASSES_DISABLED, message.to_string())
-                .with_suggestion(span, "".to_string(), "Enable OOP features in tlconfig.yaml by setting enableOOP: true")
+                .with_suggestion(
+                    span,
+                    "".to_string(),
+                    "Enable OOP features in tlconfig.yaml by setting enableOOP: true",
+                )
         } else if message.contains("Decorators are disabled") {
             Diagnostic::error_with_code(span, error_codes::DECORATORS_DISABLED, message.to_string())
-                .with_suggestion(span, "".to_string(), "Enable decorators in tlconfig.yaml by setting enableDecorators: true")
+                .with_suggestion(
+                    span,
+                    "".to_string(),
+                    "Enable decorators in tlconfig.yaml by setting enableDecorators: true",
+                )
         } else if message.contains("Functional programming features are disabled") {
             Diagnostic::error_with_code(span, error_codes::FP_DISABLED, message.to_string())
-                .with_suggestion(span, "".to_string(), "Enable FP features in tlconfig.yaml by setting enableFP: true")
+                .with_suggestion(
+                    span,
+                    "".to_string(),
+                    "Enable FP features in tlconfig.yaml by setting enableFP: true",
+                )
         } else if message.contains("break") && message.contains("outside") {
             Diagnostic::error_with_code(span, error_codes::BREAK_OUTSIDE_LOOP, message.to_string())
         } else if message.contains("continue") && message.contains("outside") {
-            Diagnostic::error_with_code(span, error_codes::CONTINUE_OUTSIDE_LOOP, message.to_string())
+            Diagnostic::error_with_code(
+                span,
+                error_codes::CONTINUE_OUTSIDE_LOOP,
+                message.to_string(),
+            )
         } else if message.contains("end") {
             Diagnostic::error_with_code(span, error_codes::MISSING_END, message.to_string())
-                .with_suggestion(span, "end".to_string(), "Add 'end' keyword to close the block")
+                .with_suggestion(
+                    span,
+                    "end".to_string(),
+                    "Add 'end' keyword to close the block",
+                )
         } else if message.contains("then") {
             Diagnostic::error_with_code(span, error_codes::MISSING_THEN, message.to_string())
-                .with_suggestion(span, "then".to_string(), "Add 'then' keyword after the condition")
+                .with_suggestion(
+                    span,
+                    "then".to_string(),
+                    "Add 'then' keyword after the condition",
+                )
         } else if message.contains("do") && (message.contains("while") || message.contains("for")) {
             Diagnostic::error_with_code(span, error_codes::MISSING_DO, message.to_string())
-                .with_suggestion(span, "do".to_string(), "Add 'do' keyword to start the loop body")
+                .with_suggestion(
+                    span,
+                    "do".to_string(),
+                    "Add 'do' keyword to start the loop body",
+                )
         } else if message.contains("Expected ')'") {
             Diagnostic::error_with_code(span, error_codes::EXPECTED_TOKEN, message.to_string())
                 .with_suggestion(span, ")".to_string(), "Add closing parenthesis ')'")
@@ -176,7 +200,11 @@ impl Parser {
                 .with_suggestion(span, ",".to_string(), "Add comma ',' to separate items")
         } else if message.contains("Expected '='") && message.contains("variable") {
             Diagnostic::error_with_code(span, error_codes::EXPECTED_TOKEN, message.to_string())
-                .with_suggestion(span, "= value".to_string(), "Add '=' followed by an initial value")
+                .with_suggestion(
+                    span,
+                    "= value".to_string(),
+                    "Add '=' followed by an initial value",
+                )
         } else if message.contains("identifier") && message.contains("Expected") {
             Diagnostic::error_with_code(span, error_codes::EXPECTED_IDENTIFIER, message.to_string())
                 .with_suggestion(span, "name".to_string(), "Provide a valid identifier name")
@@ -187,25 +215,42 @@ impl Parser {
                 .with_suggestion(span, "0".to_string(), "Use a valid number literal")
         } else if message.contains("Enum value must be") {
             Diagnostic::error_with_code(span, error_codes::EXPECTED_TOKEN, message.to_string())
-                .with_suggestion(span, "".to_string(), "Enum values must be string or number literals")
+                .with_suggestion(
+                    span,
+                    "".to_string(),
+                    "Enum values must be string or number literals",
+                )
         } else if message.contains("Index signature key must be") {
             Diagnostic::error_with_code(span, error_codes::EXPECTED_TOKEN, message.to_string())
-                .with_suggestion(span, "".to_string(), "Index signature keys must be 'string' or 'number'")
+                .with_suggestion(
+                    span,
+                    "".to_string(),
+                    "Index signature keys must be 'string' or 'number'",
+                )
         } else if message.contains("Unexpected token in expression") {
             let token_name = self.format_token_name(&self.current().kind);
             let msg = format!("Unexpected {} in expression", token_name);
-            Diagnostic::error_with_code(span, error_codes::UNEXPECTED_TOKEN, msg)
-                .with_suggestion(span, "".to_string(), "This token cannot appear in an expression context")
+            Diagnostic::error_with_code(span, error_codes::UNEXPECTED_TOKEN, msg).with_suggestion(
+                span,
+                "".to_string(),
+                "This token cannot appear in an expression context",
+            )
         } else if message.contains("Unexpected token in pattern") {
             let token_name = self.format_token_name(&self.current().kind);
             let msg = format!("Unexpected {} in destructuring pattern", token_name);
-            Diagnostic::error_with_code(span, error_codes::EXPECTED_PATTERN, msg)
-                .with_suggestion(span, "".to_string(), "Expected a valid destructuring pattern (identifier, array, or object)")
+            Diagnostic::error_with_code(span, error_codes::EXPECTED_PATTERN, msg).with_suggestion(
+                span,
+                "".to_string(),
+                "Expected a valid destructuring pattern (identifier, array, or object)",
+            )
         } else if message.contains("Unexpected token in type") {
             let token_name = self.format_token_name(&self.current().kind);
             let msg = format!("Unexpected {} in type annotation", token_name);
-            Diagnostic::error_with_code(span, error_codes::EXPECTED_TYPE, msg)
-                .with_suggestion(span, "".to_string(), "Expected a valid type (string, number, boolean, etc.)")
+            Diagnostic::error_with_code(span, error_codes::EXPECTED_TYPE, msg).with_suggestion(
+                span,
+                "".to_string(),
+                "Expected a valid type (string, number, boolean, etc.)",
+            )
         } else if message.contains("Unexpected") || message.contains("unexpected") {
             Diagnostic::error_with_code(span, error_codes::UNEXPECTED_TOKEN, message.to_string())
         } else if message.contains("Expected") || message.contains("expected") {
@@ -230,7 +275,7 @@ impl Parser {
                 } else {
                     format!("string \"{}\"", s)
                 }
-            },
+            }
             TokenKind::TemplateString(_) => "template string".to_string(),
             TokenKind::True => "keyword 'true'".to_string(),
             TokenKind::False => "keyword 'false'".to_string(),
@@ -347,21 +392,6 @@ impl Parser {
             self.advance();
         }
     }
-
-    // Enhanced consume with better error messages showing what was found
-    fn consume_with_context(&mut self, kind: TokenKind, expected_desc: &str) -> Result<&Token, ParserError> {
-        if self.check(&kind) {
-            return Ok(self.advance());
-        }
-
-        let found = self.format_token_name(&self.current().kind);
-        let message = format!("Expected {}, but found {}", expected_desc, found);
-
-        Err(ParserError {
-            message,
-            span: self.current_span(),
-        })
-    }
 }
 
 // Helper trait to get span from any statement/expression
@@ -383,7 +413,7 @@ impl Spannable for crate::ast::statement::Statement {
             Export(e) => e.span,
             If(i) => i.span,
             While(w) => w.span,
-            For(f) => match f {
+            For(f) => match f.as_ref() {
                 crate::ast::statement::ForStatement::Numeric(n) => n.span,
                 crate::ast::statement::ForStatement::Generic(g) => g.span,
             },

@@ -1,12 +1,11 @@
 use crate::document::Document;
-use std::sync::Arc;
+use lsp_types::*;
 use std::collections::HashMap;
-use lsp_types::{*, Uri};
-use typedlua_core::diagnostics::CollectingDiagnosticHandler;
-use typedlua_core::ast::statement::Statement;
-use typedlua_core::ast::expression::{Expression, ExpressionKind};
+use std::sync::Arc;
 use typedlua_core::ast::pattern::Pattern;
-use typedlua_core::{Lexer, Parser, Span};
+use typedlua_core::ast::statement::Statement;
+use typedlua_core::diagnostics::CollectingDiagnosticHandler;
+use typedlua_core::{Lexer, Parser};
 
 /// Provides code actions (quick fixes, refactorings, source actions)
 pub struct CodeActionsProvider;
@@ -120,11 +119,7 @@ impl CodeActionsProvider {
     }
 
     /// Generate a quick fix for unused variable
-    fn quick_fix_unused_variable(
-        &self,
-        uri: &Uri,
-        diagnostic: &Diagnostic,
-    ) -> Option<CodeAction> {
+    fn quick_fix_unused_variable(&self, uri: &Uri, diagnostic: &Diagnostic) -> Option<CodeAction> {
         // Prefix the variable name with underscore
         let mut changes = HashMap::new();
         changes.insert(
@@ -195,7 +190,12 @@ impl CodeActionsProvider {
                         character: 0,
                     },
                 },
-                new_text: format!("{}local {}: unknown = {}\n", indent, var_name, selected_text.trim()),
+                new_text: format!(
+                    "{}local {}: unknown = {}\n",
+                    indent,
+                    var_name,
+                    selected_text.trim()
+                ),
             },
             // Replace the selection with the variable name
             TextEdit {
@@ -327,70 +327,10 @@ impl CodeActionsProvider {
         }
 
         let line = lines[line_idx];
-        line.chars()
-            .take_while(|c| c.is_whitespace())
-            .collect()
+        line.chars().take_while(|c| c.is_whitespace()).collect()
     }
 
     /// Find statement containing a range
-    fn find_statement_containing_range<'a>(
-        &self,
-        statements: &'a [Statement],
-        range: Range,
-    ) -> Option<&'a Statement> {
-        for stmt in statements {
-            let stmt_span = self.get_statement_span(stmt);
-            if self.span_contains_range(&stmt_span, range) {
-                return Some(stmt);
-            }
-        }
-        None
-    }
-
-    /// Get the span of a statement
-    fn get_statement_span(&self, stmt: &Statement) -> Span {
-        use typedlua_core::ast::statement::ForStatement;
-
-        match stmt {
-            Statement::Variable(v) => v.span,
-            Statement::Function(f) => f.span,
-            Statement::Class(c) => c.span,
-            Statement::Interface(i) => i.span,
-            Statement::TypeAlias(t) => t.span,
-            Statement::Enum(e) => e.span,
-            Statement::Import(i) => i.span,
-            Statement::Export(e) => e.span,
-            Statement::If(i) => i.span,
-            Statement::While(w) => w.span,
-            Statement::For(for_stmt) => match for_stmt {
-                ForStatement::Numeric(n) => n.span,
-                ForStatement::Generic(g) => g.span,
-            },
-            Statement::Repeat(r) => r.span,
-            Statement::Return(r) => r.span,
-            Statement::Break(s) => *s,
-            Statement::Continue(s) => *s,
-            Statement::Expression(e) => e.span,
-            Statement::Block(b) => b.span,
-            Statement::DeclareFunction(f) => f.span,
-            Statement::DeclareNamespace(n) => n.span,
-            Statement::DeclareType(t) => t.span,
-            Statement::DeclareInterface(i) => i.span,
-            Statement::DeclareConst(c) => c.span,
-        }
-    }
-
-    /// Check if a span contains a range
-    fn span_contains_range(&self, span: &Span, range: Range) -> bool {
-        let span_start_line = (span.line.saturating_sub(1)) as u32;
-        let span_start_char = (span.column.saturating_sub(1)) as u32;
-        let span_end_char = ((span.column + span.len()).saturating_sub(1)) as u32;
-
-        span_start_line == range.start.line
-            && span_start_char <= range.start.character
-            && span_end_char >= range.end.character
-    }
-
     /// Collect missing type annotations from statements
     fn collect_missing_type_annotations(&self, stmt: &Statement, edits: &mut Vec<TextEdit>) {
         match stmt {
@@ -400,7 +340,8 @@ impl CodeActionsProvider {
                         // Add type annotation after the identifier
                         let position = Position {
                             line: (ident.span.line.saturating_sub(1)) as u32,
-                            character: ((ident.span.column + ident.span.len()).saturating_sub(1)) as u32,
+                            character: ((ident.span.column + ident.span.len()).saturating_sub(1))
+                                as u32,
                         };
 
                         edits.push(TextEdit {
@@ -458,15 +399,17 @@ mod tests {
         let provider = CodeActionsProvider::new();
 
         // Test that we can create different kinds of code actions
-        let doc = Document {
-            text: "local x = 10".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("local x = 10".to_string(), 1);
 
         let range = Range {
-            start: Position { line: 0, character: 0 },
-            end: Position { line: 0, character: 12 },
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 0,
+                character: 12,
+            },
         };
 
         let context = CodeActionContext {
@@ -476,25 +419,26 @@ mod tests {
         };
 
         let uri = "file:///test.lua".parse::<Uri>().unwrap();
-        let actions = provider.provide(&uri, &doc, range, context);
+        let _actions = provider.provide(&uri, &doc, range, context);
 
         // Should provide at least source actions
-        assert!(actions.len() >= 0);
     }
 
     #[test]
     fn test_quick_fix_scenarios() {
         let provider = CodeActionsProvider::new();
 
-        let doc = Document {
-            text: "local unused_var = 10".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("local unused_var = 10".to_string(), 1);
 
         let range = Range {
-            start: Position { line: 0, character: 6 },
-            end: Position { line: 0, character: 16 },
+            start: Position {
+                line: 0,
+                character: 6,
+            },
+            end: Position {
+                line: 0,
+                character: 16,
+            },
         };
 
         // Create a diagnostic for unused variable
@@ -537,16 +481,18 @@ mod tests {
     fn test_refactoring_scenarios() {
         let provider = CodeActionsProvider::new();
 
-        let doc = Document {
-            text: "local x = 10 + 20".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("local x = 10 + 20".to_string(), 1);
 
         // Select the expression "10 + 20"
         let range = Range {
-            start: Position { line: 0, character: 10 },
-            end: Position { line: 0, character: 17 },
+            start: Position {
+                line: 0,
+                character: 10,
+            },
+            end: Position {
+                line: 0,
+                character: 17,
+            },
         };
 
         let context = CodeActionContext {

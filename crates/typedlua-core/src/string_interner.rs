@@ -65,7 +65,7 @@ impl StringId {
     }
 
     /// Create a StringId from a raw u32 value
-    /// This is unsafe because it doesn't validate the ID exists
+    /// This is unchecked and doesn't validate the ID exists in the interner
     pub fn from_u32(id: u32) -> Self {
         Self(id)
     }

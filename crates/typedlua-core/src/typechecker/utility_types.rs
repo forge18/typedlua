@@ -6,11 +6,7 @@ use crate::span::Span;
 use rustc_hash::FxHashMap;
 
 /// Apply a utility type transformation
-pub fn apply_utility_type(
-    name: &str,
-    type_args: &[Type],
-    span: Span,
-) -> Result<Type, String> {
+pub fn apply_utility_type(name: &str, type_args: &[Type], span: Span) -> Result<Type, String> {
     match name {
         "Partial" => partial(type_args, span),
         "Required" => required(type_args, span),
@@ -31,27 +27,34 @@ pub fn apply_utility_type(
 /// Partial<T> - Makes all properties in T optional
 fn partial(type_args: &[Type], span: Span) -> Result<Type, String> {
     if type_args.len() != 1 {
-        return Err(format!("Partial<T> expects 1 type argument, got {}", type_args.len()));
+        return Err(format!(
+            "Partial<T> expects 1 type argument, got {}",
+            type_args.len()
+        ));
     }
 
     let typ = &type_args[0];
     match &typ.kind {
         TypeKind::Object(obj) => {
-            let new_members = obj.members.iter().map(|member| {
-                match member {
-                    ObjectTypeMember::Property(prop) => {
-                        ObjectTypeMember::Property(PropertySignature {
-                            is_readonly: prop.is_readonly,
-                            name: prop.name.clone(),
-                            is_optional: true, // Make optional
-                            type_annotation: prop.type_annotation.clone(),
-                            span: prop.span,
-                        })
+            let new_members = obj
+                .members
+                .iter()
+                .map(|member| {
+                    match member {
+                        ObjectTypeMember::Property(prop) => {
+                            ObjectTypeMember::Property(PropertySignature {
+                                is_readonly: prop.is_readonly,
+                                name: prop.name.clone(),
+                                is_optional: true, // Make optional
+                                type_annotation: prop.type_annotation.clone(),
+                                span: prop.span,
+                            })
+                        }
+                        // Methods and index signatures remain unchanged
+                        other => other.clone(),
                     }
-                    // Methods and index signatures remain unchanged
-                    other => other.clone(),
-                }
-            }).collect();
+                })
+                .collect();
 
             Ok(Type::new(
                 TypeKind::Object(ObjectType {
@@ -61,33 +64,40 @@ fn partial(type_args: &[Type], span: Span) -> Result<Type, String> {
                 span,
             ))
         }
-        _ => Err(format!("Partial<T> requires T to be an object type")),
+        _ => Err("Partial<T> requires T to be an object type".to_string()),
     }
 }
 
 /// Required<T> - Makes all properties in T required (non-optional)
 fn required(type_args: &[Type], span: Span) -> Result<Type, String> {
     if type_args.len() != 1 {
-        return Err(format!("Required<T> expects 1 type argument, got {}", type_args.len()));
+        return Err(format!(
+            "Required<T> expects 1 type argument, got {}",
+            type_args.len()
+        ));
     }
 
     let typ = &type_args[0];
     match &typ.kind {
         TypeKind::Object(obj) => {
-            let new_members = obj.members.iter().map(|member| {
-                match member {
-                    ObjectTypeMember::Property(prop) => {
-                        ObjectTypeMember::Property(PropertySignature {
-                            is_readonly: prop.is_readonly,
-                            name: prop.name.clone(),
-                            is_optional: false, // Make required
-                            type_annotation: prop.type_annotation.clone(),
-                            span: prop.span,
-                        })
+            let new_members = obj
+                .members
+                .iter()
+                .map(|member| {
+                    match member {
+                        ObjectTypeMember::Property(prop) => {
+                            ObjectTypeMember::Property(PropertySignature {
+                                is_readonly: prop.is_readonly,
+                                name: prop.name.clone(),
+                                is_optional: false, // Make required
+                                type_annotation: prop.type_annotation.clone(),
+                                span: prop.span,
+                            })
+                        }
+                        other => other.clone(),
                     }
-                    other => other.clone(),
-                }
-            }).collect();
+                })
+                .collect();
 
             Ok(Type::new(
                 TypeKind::Object(ObjectType {
@@ -97,33 +107,40 @@ fn required(type_args: &[Type], span: Span) -> Result<Type, String> {
                 span,
             ))
         }
-        _ => Err(format!("Required<T> requires T to be an object type")),
+        _ => Err("Required<T> requires T to be an object type".to_string()),
     }
 }
 
 /// Readonly<T> - Makes all properties in T readonly
 fn readonly(type_args: &[Type], span: Span) -> Result<Type, String> {
     if type_args.len() != 1 {
-        return Err(format!("Readonly<T> expects 1 type argument, got {}", type_args.len()));
+        return Err(format!(
+            "Readonly<T> expects 1 type argument, got {}",
+            type_args.len()
+        ));
     }
 
     let typ = &type_args[0];
     match &typ.kind {
         TypeKind::Object(obj) => {
-            let new_members = obj.members.iter().map(|member| {
-                match member {
-                    ObjectTypeMember::Property(prop) => {
-                        ObjectTypeMember::Property(PropertySignature {
-                            is_readonly: true, // Make readonly
-                            name: prop.name.clone(),
-                            is_optional: prop.is_optional,
-                            type_annotation: prop.type_annotation.clone(),
-                            span: prop.span,
-                        })
+            let new_members = obj
+                .members
+                .iter()
+                .map(|member| {
+                    match member {
+                        ObjectTypeMember::Property(prop) => {
+                            ObjectTypeMember::Property(PropertySignature {
+                                is_readonly: true, // Make readonly
+                                name: prop.name.clone(),
+                                is_optional: prop.is_optional,
+                                type_annotation: prop.type_annotation.clone(),
+                                span: prop.span,
+                            })
+                        }
+                        other => other.clone(),
                     }
-                    other => other.clone(),
-                }
-            }).collect();
+                })
+                .collect();
 
             Ok(Type::new(
                 TypeKind::Object(ObjectType {
@@ -138,14 +155,17 @@ fn readonly(type_args: &[Type], span: Span) -> Result<Type, String> {
             // but for now, just return the same array (Lua doesn't enforce readonly)
             Ok(typ.clone())
         }
-        _ => Err(format!("Readonly<T> requires T to be an object or array type")),
+        _ => Err("Readonly<T> requires T to be an object or array type".to_string()),
     }
 }
 
 /// Record<K, V> - Constructs an object type with keys of type K and values of type V
 fn record(type_args: &[Type], span: Span) -> Result<Type, String> {
     if type_args.len() != 2 {
-        return Err(format!("Record<K, V> expects 2 type arguments, got {}", type_args.len()));
+        return Err(format!(
+            "Record<K, V> expects 2 type arguments, got {}",
+            type_args.len()
+        ));
     }
 
     let key_type = &type_args[0];
@@ -204,7 +224,10 @@ fn record(type_args: &[Type], span: Span) -> Result<Type, String> {
 /// Pick<T, K> - Picks a subset of properties from T
 fn pick(type_args: &[Type], span: Span) -> Result<Type, String> {
     if type_args.len() != 2 {
-        return Err(format!("Pick<T, K> expects 2 type arguments, got {}", type_args.len()));
+        return Err(format!(
+            "Pick<T, K> expects 2 type arguments, got {}",
+            type_args.len()
+        ));
     }
 
     let typ = &type_args[0];
@@ -215,7 +238,9 @@ fn pick(type_args: &[Type], span: Span) -> Result<Type, String> {
             // Extract the property names to pick
             let keys_to_pick = extract_string_literal_keys(keys)?;
 
-            let new_members: Vec<ObjectTypeMember> = obj.members.iter()
+            let new_members: Vec<ObjectTypeMember> = obj
+                .members
+                .iter()
                 .filter_map(|member| {
                     match member {
                         ObjectTypeMember::Property(prop) => {
@@ -239,14 +264,17 @@ fn pick(type_args: &[Type], span: Span) -> Result<Type, String> {
                 span,
             ))
         }
-        _ => Err(format!("Pick<T, K> requires T to be an object type")),
+        _ => Err("Pick<T, K> requires T to be an object type".to_string()),
     }
 }
 
 /// Omit<T, K> - Omits properties from T
 fn omit(type_args: &[Type], span: Span) -> Result<Type, String> {
     if type_args.len() != 2 {
-        return Err(format!("Omit<T, K> expects 2 type arguments, got {}", type_args.len()));
+        return Err(format!(
+            "Omit<T, K> expects 2 type arguments, got {}",
+            type_args.len()
+        ));
     }
 
     let typ = &type_args[0];
@@ -257,7 +285,9 @@ fn omit(type_args: &[Type], span: Span) -> Result<Type, String> {
             // Extract the property names to omit
             let keys_to_omit = extract_string_literal_keys(keys)?;
 
-            let new_members: Vec<ObjectTypeMember> = obj.members.iter()
+            let new_members: Vec<ObjectTypeMember> = obj
+                .members
+                .iter()
                 .filter_map(|member| {
                     match member {
                         ObjectTypeMember::Property(prop) => {
@@ -281,14 +311,17 @@ fn omit(type_args: &[Type], span: Span) -> Result<Type, String> {
                 span,
             ))
         }
-        _ => Err(format!("Omit<T, K> requires T to be an object type")),
+        _ => Err("Omit<T, K> requires T to be an object type".to_string()),
     }
 }
 
 /// Exclude<T, U> - Excludes types from a union T that are assignable to U
 fn exclude(type_args: &[Type], span: Span) -> Result<Type, String> {
     if type_args.len() != 2 {
-        return Err(format!("Exclude<T, U> expects 2 type arguments, got {}", type_args.len()));
+        return Err(format!(
+            "Exclude<T, U> expects 2 type arguments, got {}",
+            type_args.len()
+        ));
     }
 
     let typ = &type_args[0];
@@ -296,7 +329,8 @@ fn exclude(type_args: &[Type], span: Span) -> Result<Type, String> {
 
     match &typ.kind {
         TypeKind::Union(types) => {
-            let remaining: Vec<Type> = types.iter()
+            let remaining: Vec<Type> = types
+                .iter()
                 .filter(|t| !is_assignable_to(t, exclude_type))
                 .cloned()
                 .collect();
@@ -323,7 +357,10 @@ fn exclude(type_args: &[Type], span: Span) -> Result<Type, String> {
 /// Extract<T, U> - Extracts types from a union T that are assignable to U
 fn extract(type_args: &[Type], span: Span) -> Result<Type, String> {
     if type_args.len() != 2 {
-        return Err(format!("Extract<T, U> expects 2 type arguments, got {}", type_args.len()));
+        return Err(format!(
+            "Extract<T, U> expects 2 type arguments, got {}",
+            type_args.len()
+        ));
     }
 
     let typ = &type_args[0];
@@ -331,7 +368,8 @@ fn extract(type_args: &[Type], span: Span) -> Result<Type, String> {
 
     match &typ.kind {
         TypeKind::Union(types) => {
-            let extracted: Vec<Type> = types.iter()
+            let extracted: Vec<Type> = types
+                .iter()
                 .filter(|t| is_assignable_to(t, extract_type))
                 .cloned()
                 .collect();
@@ -358,14 +396,18 @@ fn extract(type_args: &[Type], span: Span) -> Result<Type, String> {
 /// NonNilable<T> - Removes nil and void from a type
 fn non_nilable(type_args: &[Type], span: Span) -> Result<Type, String> {
     if type_args.len() != 1 {
-        return Err(format!("NonNilable<T> expects 1 type argument, got {}", type_args.len()));
+        return Err(format!(
+            "NonNilable<T> expects 1 type argument, got {}",
+            type_args.len()
+        ));
     }
 
     let typ = &type_args[0];
 
     match &typ.kind {
         TypeKind::Union(types) => {
-            let non_nil: Vec<Type> = types.iter()
+            let non_nil: Vec<Type> = types
+                .iter()
                 .filter(|t| !is_nil_or_void(t))
                 .cloned()
                 .collect();
@@ -378,9 +420,7 @@ fn non_nilable(type_args: &[Type], span: Span) -> Result<Type, String> {
                 Ok(Type::new(TypeKind::Union(non_nil), span))
             }
         }
-        TypeKind::Nullable(inner) => {
-            Ok((**inner).clone())
-        }
+        TypeKind::Nullable(inner) => Ok((**inner).clone()),
         _ => {
             if is_nil_or_void(typ) {
                 Ok(Type::new(TypeKind::Primitive(PrimitiveType::Never), span))
@@ -394,7 +434,10 @@ fn non_nilable(type_args: &[Type], span: Span) -> Result<Type, String> {
 /// Nilable<T> - Adds nil to a type (equivalent to T | nil)
 fn nilable(type_args: &[Type], span: Span) -> Result<Type, String> {
     if type_args.len() != 1 {
-        return Err(format!("Nilable<T> expects 1 type argument, got {}", type_args.len()));
+        return Err(format!(
+            "Nilable<T> expects 1 type argument, got {}",
+            type_args.len()
+        ));
     }
 
     let typ = &type_args[0];
@@ -419,36 +462,40 @@ fn nilable(type_args: &[Type], span: Span) -> Result<Type, String> {
             // Already nullable
             Ok(typ.clone())
         }
-        _ => {
-            Ok(Type::new(
-                TypeKind::Union(vec![
-                    typ.clone(),
-                    Type::new(TypeKind::Primitive(PrimitiveType::Nil), span),
-                ]),
-                span,
-            ))
-        }
+        _ => Ok(Type::new(
+            TypeKind::Union(vec![
+                typ.clone(),
+                Type::new(TypeKind::Primitive(PrimitiveType::Nil), span),
+            ]),
+            span,
+        )),
     }
 }
 
 /// ReturnType<F> - Extracts the return type from a function type
 fn return_type(type_args: &[Type], _span: Span) -> Result<Type, String> {
     if type_args.len() != 1 {
-        return Err(format!("ReturnType<F> expects 1 type argument, got {}", type_args.len()));
+        return Err(format!(
+            "ReturnType<F> expects 1 type argument, got {}",
+            type_args.len()
+        ));
     }
 
     let typ = &type_args[0];
 
     match &typ.kind {
         TypeKind::Function(ref func) => Ok((*func.return_type).clone()),
-        _ => Err(format!("ReturnType<F> requires F to be a function type")),
+        _ => Err("ReturnType<F> requires F to be a function type".to_string()),
     }
 }
 
 /// Parameters<F> - Extracts parameter types from a function as a tuple
 fn parameters(type_args: &[Type], span: Span) -> Result<Type, String> {
     if type_args.len() != 1 {
-        return Err(format!("Parameters<F> expects 1 type argument, got {}", type_args.len()));
+        return Err(format!(
+            "Parameters<F> expects 1 type argument, got {}",
+            type_args.len()
+        ));
     }
 
     let typ = &type_args[0];
@@ -463,13 +510,16 @@ fn parameters(type_args: &[Type], span: Span) -> Result<Type, String> {
 
             Ok(Type::new(TypeKind::Tuple(param_types), span))
         }
-        _ => Err(format!("Parameters<F> requires F to be a function type")),
+        _ => Err("Parameters<F> requires F to be a function type".to_string()),
     }
 }
 
 /// Evaluate a mapped type: { [K in T]: V }
 /// Transforms the mapped type into a concrete object type
-pub fn evaluate_mapped_type(mapped: &MappedType, type_env: &super::TypeEnvironment) -> Result<Type, String> {
+pub fn evaluate_mapped_type(
+    mapped: &MappedType,
+    type_env: &super::TypeEnvironment,
+) -> Result<Type, String> {
     // Resolve the 'in' type if it's a KeyOf expression
     let in_type_resolved = match &mapped.in_type.kind {
         TypeKind::KeyOf(operand) => {
@@ -508,12 +558,10 @@ pub fn evaluate_mapped_type(mapped: &MappedType, type_env: &super::TypeEnvironme
 pub fn evaluate_keyof(typ: &Type, type_env: &super::TypeEnvironment) -> Result<Type, String> {
     // Resolve type reference first
     let resolved_type = match &typ.kind {
-        TypeKind::Reference(type_ref) => {
-            match type_env.lookup_type(&type_ref.name.node) {
-                Some(t) => t.clone(),
-                None => return Err(format!("Type '{}' not found", type_ref.name.node)),
-            }
-        }
+        TypeKind::Reference(type_ref) => match type_env.lookup_type(&type_ref.name.node) {
+            Some(t) => t.clone(),
+            None => return Err(format!("Type '{}' not found", type_ref.name.node)),
+        },
         _ => typ.clone(),
     };
 
@@ -541,14 +589,20 @@ pub fn evaluate_keyof(typ: &Type, type_env: &super::TypeEnvironment) -> Result<T
             }
 
             if keys.is_empty() {
-                Ok(Type::new(TypeKind::Primitive(PrimitiveType::Never), typ.span))
+                Ok(Type::new(
+                    TypeKind::Primitive(PrimitiveType::Never),
+                    typ.span,
+                ))
             } else if keys.len() == 1 {
                 Ok(keys.into_iter().next().unwrap())
             } else {
                 Ok(Type::new(TypeKind::Union(keys), resolved_type.span))
             }
         }
-        _ => Err(format!("keyof requires an object type, got {:?}", resolved_type.kind)),
+        _ => Err(format!(
+            "keyof requires an object type, got {:?}",
+            resolved_type.kind
+        )),
     }
 }
 
@@ -606,18 +660,15 @@ pub fn evaluate_conditional_type(
         }
 
         // Check if all types are the same (simplified check)
-        let all_same = result_types.windows(2).all(|w| {
-            types_structurally_equal(&w[0], &w[1])
-        });
+        let all_same = result_types
+            .windows(2)
+            .all(|w| types_structurally_equal(&w[0], &w[1]));
 
         if all_same {
             return Ok(result_types.into_iter().next().unwrap());
         }
 
-        return Ok(Type::new(
-            TypeKind::Union(result_types),
-            conditional.span,
-        ));
+        return Ok(Type::new(TypeKind::Union(result_types), conditional.span));
     }
 
     // Resolve type references for comparison
@@ -662,18 +713,18 @@ fn contains_infer(typ: &Type) -> bool {
         TypeKind::Infer(_) => true,
         TypeKind::Array(elem) => contains_infer(elem),
         TypeKind::Union(types) | TypeKind::Intersection(types) | TypeKind::Tuple(types) => {
-            types.iter().any(|t| contains_infer(t))
+            types.iter().any(contains_infer)
         }
         TypeKind::Function(func) => {
-            func.parameters.iter().any(|p| {
-                p.type_annotation.as_ref().map_or(false, |t| contains_infer(t))
-            }) || contains_infer(&func.return_type)
+            func.parameters
+                .iter()
+                .any(|p| p.type_annotation.as_ref().is_some_and(contains_infer))
+                || contains_infer(&func.return_type)
         }
-        TypeKind::Reference(type_ref) => {
-            type_ref.type_arguments.as_ref().map_or(false, |args| {
-                args.iter().any(|t| contains_infer(t))
-            })
-        }
+        TypeKind::Reference(type_ref) => type_ref
+            .type_arguments
+            .as_ref()
+            .is_some_and(|args| args.iter().any(contains_infer)),
         _ => false,
     }
 }
@@ -685,8 +736,6 @@ fn try_match_and_infer(
     inferred: &mut FxHashMap<String, Type>,
     type_env: &super::TypeEnvironment,
 ) -> bool {
-    
-
     match &pattern.kind {
         // If pattern is `infer R`, capture the check_type as R
         TypeKind::Infer(name) => {
@@ -720,9 +769,10 @@ fn try_match_and_infer(
                         if pattern_args.len() != check_args.len() {
                             return false;
                         }
-                        pattern_args.iter().zip(check_args.iter()).all(|(p, c)| {
-                            try_match_and_infer(c, p, inferred, type_env)
-                        })
+                        pattern_args
+                            .iter()
+                            .zip(check_args.iter())
+                            .all(|(p, c)| try_match_and_infer(c, p, inferred, type_env))
                     }
                     (None, None) => true,
                     _ => false,
@@ -740,14 +790,26 @@ fn try_match_and_infer(
                     return false;
                 }
 
-                let params_match = pattern_func.parameters.iter().zip(check_func.parameters.iter()).all(|(p_param, c_param)| {
-                    match (&p_param.type_annotation, &c_param.type_annotation) {
-                        (Some(p_type), Some(c_type)) => try_match_and_infer(c_type, p_type, inferred, type_env),
-                        _ => true,
-                    }
-                });
+                let params_match = pattern_func
+                    .parameters
+                    .iter()
+                    .zip(check_func.parameters.iter())
+                    .all(|(p_param, c_param)| {
+                        match (&p_param.type_annotation, &c_param.type_annotation) {
+                            (Some(p_type), Some(c_type)) => {
+                                try_match_and_infer(c_type, p_type, inferred, type_env)
+                            }
+                            _ => true,
+                        }
+                    });
 
-                params_match && try_match_and_infer(&check_func.return_type, &pattern_func.return_type, inferred, type_env)
+                params_match
+                    && try_match_and_infer(
+                        &check_func.return_type,
+                        &pattern_func.return_type,
+                        inferred,
+                        type_env,
+                    )
             } else {
                 false
             }
@@ -759,9 +821,10 @@ fn try_match_and_infer(
                 if pattern_types.len() != check_types.len() {
                     return false;
                 }
-                pattern_types.iter().zip(check_types.iter()).all(|(p, c)| {
-                    try_match_and_infer(c, p, inferred, type_env)
-                })
+                pattern_types
+                    .iter()
+                    .zip(check_types.iter())
+                    .all(|(p, c)| try_match_and_infer(c, p, inferred, type_env))
             } else {
                 false
             }
@@ -793,25 +856,31 @@ fn substitute_inferred_types(
         // Recursively substitute in compound types
         TypeKind::Array(elem) => {
             let substituted_elem = substitute_inferred_types(elem, inferred)?;
-            Ok(Type::new(TypeKind::Array(Box::new(substituted_elem)), typ.span))
+            Ok(Type::new(
+                TypeKind::Array(Box::new(substituted_elem)),
+                typ.span,
+            ))
         }
 
         TypeKind::Union(types) => {
-            let substituted: Result<Vec<_>, _> = types.iter()
+            let substituted: Result<Vec<_>, _> = types
+                .iter()
                 .map(|t| substitute_inferred_types(t, inferred))
                 .collect();
             Ok(Type::new(TypeKind::Union(substituted?), typ.span))
         }
 
         TypeKind::Intersection(types) => {
-            let substituted: Result<Vec<_>, _> = types.iter()
+            let substituted: Result<Vec<_>, _> = types
+                .iter()
                 .map(|t| substitute_inferred_types(t, inferred))
                 .collect();
             Ok(Type::new(TypeKind::Intersection(substituted?), typ.span))
         }
 
         TypeKind::Tuple(types) => {
-            let substituted: Result<Vec<_>, _> = types.iter()
+            let substituted: Result<Vec<_>, _> = types
+                .iter()
                 .map(|t| substitute_inferred_types(t, inferred))
                 .collect();
             Ok(Type::new(TypeKind::Tuple(substituted?), typ.span))
@@ -862,12 +931,19 @@ fn extract_string_literal_keys(typ: &Type) -> Result<Vec<&str>, String> {
             for t in types {
                 match &t.kind {
                     TypeKind::Literal(Literal::String(s)) => keys.push(s.as_str()),
-                    _ => return Err("Pick/Omit key type must be string literal or union of string literals".to_string()),
+                    _ => {
+                        return Err(
+                            "Pick/Omit key type must be string literal or union of string literals"
+                                .to_string(),
+                        )
+                    }
                 }
             }
             Ok(keys)
         }
-        _ => Err("Pick/Omit key type must be string literal or union of string literals".to_string()),
+        _ => {
+            Err("Pick/Omit key type must be string literal or union of string literals".to_string())
+        }
     }
 }
 
@@ -906,7 +982,9 @@ pub fn evaluate_template_literal_type(
                 // Type interpolation - expand to all possible string values
                 let values = expand_type_to_strings(ty, type_env)?;
                 if values.is_empty() {
-                    return Err("Template literal type interpolation produced no values".to_string());
+                    return Err(
+                        "Template literal type interpolation produced no values".to_string()
+                    );
                 }
                 part_expansions.push(values);
             }
@@ -915,6 +993,19 @@ pub fn evaluate_template_literal_type(
 
     // Generate all combinations
     let combinations = cartesian_product(&part_expansions);
+
+    // Limit the number of combinations to prevent exponential explosion
+    // TypeScript uses 100,000 as the limit
+    const MAX_TEMPLATE_LITERAL_COMBINATIONS: usize = 10000;
+
+    if combinations.len() > MAX_TEMPLATE_LITERAL_COMBINATIONS {
+        return Err(format!(
+            "Template literal type expansion resulted in {} combinations, which exceeds the limit of {}. \
+             Consider using a broader type like 'string' instead.",
+            combinations.len(),
+            MAX_TEMPLATE_LITERAL_COMBINATIONS
+        ));
+    }
 
     // If there's only one combination, return a single string literal
     // Otherwise, return a union of string literals
@@ -934,7 +1025,10 @@ pub fn evaluate_template_literal_type(
 }
 
 /// Expand a type to all possible string literal values
-fn expand_type_to_strings(ty: &Type, type_env: &super::TypeEnvironment) -> Result<Vec<String>, String> {
+fn expand_type_to_strings(
+    ty: &Type,
+    type_env: &super::TypeEnvironment,
+) -> Result<Vec<String>, String> {
     // First resolve any type references
     let resolved = match &ty.kind {
         TypeKind::Reference(type_ref) => {
@@ -1036,8 +1130,18 @@ mod tests {
     #[test]
     fn test_partial() {
         let obj = make_object_type(vec![
-            ("name", Type::new(TypeKind::Primitive(PrimitiveType::String), make_span()), false, false),
-            ("age", Type::new(TypeKind::Primitive(PrimitiveType::Number), make_span()), false, false),
+            (
+                "name",
+                Type::new(TypeKind::Primitive(PrimitiveType::String), make_span()),
+                false,
+                false,
+            ),
+            (
+                "age",
+                Type::new(TypeKind::Primitive(PrimitiveType::Number), make_span()),
+                false,
+                false,
+            ),
         ]);
 
         let result = partial(&[obj], make_span()).unwrap();
@@ -1046,7 +1150,11 @@ mod tests {
             assert_eq!(obj_type.members.len(), 2);
             for member in &obj_type.members {
                 if let ObjectTypeMember::Property(prop) = member {
-                    assert!(prop.is_optional, "Property {} should be optional", prop.name.node);
+                    assert!(
+                        prop.is_optional,
+                        "Property {} should be optional",
+                        prop.name.node
+                    );
                 }
             }
         } else {
@@ -1057,8 +1165,18 @@ mod tests {
     #[test]
     fn test_required() {
         let obj = make_object_type(vec![
-            ("name", Type::new(TypeKind::Primitive(PrimitiveType::String), make_span()), true, false),
-            ("age", Type::new(TypeKind::Primitive(PrimitiveType::Number), make_span()), true, false),
+            (
+                "name",
+                Type::new(TypeKind::Primitive(PrimitiveType::String), make_span()),
+                true,
+                false,
+            ),
+            (
+                "age",
+                Type::new(TypeKind::Primitive(PrimitiveType::Number), make_span()),
+                true,
+                false,
+            ),
         ]);
 
         let result = required(&[obj], make_span()).unwrap();
@@ -1067,7 +1185,11 @@ mod tests {
             assert_eq!(obj_type.members.len(), 2);
             for member in &obj_type.members {
                 if let ObjectTypeMember::Property(prop) = member {
-                    assert!(!prop.is_optional, "Property {} should be required", prop.name.node);
+                    assert!(
+                        !prop.is_optional,
+                        "Property {} should be required",
+                        prop.name.node
+                    );
                 }
             }
         } else {
@@ -1078,8 +1200,18 @@ mod tests {
     #[test]
     fn test_readonly() {
         let obj = make_object_type(vec![
-            ("name", Type::new(TypeKind::Primitive(PrimitiveType::String), make_span()), false, false),
-            ("age", Type::new(TypeKind::Primitive(PrimitiveType::Number), make_span()), false, false),
+            (
+                "name",
+                Type::new(TypeKind::Primitive(PrimitiveType::String), make_span()),
+                false,
+                false,
+            ),
+            (
+                "age",
+                Type::new(TypeKind::Primitive(PrimitiveType::Number), make_span()),
+                false,
+                false,
+            ),
         ]);
 
         let result = readonly(&[obj], make_span()).unwrap();
@@ -1088,7 +1220,11 @@ mod tests {
             assert_eq!(obj_type.members.len(), 2);
             for member in &obj_type.members {
                 if let ObjectTypeMember::Property(prop) = member {
-                    assert!(prop.is_readonly, "Property {} should be readonly", prop.name.node);
+                    assert!(
+                        prop.is_readonly,
+                        "Property {} should be readonly",
+                        prop.name.node
+                    );
                 }
             }
         } else {
@@ -1127,7 +1263,9 @@ mod tests {
 
         if let TypeKind::Union(types) = &result.kind {
             assert_eq!(types.len(), 2);
-            assert!(types.iter().all(|t| !matches!(t.kind, TypeKind::Primitive(PrimitiveType::String))));
+            assert!(types
+                .iter()
+                .all(|t| !matches!(t.kind, TypeKind::Primitive(PrimitiveType::String))));
         } else {
             panic!("Expected union type");
         }
@@ -1145,7 +1283,10 @@ mod tests {
 
         let result = non_nilable(&[union], make_span()).unwrap();
 
-        assert!(matches!(result.kind, TypeKind::Primitive(PrimitiveType::String)));
+        assert!(matches!(
+            result.kind,
+            TypeKind::Primitive(PrimitiveType::String)
+        ));
     }
 
     #[test]
@@ -1155,8 +1296,12 @@ mod tests {
 
         if let TypeKind::Union(types) = &result.kind {
             assert_eq!(types.len(), 2);
-            assert!(types.iter().any(|t| matches!(t.kind, TypeKind::Primitive(PrimitiveType::String))));
-            assert!(types.iter().any(|t| matches!(t.kind, TypeKind::Primitive(PrimitiveType::Nil))));
+            assert!(types
+                .iter()
+                .any(|t| matches!(t.kind, TypeKind::Primitive(PrimitiveType::String))));
+            assert!(types
+                .iter()
+                .any(|t| matches!(t.kind, TypeKind::Primitive(PrimitiveType::Nil))));
         } else {
             panic!("Expected union type");
         }
@@ -1168,14 +1313,21 @@ mod tests {
 
         let func = Type::new(
             TypeKind::Function(FunctionType {
+                type_parameters: None,
                 parameters: vec![],
-                return_type: Box::new(Type::new(TypeKind::Primitive(PrimitiveType::Number), make_span())),
+                return_type: Box::new(Type::new(
+                    TypeKind::Primitive(PrimitiveType::Number),
+                    make_span(),
+                )),
                 span: make_span(),
             }),
             make_span(),
         );
 
         let result = return_type(&[func], make_span()).unwrap();
-        assert!(matches!(result.kind, TypeKind::Primitive(PrimitiveType::Number)));
+        assert!(matches!(
+            result.kind,
+            TypeKind::Primitive(PrimitiveType::Number)
+        ));
     }
 }

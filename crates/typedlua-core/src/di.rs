@@ -111,10 +111,10 @@ mod tests {
     #[test]
     fn test_container_config_access() {
         let mut config = CompilerConfig::default();
-        config.compiler_options.enable_oop = false;
+        config.compiler_options.strict_null_checks = false;
 
         let container = Container::new(config);
 
-        assert!(!container.config().compiler_options.enable_oop);
+        assert!(!container.config().compiler_options.strict_null_checks);
     }
 }

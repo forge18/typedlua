@@ -1,24 +1,31 @@
+use std::sync::Arc;
 use typedlua_core::config::CompilerOptions;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::lexer::Lexer;
 use typedlua_core::parser::Parser;
 use typedlua_core::typechecker::TypeChecker;
-use std::sync::Arc;
 
 fn type_check(source: &str) -> Result<(), String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
 
     // Lex
     let mut lexer = Lexer::new(source, handler.clone());
-    let tokens = lexer.tokenize().map_err(|e| format!("Lexing failed: {:?}", e))?;
+    let tokens = lexer
+        .tokenize()
+        .map_err(|e| format!("Lexing failed: {:?}", e))?;
 
     // Parse
     let mut parser = Parser::new(tokens, handler.clone());
-    let program = parser.parse().map_err(|e| format!("Parsing failed: {:?}", e))?;
+    let program = parser
+        .parse()
+        .map_err(|e| format!("Parsing failed: {:?}", e))?;
 
     // Type check
-    let mut type_checker = TypeChecker::new(handler.clone()).with_options(CompilerOptions::default());
-    type_checker.check_program(&program).map_err(|e| e.message)?;
+    let mut type_checker =
+        TypeChecker::new(handler.clone()).with_options(CompilerOptions::default());
+    type_checker
+        .check_program(&program)
+        .map_err(|e| e.message)?;
 
     Ok(())
 }
@@ -37,7 +44,10 @@ fn test_boolean_exhaustive_with_wildcard() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Boolean match with wildcard should be exhaustive");
+    assert!(
+        result.is_ok(),
+        "Boolean match with wildcard should be exhaustive"
+    );
 }
 
 #[test]
@@ -51,7 +61,10 @@ fn test_boolean_exhaustive_with_both_cases() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Boolean match with true and false should be exhaustive");
+    assert!(
+        result.is_ok(),
+        "Boolean match with true and false should be exhaustive"
+    );
 }
 
 #[test]
@@ -64,10 +77,19 @@ fn test_boolean_non_exhaustive_missing_false() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_err(), "Boolean match missing false case should fail");
+    assert!(
+        result.is_err(),
+        "Boolean match missing false case should fail"
+    );
     let error = result.unwrap_err();
-    assert!(error.contains("Non-exhaustive match"), "Error should mention non-exhaustive match");
-    assert!(error.contains("boolean"), "Error should mention boolean type");
+    assert!(
+        error.contains("Non-exhaustive match"),
+        "Error should mention non-exhaustive match"
+    );
+    assert!(
+        error.contains("boolean"),
+        "Error should mention boolean type"
+    );
 }
 
 #[test]
@@ -80,9 +102,15 @@ fn test_boolean_non_exhaustive_missing_true() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_err(), "Boolean match missing true case should fail");
+    assert!(
+        result.is_err(),
+        "Boolean match missing true case should fail"
+    );
     let error = result.unwrap_err();
-    assert!(error.contains("Non-exhaustive match"), "Error should mention non-exhaustive match");
+    assert!(
+        error.contains("Non-exhaustive match"),
+        "Error should mention non-exhaustive match"
+    );
 }
 
 #[test]
@@ -95,7 +123,10 @@ fn test_boolean_exhaustive_with_identifier_pattern() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Boolean match with identifier pattern should be exhaustive");
+    assert!(
+        result.is_ok(),
+        "Boolean match with identifier pattern should be exhaustive"
+    );
 }
 
 // ============================================================================
@@ -112,7 +143,10 @@ fn test_literal_type_exhaustive() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Literal type match with exact literal should be exhaustive");
+    assert!(
+        result.is_ok(),
+        "Literal type match with exact literal should be exhaustive"
+    );
 }
 
 #[test]
@@ -125,9 +159,15 @@ fn test_literal_type_non_exhaustive() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_err(), "Literal type match without matching literal should fail");
+    assert!(
+        result.is_err(),
+        "Literal type match without matching literal should fail"
+    );
     let error = result.unwrap_err();
-    assert!(error.contains("Non-exhaustive match"), "Error should mention non-exhaustive match");
+    assert!(
+        error.contains("Non-exhaustive match"),
+        "Error should mention non-exhaustive match"
+    );
     assert!(error.contains("literal"), "Error should mention literal");
 }
 
@@ -141,7 +181,10 @@ fn test_literal_type_with_wildcard() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Literal type match with wildcard should be exhaustive");
+    assert!(
+        result.is_ok(),
+        "Literal type match with wildcard should be exhaustive"
+    );
 }
 
 // ============================================================================
@@ -158,7 +201,10 @@ fn test_union_exhaustive_with_wildcard() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Union match with wildcard should be exhaustive");
+    assert!(
+        result.is_ok(),
+        "Union match with wildcard should be exhaustive"
+    );
 }
 
 #[test]
@@ -191,7 +237,10 @@ fn test_union_with_identifier_exhaustive() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Union match with identifier should be exhaustive");
+    assert!(
+        result.is_ok(),
+        "Union match with identifier should be exhaustive"
+    );
 }
 
 // ============================================================================
@@ -228,7 +277,10 @@ fn test_guard_with_wildcard_fallback() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Match with guard and wildcard fallback should be exhaustive");
+    assert!(
+        result.is_ok(),
+        "Match with guard and wildcard fallback should be exhaustive"
+    );
 }
 
 // ============================================================================
@@ -265,7 +317,10 @@ fn test_number_type_with_wildcard() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Number match with wildcard should be exhaustive");
+    assert!(
+        result.is_ok(),
+        "Number match with wildcard should be exhaustive"
+    );
 }
 
 #[test]
@@ -280,7 +335,10 @@ fn test_string_type_with_wildcard() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "String match with wildcard should be exhaustive");
+    assert!(
+        result.is_ok(),
+        "String match with wildcard should be exhaustive"
+    );
 }
 
 // ============================================================================
@@ -298,7 +356,10 @@ fn test_array_type_with_wildcard() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Array match with wildcard should be exhaustive");
+    assert!(
+        result.is_ok(),
+        "Array match with wildcard should be exhaustive"
+    );
 }
 
 #[test]

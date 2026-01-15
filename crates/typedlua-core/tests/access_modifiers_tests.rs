@@ -1,9 +1,8 @@
-use typedlua_core::config::CompilerOptions;
+use std::sync::Arc;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::lexer::Lexer;
 use typedlua_core::parser::Parser;
 use typedlua_core::typechecker::TypeChecker;
-use std::sync::Arc;
 
 fn type_check(source: &str) -> Result<(), String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
@@ -14,14 +13,7 @@ fn type_check(source: &str) -> Result<(), String> {
     let program = parser.parse().map_err(|e| format!("{:?}", e))?;
 
     let mut checker = TypeChecker::new(handler);
-    checker = checker.with_options(CompilerOptions {
-        enable_oop: true,
-        ..Default::default()
-    });
-
-    checker
-        .check_program(&program)
-        .map_err(|e| e.message)?;
+    checker.check_program(&program).map_err(|e| e.message)?;
 
     Ok(())
 }
@@ -35,7 +27,10 @@ fn test_class_with_public_members() {
         }
     "#;
 
-    assert!(type_check(source).is_ok(), "Class with public members should type-check successfully");
+    assert!(
+        type_check(source).is_ok(),
+        "Class with public members should type-check successfully"
+    );
 }
 
 #[test]
@@ -47,7 +42,10 @@ fn test_class_with_private_members() {
         }
     "#;
 
-    assert!(type_check(source).is_ok(), "Class with private members should type-check successfully");
+    assert!(
+        type_check(source).is_ok(),
+        "Class with private members should type-check successfully"
+    );
 }
 
 #[test]
@@ -59,7 +57,10 @@ fn test_class_with_protected_members() {
         }
     "#;
 
-    assert!(type_check(source).is_ok(), "Class with protected members should type-check successfully");
+    assert!(
+        type_check(source).is_ok(),
+        "Class with protected members should type-check successfully"
+    );
 }
 
 #[test]
@@ -72,7 +73,10 @@ fn test_class_with_mixed_access_modifiers() {
         }
     "#;
 
-    assert!(type_check(source).is_ok(), "Class with mixed access modifiers should type-check successfully");
+    assert!(
+        type_check(source).is_ok(),
+        "Class with mixed access modifiers should type-check successfully"
+    );
 }
 
 #[test]
@@ -93,7 +97,10 @@ fn test_class_methods_with_access_modifiers() {
         }
     "#;
 
-    assert!(type_check(source).is_ok(), "Class methods with access modifiers should type-check successfully");
+    assert!(
+        type_check(source).is_ok(),
+        "Class methods with access modifiers should type-check successfully"
+    );
 }
 
 #[test]
@@ -112,7 +119,10 @@ fn test_class_getters_setters_with_access_modifiers() {
         }
     "#;
 
-    assert!(type_check(source).is_ok(), "Getters and setters with access modifiers should type-check successfully");
+    assert!(
+        type_check(source).is_ok(),
+        "Getters and setters with access modifiers should type-check successfully"
+    );
 }
 
 #[test]
@@ -125,7 +135,10 @@ fn test_class_static_members_with_access_modifiers() {
         }
     "#;
 
-    assert!(type_check(source).is_ok(), "Static members with access modifiers should type-check successfully");
+    assert!(
+        type_check(source).is_ok(),
+        "Static members with access modifiers should type-check successfully"
+    );
 }
 
 #[test]
@@ -142,7 +155,10 @@ fn test_inheritance_with_access_modifiers() {
         }
     "#;
 
-    assert!(type_check(source).is_ok(), "Inheritance with access modifiers should type-check successfully");
+    assert!(
+        type_check(source).is_ok(),
+        "Inheritance with access modifiers should type-check successfully"
+    );
 }
 
 #[test]
@@ -158,7 +174,10 @@ fn test_default_access_modifier_is_public() {
         }
     "#;
 
-    assert!(type_check(source).is_ok(), "Members without access modifiers should default to public and type-check successfully");
+    assert!(
+        type_check(source).is_ok(),
+        "Members without access modifiers should default to public and type-check successfully"
+    );
 }
 
 #[test]
@@ -175,5 +194,8 @@ fn test_multiple_classes_with_access_modifiers() {
         }
     "#;
 
-    assert!(type_check(source).is_ok(), "Multiple classes with access modifiers should type-check successfully");
+    assert!(
+        type_check(source).is_ok(),
+        "Multiple classes with access modifiers should type-check successfully"
+    );
 }

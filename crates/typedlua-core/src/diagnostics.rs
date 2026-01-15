@@ -111,7 +111,12 @@ impl Diagnostic {
     }
 
     /// Add a suggestion to this diagnostic
-    pub fn with_suggestion(mut self, span: Span, replacement: String, message: impl Into<String>) -> Self {
+    pub fn with_suggestion(
+        mut self,
+        span: Span,
+        replacement: String,
+        message: impl Into<String>,
+    ) -> Self {
         self.suggestions.push(DiagnosticSuggestion {
             span,
             replacement,
@@ -186,7 +191,10 @@ impl DiagnosticHandler for ConsoleDiagnosticHandler {
 
             // Print related information
             for related in &diagnostic.related_information {
-                eprintln!("  \x1b[36mNote\x1b[0m at {}: {}", related.span, related.message);
+                eprintln!(
+                    "  \x1b[36mNote\x1b[0m at {}: {}",
+                    related.span, related.message
+                );
             }
 
             // Print suggestions
@@ -576,15 +584,21 @@ mod tests {
 
         assert_eq!(diag.related_information.len(), 1);
         assert_eq!(diag.related_information[0].span, related_span);
-        assert_eq!(diag.related_information[0].message, "Previously declared here");
+        assert_eq!(
+            diag.related_information[0].message,
+            "Previously declared here"
+        );
     }
 
     #[test]
     fn test_diagnostic_with_suggestion() {
         let span = Span::new(0, 5, 1, 1);
 
-        let diag = Diagnostic::error(span, "Use 'const' instead")
-            .with_suggestion(span, "const".to_string(), "Replace with 'const'");
+        let diag = Diagnostic::error(span, "Use 'const' instead").with_suggestion(
+            span,
+            "const".to_string(),
+            "Replace with 'const'",
+        );
 
         assert_eq!(diag.suggestions.len(), 1);
         assert_eq!(diag.suggestions[0].replacement, "const");
@@ -764,11 +778,7 @@ mod tests {
         // Check all codes are unique
         for code in all_codes {
             let key = (code.prefix, code.code);
-            assert!(
-                codes.insert(key),
-                "Duplicate error code: {}",
-                code.as_str()
-            );
+            assert!(codes.insert(key), "Duplicate error code: {}", code.as_str());
         }
     }
 
@@ -777,8 +787,16 @@ mod tests {
         use super::error_codes::*;
 
         let span = Span::new(0, 5, 1, 1);
-        let diag = Diagnostic::error_with_code(span, TYPE_MISMATCH, "Type 'string' is not assignable to type 'number'")
-            .with_suggestion(span, "tonumber(value)".to_string(), "Convert to number using tonumber()");
+        let diag = Diagnostic::error_with_code(
+            span,
+            TYPE_MISMATCH,
+            "Type 'string' is not assignable to type 'number'",
+        )
+        .with_suggestion(
+            span,
+            "tonumber(value)".to_string(),
+            "Convert to number using tonumber()",
+        );
 
         assert_eq!(diag.code, Some(TYPE_MISMATCH));
         assert_eq!(diag.code.unwrap().as_str(), "E3001");
@@ -793,12 +811,19 @@ mod tests {
         let error_span = Span::new(10, 15, 2, 1);
         let decl_span = Span::new(0, 5, 1, 1);
 
-        let diag = Diagnostic::error_with_code(error_span, DUPLICATE_DECLARATION, "Duplicate declaration of 'x'")
-            .with_related(decl_span, "Previously declared here");
+        let diag = Diagnostic::error_with_code(
+            error_span,
+            DUPLICATE_DECLARATION,
+            "Duplicate declaration of 'x'",
+        )
+        .with_related(decl_span, "Previously declared here");
 
         assert_eq!(diag.code, Some(DUPLICATE_DECLARATION));
         assert_eq!(diag.code.unwrap().as_str(), "E3003");
         assert_eq!(diag.related_information.len(), 1);
-        assert_eq!(diag.related_information[0].message, "Previously declared here");
+        assert_eq!(
+            diag.related_information[0].message,
+            "Previously declared here"
+        );
     }
 }

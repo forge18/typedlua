@@ -25,6 +25,17 @@ pub enum StrictLevel {
     Error,
 }
 
+/// Module code generation mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ModuleMode {
+    /// Generate separate files with require() calls (default)
+    #[default]
+    Require,
+    /// Bundle all modules into a single file
+    Bundle,
+}
+
 /// Compiler options that control type checking and code generation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -49,14 +60,6 @@ pub struct CompilerOptions {
     #[serde(default)]
     pub target: LuaVersion,
 
-    /// Enable OOP features (default: true)
-    #[serde(default = "default_true")]
-    pub enable_oop: bool,
-
-    /// Enable functional programming features (default: true)
-    #[serde(default = "default_true")]
-    pub enable_fp: bool,
-
     /// Enable decorator syntax (default: true)
     #[serde(default = "default_true")]
     pub enable_decorators: bool,
@@ -64,6 +67,10 @@ pub struct CompilerOptions {
     /// Allow importing non-typed Lua files (default: true)
     #[serde(default = "default_true")]
     pub allow_non_typed_lua: bool,
+
+    /// Copy plain .lua files to output directory during compilation (default: false)
+    #[serde(default)]
+    pub copy_lua_to_output: bool,
 
     /// Output directory for compiled files
     #[serde(default)]
@@ -84,10 +91,26 @@ pub struct CompilerOptions {
     /// Pretty-print diagnostics (default: true)
     #[serde(default = "default_true")]
     pub pretty: bool,
+
+    /// Module code generation mode (default: require)
+    #[serde(default)]
+    pub module_mode: ModuleMode,
+
+    /// Module search paths for package imports
+    #[serde(default = "default_module_paths")]
+    pub module_paths: Vec<String>,
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_module_paths() -> Vec<String> {
+    vec![
+        "./?.tl".to_string(),
+        "./lua_modules/?.tl".to_string(),
+        "./lua_modules/?/init.tl".to_string(),
+    ]
 }
 
 impl Default for CompilerOptions {
@@ -98,15 +121,16 @@ impl Default for CompilerOptions {
             no_implicit_unknown: false,
             no_explicit_unknown: false,
             target: LuaVersion::Lua54,
-            enable_oop: true,
-            enable_fp: true,
             enable_decorators: true,
             allow_non_typed_lua: true,
+            copy_lua_to_output: false,
             out_dir: None,
             out_file: None,
             source_map: false,
             no_emit: false,
             pretty: true,
+            module_mode: ModuleMode::Require,
+            module_paths: default_module_paths(),
         }
     }
 }
@@ -179,17 +203,14 @@ impl CompilerConfig {
         if let Some(target) = overrides.target {
             self.compiler_options.target = target;
         }
-        if let Some(enable_oop) = overrides.enable_oop {
-            self.compiler_options.enable_oop = enable_oop;
-        }
-        if let Some(enable_fp) = overrides.enable_fp {
-            self.compiler_options.enable_fp = enable_fp;
-        }
         if let Some(enable_decorators) = overrides.enable_decorators {
             self.compiler_options.enable_decorators = enable_decorators;
         }
         if let Some(allow_non_typed_lua) = overrides.allow_non_typed_lua {
             self.compiler_options.allow_non_typed_lua = allow_non_typed_lua;
+        }
+        if let Some(copy_lua_to_output) = overrides.copy_lua_to_output {
+            self.compiler_options.copy_lua_to_output = copy_lua_to_output;
         }
         if let Some(ref out_dir) = overrides.out_dir {
             self.compiler_options.out_dir = Some(out_dir.clone());
@@ -206,6 +227,12 @@ impl CompilerConfig {
         if let Some(pretty) = overrides.pretty {
             self.compiler_options.pretty = pretty;
         }
+        if let Some(module_mode) = overrides.module_mode {
+            self.compiler_options.module_mode = module_mode;
+        }
+        if let Some(ref module_paths) = overrides.module_paths {
+            self.compiler_options.module_paths = module_paths.clone();
+        }
     }
 }
 
@@ -218,15 +245,16 @@ pub struct CliOverrides {
     pub no_implicit_unknown: Option<bool>,
     pub no_explicit_unknown: Option<bool>,
     pub target: Option<LuaVersion>,
-    pub enable_oop: Option<bool>,
-    pub enable_fp: Option<bool>,
     pub enable_decorators: Option<bool>,
     pub allow_non_typed_lua: Option<bool>,
+    pub copy_lua_to_output: Option<bool>,
     pub out_dir: Option<String>,
     pub out_file: Option<String>,
     pub source_map: Option<bool>,
     pub no_emit: Option<bool>,
     pub pretty: Option<bool>,
+    pub module_mode: Option<ModuleMode>,
+    pub module_paths: Option<Vec<String>>,
 }
 
 #[cfg(test)]
@@ -237,7 +265,6 @@ mod tests {
     fn test_default_config() {
         let config = CompilerConfig::default();
         assert!(config.compiler_options.strict_null_checks);
-        assert!(config.compiler_options.enable_oop);
         assert_eq!(config.compiler_options.target, LuaVersion::Lua54);
     }
 
@@ -253,49 +280,49 @@ mod tests {
         let yaml = r#"
 compilerOptions:
   target: "5.3"
-  enableOop: false
+  enableDecorators: false
 "#;
         let config: CompilerConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.compiler_options.target, LuaVersion::Lua53);
-        assert!(!config.compiler_options.enable_oop);
+        assert!(!config.compiler_options.enable_decorators);
     }
 
     #[test]
     fn test_config_merge_overrides_file() {
         let mut config = CompilerConfig::default();
-        // Default has Lua54 and enableOop = true
+        // Default has Lua54 and strict_null_checks = true
         assert_eq!(config.compiler_options.target, LuaVersion::Lua54);
-        assert!(config.compiler_options.enable_oop);
+        assert!(config.compiler_options.strict_null_checks);
 
         // CLI overrides both
         let overrides = CliOverrides {
             target: Some(LuaVersion::Lua51),
-            enable_oop: Some(false),
+            strict_null_checks: Some(false),
             ..Default::default()
         };
 
         config.merge(&overrides);
 
         assert_eq!(config.compiler_options.target, LuaVersion::Lua51);
-        assert!(!config.compiler_options.enable_oop);
+        assert!(!config.compiler_options.strict_null_checks);
     }
 
     #[test]
     fn test_config_merge_partial_overrides() {
         let mut config = CompilerConfig::default();
         assert!(config.compiler_options.strict_null_checks);
-        assert!(config.compiler_options.enable_oop);
+        assert!(config.compiler_options.enable_decorators);
 
         // Only override one field
         let overrides = CliOverrides {
-            enable_oop: Some(false),
+            enable_decorators: Some(false),
             ..Default::default()
         };
 
         config.merge(&overrides);
 
         // This field was overridden
-        assert!(!config.compiler_options.enable_oop);
+        assert!(!config.compiler_options.enable_decorators);
         // This field remains from file/default
         assert!(config.compiler_options.strict_null_checks);
     }
@@ -304,14 +331,17 @@ compilerOptions:
     fn test_config_merge_empty_overrides() {
         let mut config = CompilerConfig::default();
         let original_target = config.compiler_options.target;
-        let original_oop = config.compiler_options.enable_oop;
+        let original_decorators = config.compiler_options.enable_decorators;
 
         // Empty overrides shouldn't change anything
         let overrides = CliOverrides::default();
         config.merge(&overrides);
 
         assert_eq!(config.compiler_options.target, original_target);
-        assert_eq!(config.compiler_options.enable_oop, original_oop);
+        assert_eq!(
+            config.compiler_options.enable_decorators,
+            original_decorators
+        );
     }
 
     #[test]

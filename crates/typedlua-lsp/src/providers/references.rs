@@ -1,8 +1,11 @@
-use crate::document::Document;
+use crate::document::{Document, DocumentManager};
+use lsp_types::{Uri, *};
 use std::sync::Arc;
-use lsp_types::{*, Uri};
+use typedlua_core::ast::{
+    expression::{Expression, ExpressionKind},
+    statement::Statement,
+};
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
-use typedlua_core::ast::{statement::Statement, expression::{Expression, ExpressionKind}};
 use typedlua_core::{Lexer, Parser, Span};
 
 /// Provides find-references functionality
@@ -20,6 +23,7 @@ impl ReferencesProvider {
         document: &Document,
         position: Position,
         include_declaration: bool,
+        document_manager: &DocumentManager,
     ) -> Option<Vec<Location>> {
         // Get the word at the current position
         let word = self.get_word_at_position(document, position)?;
@@ -32,7 +36,7 @@ impl ReferencesProvider {
         let mut parser = Parser::new(tokens, handler);
         let ast = parser.parse().ok()?;
 
-        // Find all references to this symbol
+        // Find all references in the current file
         let mut references = Vec::new();
         self.find_references_in_statements(&ast.statements, &word, &mut references);
 
@@ -43,8 +47,8 @@ impl ReferencesProvider {
             }
         }
 
-        // Convert spans to locations
-        let locations: Vec<Location> = references
+        // Convert spans to locations (current file)
+        let mut locations: Vec<Location> = references
             .into_iter()
             .map(|span| Location {
                 uri: uri.clone(),
@@ -52,7 +56,255 @@ impl ReferencesProvider {
             })
             .collect();
 
+        // Check if this symbol is exported from current file
+        // If so, search for references in files that import it
+        if self.is_symbol_exported(&ast.statements, &word) {
+            if let Some(module_id) = &document.module_id {
+                self.search_references_in_importing_files(
+                    module_id,
+                    &word,
+                    document_manager,
+                    &mut locations,
+                );
+            }
+        }
+
+        // Check if this symbol is imported from another file
+        // If so, also search for references in that file
+        if let Some((source_uri, exported_name)) =
+            self.find_import_source(&ast.statements, &word, document, document_manager)
+        {
+            // Search references in the source file
+            if let Some(source_doc) = document_manager.get(&source_uri) {
+                let mut source_refs = Vec::new();
+
+                // Parse source document
+                let handler = Arc::new(CollectingDiagnosticHandler::new());
+                let mut lexer = Lexer::new(&source_doc.text, handler.clone());
+                if let Ok(tokens) = lexer.tokenize() {
+                    let mut parser = Parser::new(tokens, handler);
+                    if let Ok(ast) = parser.parse() {
+                        self.find_references_in_statements(
+                            &ast.statements,
+                            &exported_name,
+                            &mut source_refs,
+                        );
+
+                        // Include declaration in source file
+                        if include_declaration {
+                            if let Some(decl_span) =
+                                self.find_declaration(&ast.statements, &exported_name)
+                            {
+                                source_refs.push(decl_span);
+                            }
+                        }
+
+                        // Convert to locations
+                        for span in source_refs {
+                            locations.push(Location {
+                                uri: source_uri.clone(),
+                                range: span_to_range(&span),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
         Some(locations)
+    }
+
+    /// Check if a symbol is exported from the file
+    fn is_symbol_exported(&self, statements: &[Statement], symbol_name: &str) -> bool {
+        use typedlua_core::ast::statement::ExportKind;
+
+        for stmt in statements {
+            if let Statement::Export(export_decl) = stmt {
+                match &export_decl.kind {
+                    ExportKind::Declaration(decl) => {
+                        if self.get_declaration_name_span(decl, symbol_name).is_some() {
+                            return true;
+                        }
+                    }
+                    ExportKind::Named {
+                        specifiers,
+                        source: _,
+                    } => {
+                        for spec in specifiers {
+                            let exported_name = spec.exported.as_ref().unwrap_or(&spec.local);
+                            if exported_name.node == symbol_name || spec.local.node == symbol_name {
+                                return true;
+                            }
+                        }
+                    }
+                    ExportKind::Default(_) if symbol_name == "default" => {
+                        return true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        false
+    }
+
+    /// Get the declaration name span from a statement
+    fn get_declaration_name_span(&self, stmt: &Statement, name: &str) -> Option<Span> {
+        use typedlua_core::ast::pattern::Pattern;
+
+        match stmt {
+            Statement::Variable(var_decl) => {
+                if let Pattern::Identifier(ident) = &var_decl.pattern {
+                    if ident.node == name {
+                        return Some(ident.span);
+                    }
+                }
+            }
+            Statement::Function(func_decl) => {
+                if func_decl.name.node == name {
+                    return Some(func_decl.name.span);
+                }
+            }
+            Statement::Class(class_decl) => {
+                if class_decl.name.node == name {
+                    return Some(class_decl.name.span);
+                }
+            }
+            Statement::Interface(interface_decl) => {
+                if interface_decl.name.node == name {
+                    return Some(interface_decl.name.span);
+                }
+            }
+            Statement::TypeAlias(type_decl) => {
+                if type_decl.name.node == name {
+                    return Some(type_decl.name.span);
+                }
+            }
+            Statement::Enum(enum_decl) => {
+                if enum_decl.name.node == name {
+                    return Some(enum_decl.name.span);
+                }
+            }
+            _ => {}
+        }
+        None
+    }
+
+    /// Search for references in files that import from the current module
+    fn search_references_in_importing_files(
+        &self,
+        module_id: &typedlua_core::module_resolver::ModuleId,
+        symbol_name: &str,
+        document_manager: &DocumentManager,
+        locations: &mut Vec<Location>,
+    ) {
+        // Use symbol index to quickly find all files that import this symbol
+        let importing_uris = document_manager
+            .symbol_index()
+            .get_importers(module_id, symbol_name);
+
+        // For each importing file, find references to the local name
+        for uri in importing_uris {
+            if let Some(doc) = document_manager.get(&uri) {
+                // Get the document's module ID
+                if let Some(doc_module_id) = &doc.module_id {
+                    // Use symbol index to get import info
+                    if let Some(imports) = document_manager
+                        .symbol_index()
+                        .get_imports(doc_module_id, symbol_name)
+                    {
+                        for import_info in imports {
+                            // Check if this import is from our source module
+                            if let Some(source_module_id) =
+                                document_manager.uri_to_module_id(&import_info.source_uri)
+                            {
+                                if source_module_id == module_id
+                                    && import_info.imported_name == symbol_name
+                                {
+                                    // Parse the document to find references
+                                    if let Some(ast) = doc.get_or_parse_ast() {
+                                        let mut refs = Vec::new();
+                                        self.find_references_in_statements(
+                                            &ast.statements,
+                                            &import_info.local_name,
+                                            &mut refs,
+                                        );
+
+                                        // Convert to locations
+                                        for span in refs {
+                                            locations.push(Location {
+                                                uri: uri.clone(),
+                                                range: span_to_range(&span),
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Find the source file and exported name for an imported symbol
+    fn find_import_source(
+        &self,
+        statements: &[Statement],
+        symbol_name: &str,
+        current_document: &Document,
+        document_manager: &DocumentManager,
+    ) -> Option<(Uri, String)> {
+        use typedlua_core::ast::statement::ImportClause;
+
+        for stmt in statements {
+            if let Statement::Import(import_decl) = stmt {
+                let import_source = &import_decl.source;
+
+                // Check if this import contains our symbol
+                let exported_name = match &import_decl.clause {
+                    ImportClause::Named(specs) => specs.iter().find_map(|spec| {
+                        let local_name = spec.local.as_ref().unwrap_or(&spec.imported);
+                        if local_name.node == symbol_name {
+                            Some(spec.imported.node.clone())
+                        } else {
+                            None
+                        }
+                    }),
+                    ImportClause::Default(ident) => {
+                        if ident.node == symbol_name {
+                            Some("default".to_string())
+                        } else {
+                            None
+                        }
+                    }
+                    ImportClause::Namespace(ident) => {
+                        if ident.node == symbol_name {
+                            None // Skip namespace imports for now
+                        } else {
+                            None
+                        }
+                    }
+                    ImportClause::TypeOnly(_) => None,
+                };
+
+                if let Some(exported_name) = exported_name {
+                    // Resolve the import path
+                    if let Some(module_id) = &current_document.module_id {
+                        if let Ok(target_module_id) = document_manager
+                            .module_resolver()
+                            .resolve(import_source, module_id.path())
+                        {
+                            if let Some(target_uri) =
+                                document_manager.module_id_to_uri(&target_module_id)
+                            {
+                                return Some((target_uri.clone(), exported_name));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Find the declaration span for a given symbol name
@@ -101,7 +353,12 @@ impl ReferencesProvider {
     }
 
     /// Find all references to a symbol by traversing the AST
-    fn find_references_in_statements(&self, statements: &[Statement], name: &str, refs: &mut Vec<Span>) {
+    fn find_references_in_statements(
+        &self,
+        statements: &[Statement],
+        name: &str,
+        refs: &mut Vec<Span>,
+    ) {
         for stmt in statements {
             self.find_references_in_statement(stmt, name, refs);
         }
@@ -259,6 +516,7 @@ impl ReferencesProvider {
     }
 
     /// Provide document highlights for the symbol at the given position
+    #[allow(dead_code)]
     pub fn provide_highlights(
         &self,
         document: &Document,

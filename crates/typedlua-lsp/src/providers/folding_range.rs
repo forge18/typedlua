@@ -1,5 +1,5 @@
 use crate::document::Document;
-use lsp_types::{*, Uri};
+use lsp_types::*;
 
 /// Provides folding ranges for code sections (functions, blocks, comments)
 pub struct FoldingRangeProvider;
@@ -13,8 +13,6 @@ impl FoldingRangeProvider {
     pub fn provide(&self, document: &Document) -> Vec<FoldingRange> {
         let mut ranges = Vec::new();
 
-        
-        
         //   - Function bodies
         //   - if/then/else blocks
         //   - while/for loops
@@ -171,11 +169,10 @@ mod tests {
     fn test_function_folding() {
         let provider = FoldingRangeProvider::new();
 
-        let doc = Document {
-            text: "function foo()\n    local x = 1\n    return x\nend".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test(
+            "function foo()\n    local x = 1\n    return x\nend".to_string(),
+            1,
+        );
 
         let ranges = provider.provide(&doc);
 
@@ -193,11 +190,10 @@ mod tests {
     fn test_if_statement_folding() {
         let provider = FoldingRangeProvider::new();
 
-        let doc = Document {
-            text: "if condition then\n    do_something()\nelse\n    do_default()\nend".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test(
+            "if condition then\n    do_something()\nelse\n    do_default()\nend".to_string(),
+            1,
+        );
 
         let ranges = provider.provide(&doc);
 
@@ -209,11 +205,10 @@ mod tests {
     fn test_table_literal_folding() {
         let provider = FoldingRangeProvider::new();
 
-        let doc = Document {
-            text: "local t = {\n    x = 1,\n    y = 2,\n    z = 3\n}".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test(
+            "local t = {\n    x = 1,\n    y = 2,\n    z = 3\n}".to_string(),
+            1,
+        );
 
         let ranges = provider.provide(&doc);
 
@@ -230,11 +225,10 @@ mod tests {
     fn test_multiline_comment_folding() {
         let provider = FoldingRangeProvider::new();
 
-        let doc = Document {
-            text: "--[[\n  This is a long comment\n  that spans multiple lines\n]]".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test(
+            "--[[\n  This is a long comment\n  that spans multiple lines\n]]".to_string(),
+            1,
+        );
 
         let ranges = provider.provide(&doc);
 
@@ -252,11 +246,11 @@ mod tests {
     fn test_consecutive_single_line_comments() {
         let provider = FoldingRangeProvider::new();
 
-        let doc = Document {
-            text: "-- Comment line 1\n-- Comment line 2\n-- Comment line 3\n-- Comment line 4".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test(
+            "-- Comment line 1\n-- Comment line 2\n-- Comment line 3\n-- Comment line 4"
+                .to_string(),
+            1,
+        );
 
         let ranges = provider.provide(&doc);
 
@@ -273,11 +267,7 @@ mod tests {
     fn test_nested_blocks() {
         let provider = FoldingRangeProvider::new();
 
-        let doc = Document {
-            text: "function outer()\n    if condition then\n        for i = 1, 10 do\n            print(i)\n        end\n    end\nend".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("function outer()\n    if condition then\n        for i = 1, 10 do\n            print(i)\n        end\n    end\nend".to_string(), 1);
 
         let ranges = provider.provide(&doc);
 
@@ -288,10 +278,16 @@ mod tests {
         for (i, range1) in ranges.iter().enumerate() {
             for range2 in ranges.iter().skip(i + 1) {
                 // Either completely nested or completely separate
-                let nested = (range1.start_line <= range2.start_line && range1.end_line >= range2.end_line)
-                    || (range2.start_line <= range1.start_line && range2.end_line >= range1.end_line);
-                let separate = range1.end_line < range2.start_line || range2.end_line < range1.start_line;
-                assert!(nested || separate, "Ranges should be nested or separate, not overlapping");
+                let nested = (range1.start_line <= range2.start_line
+                    && range1.end_line >= range2.end_line)
+                    || (range2.start_line <= range1.start_line
+                        && range2.end_line >= range1.end_line);
+                let separate =
+                    range1.end_line < range2.start_line || range2.end_line < range1.start_line;
+                assert!(
+                    nested || separate,
+                    "Ranges should be nested or separate, not overlapping"
+                );
             }
         }
     }

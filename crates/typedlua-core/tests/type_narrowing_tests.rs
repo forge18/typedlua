@@ -1,24 +1,31 @@
+use std::sync::Arc;
 use typedlua_core::config::CompilerOptions;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::lexer::Lexer;
 use typedlua_core::parser::Parser;
 use typedlua_core::typechecker::TypeChecker;
-use std::sync::Arc;
 
 fn type_check(source: &str) -> Result<(), String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
 
     // Lex
     let mut lexer = Lexer::new(source, handler.clone());
-    let tokens = lexer.tokenize().map_err(|e| format!("Lexing failed: {:?}", e))?;
+    let tokens = lexer
+        .tokenize()
+        .map_err(|e| format!("Lexing failed: {:?}", e))?;
 
     // Parse
     let mut parser = Parser::new(tokens, handler.clone());
-    let program = parser.parse().map_err(|e| format!("Parsing failed: {:?}", e))?;
+    let program = parser
+        .parse()
+        .map_err(|e| format!("Parsing failed: {:?}", e))?;
 
     // Type check
-    let mut type_checker = TypeChecker::new(handler.clone()).with_options(CompilerOptions::default());
-    type_checker.check_program(&program).map_err(|e| e.message)?;
+    let mut type_checker =
+        TypeChecker::new(handler.clone()).with_options(CompilerOptions::default());
+    type_checker
+        .check_program(&program)
+        .map_err(|e| e.message)?;
 
     Ok(())
 }
@@ -38,7 +45,10 @@ fn test_literal_narrowing_number() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Literal pattern should narrow number to literal type");
+    assert!(
+        result.is_ok(),
+        "Literal pattern should narrow number to literal type"
+    );
 }
 
 #[test]
@@ -53,7 +63,10 @@ fn test_literal_narrowing_string() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Literal pattern should narrow string to literal type");
+    assert!(
+        result.is_ok(),
+        "Literal pattern should narrow string to literal type"
+    );
 }
 
 #[test]
@@ -67,7 +80,10 @@ fn test_literal_narrowing_boolean() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Literal pattern should narrow boolean to literal type");
+    assert!(
+        result.is_ok(),
+        "Literal pattern should narrow boolean to literal type"
+    );
 }
 
 // ============================================================================
@@ -86,7 +102,10 @@ fn test_union_narrowing_with_literals() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Union of literals should narrow to each literal type");
+    assert!(
+        result.is_ok(),
+        "Union of literals should narrow to each literal type"
+    );
 }
 
 #[test]
@@ -101,7 +120,10 @@ fn test_union_narrowing_number_string() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Union of number and string should narrow with literals");
+    assert!(
+        result.is_ok(),
+        "Union of number and string should narrow with literals"
+    );
 }
 
 #[test]
@@ -116,7 +138,10 @@ fn test_union_narrowing_with_array_pattern() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Array pattern should narrow union to array type");
+    assert!(
+        result.is_ok(),
+        "Array pattern should narrow union to array type"
+    );
 }
 
 #[test]
@@ -130,7 +155,10 @@ fn test_union_narrowing_with_object_pattern() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Object pattern should extract and use properties");
+    assert!(
+        result.is_ok(),
+        "Object pattern should extract and use properties"
+    );
 }
 
 // ============================================================================
@@ -147,7 +175,10 @@ fn test_object_pattern_binds_narrowed_properties() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Object pattern should bind properties with correct types");
+    assert!(
+        result.is_ok(),
+        "Object pattern should bind properties with correct types"
+    );
 }
 
 #[test]
@@ -163,7 +194,10 @@ fn test_discriminated_union_narrowing() {
 
     let result = type_check(source);
     // This tests object pattern with guard narrowing
-    assert!(result.is_ok(), "Object pattern with guard should narrow correctly");
+    assert!(
+        result.is_ok(),
+        "Object pattern with guard should narrow correctly"
+    );
 }
 
 // ============================================================================
@@ -200,7 +234,10 @@ fn test_tuple_pattern_narrowing() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Array pattern should narrow array type with element access");
+    assert!(
+        result.is_ok(),
+        "Array pattern should narrow array type with element access"
+    );
 }
 
 // ============================================================================
@@ -217,7 +254,10 @@ fn test_nested_object_pattern_narrowing() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Nested object pattern should preserve nested type information");
+    assert!(
+        result.is_ok(),
+        "Nested object pattern should preserve nested type information"
+    );
 }
 
 #[test]
@@ -231,7 +271,10 @@ fn test_nested_array_pattern_narrowing() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Nested array pattern should narrow nested array types");
+    assert!(
+        result.is_ok(),
+        "Nested array pattern should narrow nested array types"
+    );
 }
 
 // ============================================================================
@@ -248,7 +291,10 @@ fn test_identifier_pattern_no_narrowing() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Identifier pattern should not narrow type (keeps union)");
+    assert!(
+        result.is_ok(),
+        "Identifier pattern should not narrow type (keeps union)"
+    );
 }
 
 #[test]
@@ -281,7 +327,10 @@ fn test_multiple_union_members_narrowing() {
 
     let result = type_check(source);
     // This tests object pattern with multiple properties and guards
-    assert!(result.is_ok(), "Object pattern with guards should work correctly");
+    assert!(
+        result.is_ok(),
+        "Object pattern with guards should work correctly"
+    );
 }
 
 #[test]
@@ -295,7 +344,10 @@ fn test_nullable_type_narrowing() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Nullable type should narrow with nil pattern");
+    assert!(
+        result.is_ok(),
+        "Nullable type should narrow with nil pattern"
+    );
 }
 
 #[test]
@@ -310,7 +362,10 @@ fn test_literal_union_narrowing() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Literal union should narrow to each literal in patterns");
+    assert!(
+        result.is_ok(),
+        "Literal union should narrow to each literal in patterns"
+    );
 }
 
 // ============================================================================
@@ -329,7 +384,10 @@ fn test_narrowing_preserved_in_guard() {
     "#;
 
     let result = type_check(source);
-    assert!(result.is_ok(), "Type narrowing should be available in guard expressions");
+    assert!(
+        result.is_ok(),
+        "Type narrowing should be available in guard expressions"
+    );
 }
 
 #[test]

@@ -1,35 +1,43 @@
+#![allow(clippy::all)]
+#![allow(deprecated)]
+
 mod document;
+mod message_handler;
 mod providers;
+mod symbol_index;
 
 use anyhow::Result;
-use crossbeam_channel::{Receiver, Sender};
 use document::DocumentManager;
-use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId, Response};
-use lsp_types::notification::{
-    DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument, PublishDiagnostics,
-};
-use lsp_types::request::{
-    CodeActionRequest, CodeActionResolveRequest, Completion, DocumentSymbolRequest, Formatting,
-    GotoDefinition, HoverRequest, InlayHintRequest, PrepareRenameRequest, RangeFormatting,
-    References, Rename, SelectionRangeRequest, SemanticTokensFullRequest, SignatureHelpRequest,
-    WorkspaceSymbolRequest,
-};
-use lsp_types::{*, Uri};
-use providers::{
-    CodeActionsProvider, CompletionProvider, DefinitionProvider, DiagnosticsProvider,
-    FoldingRangeProvider, FormattingProvider, HoverProvider, InlayHintsProvider,
-    ReferencesProvider, RenameProvider, SelectionRangeProvider, SemanticTokensProvider,
-    SignatureHelpProvider, SymbolsProvider,
-};
+use lsp_server::{Connection, Message, Notification, Response};
+use lsp_types::*;
+use message_handler::{LspConnection, MessageHandler};
 use std::error::Error;
+use std::path::PathBuf;
+use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
+use typedlua_core::config::CompilerOptions;
+use typedlua_core::fs::RealFileSystem;
+use typedlua_core::module_resolver::{ModuleConfig, ModuleRegistry, ModuleResolver};
+
+// Implement LspConnection for the real lsp_server::Connection
+struct ConnectionWrapper<'a>(&'a Connection);
+
+impl LspConnection for ConnectionWrapper<'_> {
+    fn send_response(&self, response: Response) -> Result<()> {
+        self.0.sender.send(Message::Response(response))?;
+        Ok(())
+    }
+
+    fn send_notification(&self, notification: Notification) -> Result<()> {
+        self.0.sender.send(Message::Notification(notification))?;
+        Ok(())
+    }
+}
 
 fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     // Initialize tracing for LSP server
     tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::from_default_env().add_directive(tracing::Level::INFO.into()),
-        )
+        .with_env_filter(EnvFilter::from_default_env().add_directive(tracing::Level::INFO.into()))
         .with_writer(std::io::stderr) // LSP uses stdout for protocol, log to stderr
         .init();
 
@@ -64,17 +72,15 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         document_highlight_provider: Some(OneOf::Left(true)),
         document_symbol_provider: Some(OneOf::Left(true)),
         workspace_symbol_provider: Some(OneOf::Left(true)),
-        code_action_provider: Some(CodeActionProviderCapability::Options(
-            CodeActionOptions {
-                code_action_kinds: Some(vec![
-                    CodeActionKind::QUICKFIX,
-                    CodeActionKind::REFACTOR,
-                    CodeActionKind::SOURCE_ORGANIZE_IMPORTS,
-                ]),
-                resolve_provider: Some(false),
-                work_done_progress_options: WorkDoneProgressOptions::default(),
-            },
-        )),
+        code_action_provider: Some(CodeActionProviderCapability::Options(CodeActionOptions {
+            code_action_kinds: Some(vec![
+                CodeActionKind::QUICKFIX,
+                CodeActionKind::REFACTOR,
+                CodeActionKind::SOURCE_ORGANIZE_IMPORTS,
+            ]),
+            resolve_provider: Some(true),
+            work_done_progress_options: WorkDoneProgressOptions::default(),
+        })),
         rename_provider: Some(OneOf::Right(RenameOptions {
             prepare_provider: Some(true),
             work_done_progress_options: WorkDoneProgressOptions::default(),
@@ -116,10 +122,15 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         )),
         inlay_hint_provider: Some(OneOf::Right(InlayHintServerCapabilities::Options(
             InlayHintOptions {
-                resolve_provider: Some(false),
+                resolve_provider: Some(true),
                 work_done_progress_options: WorkDoneProgressOptions::default(),
             },
         ))),
+        document_on_type_formatting_provider: Some(DocumentOnTypeFormattingOptions {
+            first_trigger_character: "d".to_string(), // Trigger when typing 'end'
+            more_trigger_character: Some(vec![]),
+        }),
+        folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
         ..Default::default()
     })
     .unwrap();
@@ -137,21 +148,32 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     Ok(())
 }
 
-fn main_loop(connection: Connection, _params: InitializeParams) -> Result<()> {
-    let mut document_manager = DocumentManager::new();
-    let diagnostics_provider = DiagnosticsProvider::new();
-    let completion_provider = CompletionProvider::new();
-    let hover_provider = HoverProvider::new();
-    let definition_provider = DefinitionProvider::new();
-    let references_provider = ReferencesProvider::new();
-    let rename_provider = RenameProvider::new();
-    let symbols_provider = SymbolsProvider::new();
-    let formatting_provider = FormattingProvider::new();
-    let code_actions_provider = CodeActionsProvider::new();
-    let signature_help_provider = SignatureHelpProvider::new();
-    let inlay_hints_provider = InlayHintsProvider::new();
-    let selection_range_provider = SelectionRangeProvider::new();
-    let semantic_tokens_provider = SemanticTokensProvider::new();
+fn main_loop(connection: Connection, params: InitializeParams) -> Result<()> {
+    // Get workspace root from initialization params
+    #[allow(deprecated)] // root_uri is deprecated but still widely used
+    let workspace_root = params
+        .root_uri
+        .and_then(|uri| uri.as_str().strip_prefix("file://").map(PathBuf::from))
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+    tracing::info!("LSP workspace root: {:?}", workspace_root);
+
+    // Initialize module system infrastructure
+    let fs = Arc::new(RealFileSystem);
+    let compiler_options = CompilerOptions::default();
+    let module_config = ModuleConfig::from_compiler_options(&compiler_options, &workspace_root);
+    let module_registry = Arc::new(ModuleRegistry::new());
+    let module_resolver = Arc::new(ModuleResolver::new(
+        fs,
+        module_config,
+        workspace_root.clone(),
+    ));
+
+    // Create document manager with module system support
+    let mut document_manager =
+        DocumentManager::new(workspace_root, module_registry, module_resolver);
+    let message_handler = MessageHandler::new();
+    let connection_wrapper = ConnectionWrapper(&connection);
 
     for msg in &connection.receiver {
         match msg {
@@ -160,30 +182,13 @@ fn main_loop(connection: Connection, _params: InitializeParams) -> Result<()> {
                     return Ok(());
                 }
 
-                handle_request(
-                    &connection,
-                    req,
-                    &document_manager,
-                    &completion_provider,
-                    &hover_provider,
-                    &definition_provider,
-                    &references_provider,
-                    &rename_provider,
-                    &symbols_provider,
-                    &formatting_provider,
-                    &code_actions_provider,
-                    &signature_help_provider,
-                    &inlay_hints_provider,
-                    &selection_range_provider,
-                    &semantic_tokens_provider,
-                )?;
+                message_handler.handle_request(&connection_wrapper, req, &document_manager)?;
             }
             Message::Notification(not) => {
-                handle_notification(
-                    &connection,
+                message_handler.handle_notification(
+                    &connection_wrapper,
                     not,
                     &mut document_manager,
-                    &diagnostics_provider,
                 )?;
             }
             Message::Response(_resp) => {
@@ -192,387 +197,5 @@ fn main_loop(connection: Connection, _params: InitializeParams) -> Result<()> {
         }
     }
 
-    Ok(())
-}
-
-fn handle_request(
-    connection: &Connection,
-    req: Request,
-    document_manager: &DocumentManager,
-    completion_provider: &CompletionProvider,
-    hover_provider: &HoverProvider,
-    definition_provider: &DefinitionProvider,
-    references_provider: &ReferencesProvider,
-    rename_provider: &RenameProvider,
-    symbols_provider: &SymbolsProvider,
-    formatting_provider: &FormattingProvider,
-    code_actions_provider: &CodeActionsProvider,
-    signature_help_provider: &SignatureHelpProvider,
-    inlay_hints_provider: &InlayHintsProvider,
-    selection_range_provider: &SelectionRangeProvider,
-    semantic_tokens_provider: &SemanticTokensProvider,
-) -> Result<()> {
-    match cast_request::<Completion>(req.clone()) {
-        Ok((id, params)) => {
-            let uri = &params.text_document_position.text_document.uri;
-            let position = params.text_document_position.position;
-
-            let result = document_manager
-                .get(uri)
-                .map(|doc| completion_provider.provide(doc, position))
-                .map(CompletionResponse::Array);
-
-            let response = Response::new_ok(id, result);
-            connection.sender.send(Message::Response(response))?;
-            return Ok(());
-        }
-        Err(req) => req,
-    };
-
-    match cast_request::<HoverRequest>(req.clone()) {
-        Ok((id, params)) => {
-            let uri = &params.text_document_position_params.text_document.uri;
-            let position = params.text_document_position_params.position;
-
-            let result = document_manager
-                .get(uri)
-                .and_then(|doc| hover_provider.provide(doc, position));
-
-            let response = Response::new_ok(id, result);
-            connection.sender.send(Message::Response(response))?;
-            return Ok(());
-        }
-        Err(req) => req,
-    };
-
-    match cast_request::<GotoDefinition>(req.clone()) {
-        Ok((id, params)) => {
-            let uri = &params.text_document_position_params.text_document.uri;
-            let position = params.text_document_position_params.position;
-
-            let result = document_manager
-                .get(uri)
-                .and_then(|doc| definition_provider.provide(uri, doc, position));
-
-            let response = Response::new_ok(id, result);
-            connection.sender.send(Message::Response(response))?;
-            return Ok(());
-        }
-        Err(req) => req,
-    };
-
-    match cast_request::<References>(req.clone()) {
-        Ok((id, params)) => {
-            let uri = &params.text_document_position.text_document.uri;
-            let position = params.text_document_position.position;
-            let include_declaration = params.context.include_declaration;
-
-            let result = document_manager.get(uri).and_then(|doc| {
-                references_provider.provide(uri, doc, position, include_declaration)
-            });
-
-            let response = Response::new_ok(id, result);
-            connection.sender.send(Message::Response(response))?;
-            return Ok(());
-        }
-        Err(req) => req,
-    };
-
-    match cast_request::<PrepareRenameRequest>(req.clone()) {
-        Ok((id, params)) => {
-            let uri = &params.text_document.uri;
-            let position = params.position;
-
-            let result = document_manager
-                .get(uri)
-                .and_then(|doc| rename_provider.prepare(doc, position));
-
-            let response = Response::new_ok(id, result);
-            connection.sender.send(Message::Response(response))?;
-            return Ok(());
-        }
-        Err(req) => req,
-    };
-
-    match cast_request::<Rename>(req.clone()) {
-        Ok((id, params)) => {
-            let uri = &params.text_document_position.text_document.uri;
-            let position = params.text_document_position.position;
-            let new_name = &params.new_name;
-
-            let result = document_manager
-                .get(uri)
-                .and_then(|doc| rename_provider.rename(uri, doc, position, new_name));
-
-            let response = Response::new_ok(id, result);
-            connection.sender.send(Message::Response(response))?;
-            return Ok(());
-        }
-        Err(req) => req,
-    };
-
-    match cast_request::<DocumentSymbolRequest>(req.clone()) {
-        Ok((id, params)) => {
-            let uri = &params.text_document.uri;
-
-            let result = document_manager
-                .get(uri)
-                .map(|doc| symbols_provider.provide(doc))
-                .map(DocumentSymbolResponse::Nested);
-
-            let response = Response::new_ok(id, result);
-            connection.sender.send(Message::Response(response))?;
-            return Ok(());
-        }
-        Err(req) => req,
-    };
-
-    match cast_request::<WorkspaceSymbolRequest>(req.clone()) {
-        Ok((id, params)) => {
-            let symbols = symbols_provider.provide_workspace_symbols(&params.query);
-            let response = Response::new_ok(id, Some(symbols));
-            connection.sender.send(Message::Response(response))?;
-            return Ok(());
-        }
-        Err(req) => req,
-    };
-
-    match cast_request::<Formatting>(req.clone()) {
-        Ok((id, params)) => {
-            let uri = &params.text_document.uri;
-            let options = params.options;
-
-            let result = document_manager
-                .get(uri)
-                .map(|doc| formatting_provider.format_document(doc, options));
-
-            let response = Response::new_ok(id, result);
-            connection.sender.send(Message::Response(response))?;
-            return Ok(());
-        }
-        Err(req) => req,
-    };
-
-    match cast_request::<RangeFormatting>(req.clone()) {
-        Ok((id, params)) => {
-            let uri = &params.text_document.uri;
-            let range = params.range;
-            let options = params.options;
-
-            let result = document_manager
-                .get(uri)
-                .map(|doc| formatting_provider.format_range(doc, range, options));
-
-            let response = Response::new_ok(id, result);
-            connection.sender.send(Message::Response(response))?;
-            return Ok(());
-        }
-        Err(req) => req,
-    };
-
-    match cast_request::<CodeActionRequest>(req.clone()) {
-        Ok((id, params)) => {
-            let uri = &params.text_document.uri;
-            let range = params.range;
-            let context = params.context;
-
-            let result = document_manager
-                .get(uri)
-                .map(|doc| code_actions_provider.provide(uri, doc, range, context));
-
-            let response = Response::new_ok(id, result);
-            connection.sender.send(Message::Response(response))?;
-            return Ok(());
-        }
-        Err(req) => req,
-    };
-
-    match cast_request::<SignatureHelpRequest>(req.clone()) {
-        Ok((id, params)) => {
-            let uri = &params.text_document_position_params.text_document.uri;
-            let position = params.text_document_position_params.position;
-
-            let result = document_manager
-                .get(uri)
-                .and_then(|doc| signature_help_provider.provide(doc, position));
-
-            let response = Response::new_ok(id, result);
-            connection.sender.send(Message::Response(response))?;
-            return Ok(());
-        }
-        Err(req) => req,
-    };
-
-    match cast_request::<InlayHintRequest>(req.clone()) {
-        Ok((id, params)) => {
-            let uri = &params.text_document.uri;
-            let range = params.range;
-
-            let result = document_manager
-                .get(uri)
-                .map(|doc| inlay_hints_provider.provide(doc, range));
-
-            let response = Response::new_ok(id, result);
-            connection.sender.send(Message::Response(response))?;
-            return Ok(());
-        }
-        Err(req) => req,
-    };
-
-    match cast_request::<SelectionRangeRequest>(req.clone()) {
-        Ok((id, params)) => {
-            let uri = &params.text_document.uri;
-            let positions = params.positions;
-
-            let result = document_manager
-                .get(uri)
-                .map(|doc| selection_range_provider.provide(doc, positions));
-
-            let response = Response::new_ok(id, result);
-            connection.sender.send(Message::Response(response))?;
-            return Ok(());
-        }
-        Err(req) => req,
-    };
-
-    match cast_request::<SemanticTokensFullRequest>(req.clone()) {
-        Ok((id, params)) => {
-            let uri = &params.text_document.uri;
-
-            let result = document_manager
-                .get(uri)
-                .map(|doc| semantic_tokens_provider.provide_full(doc))
-                .map(SemanticTokensResult::Tokens);
-
-            let response = Response::new_ok(id, result);
-            connection.sender.send(Message::Response(response))?;
-            return Ok(());
-        }
-        Err(_req) => {
-            // Unknown request, ignore
-        }
-    };
-
-    Ok(())
-}
-
-fn handle_notification(
-    connection: &Connection,
-    not: Notification,
-    document_manager: &mut DocumentManager,
-    diagnostics_provider: &DiagnosticsProvider,
-) -> Result<()> {
-    match cast_notification::<DidOpenTextDocument>(not.clone()) {
-        Ok(params) => {
-            let uri = params.text_document.uri.clone();
-            document_manager.open(params);
-            publish_diagnostics(connection, &uri, document_manager, diagnostics_provider)?;
-            return Ok(());
-        }
-        Err(not) => not,
-    };
-
-    match cast_notification::<DidChangeTextDocument>(not.clone()) {
-        Ok(params) => {
-            let uri = params.text_document.uri.clone();
-            document_manager.change(params);
-            publish_diagnostics(connection, &uri, document_manager, diagnostics_provider)?;
-            return Ok(());
-        }
-        Err(not) => not,
-    };
-
-    match cast_notification::<DidSaveTextDocument>(not.clone()) {
-        Ok(params) => {
-            let uri = params.text_document.uri.clone();
-            document_manager.save(params);
-            publish_diagnostics(connection, &uri, document_manager, diagnostics_provider)?;
-            return Ok(());
-        }
-        Err(not) => not,
-    };
-
-    match cast_notification::<DidCloseTextDocument>(not.clone()) {
-        Ok(params) => {
-            let uri = params.text_document.uri.clone();
-            document_manager.close(params);
-            // Clear diagnostics on close
-            send_notification::<PublishDiagnostics>(
-                connection,
-                PublishDiagnosticsParams {
-                    uri,
-                    diagnostics: vec![],
-                    version: None,
-                },
-            )?;
-            return Ok(());
-        }
-        Err(_not) => {
-            // Unknown notification, ignore
-        }
-    };
-
-    Ok(())
-}
-
-fn publish_diagnostics(
-    connection: &Connection,
-    uri: &Uri,
-    document_manager: &DocumentManager,
-    diagnostics_provider: &DiagnosticsProvider,
-) -> Result<()> {
-    if let Some(document) = document_manager.get(uri) {
-        let diagnostics = diagnostics_provider.provide(document);
-        send_notification::<PublishDiagnostics>(
-            connection,
-            PublishDiagnosticsParams {
-                uri: uri.clone(),
-                diagnostics,
-                version: None,
-            },
-        )?;
-    }
-    Ok(())
-}
-
-fn cast_request<R>(req: Request) -> std::result::Result<(RequestId, R::Params), Request>
-where
-    R: lsp_types::request::Request,
-    R::Params: serde::de::DeserializeOwned,
-{
-    match req.extract(R::METHOD) {
-        Ok(params) => Ok(params),
-        Err(ExtractError::MethodMismatch(req)) => Err(req),
-        Err(ExtractError::JsonError { method, error }) => {
-            tracing::error!("Failed to deserialize request {}: {}", method, error);
-            Err(Request::new(RequestId::from(0), method.to_string(), serde_json::Value::Null))
-        }
-    }
-}
-
-fn cast_notification<N>(
-    not: Notification,
-) -> std::result::Result<N::Params, Notification>
-where
-    N: lsp_types::notification::Notification,
-    N::Params: serde::de::DeserializeOwned,
-{
-    match not.extract(N::METHOD) {
-        Ok(params) => Ok(params),
-        Err(ExtractError::MethodMismatch(not)) => Err(not),
-        Err(ExtractError::JsonError { method, error }) => {
-            tracing::error!("Failed to deserialize notification {}: {}", method, error);
-            Err(Notification::new(method.to_string(), serde_json::Value::Null))
-        }
-    }
-}
-
-fn send_notification<N>(connection: &Connection, params: N::Params) -> Result<()>
-where
-    N: lsp_types::notification::Notification,
-    N::Params: serde::Serialize,
-{
-    let not = Notification::new(N::METHOD.to_string(), params);
-    connection.sender.send(Message::Notification(not))?;
     Ok(())
 }

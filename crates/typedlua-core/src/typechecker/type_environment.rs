@@ -105,7 +105,13 @@ impl TypeEnvironment {
         if self.generic_type_aliases.contains_key(&name) {
             return Err(format!("Generic type alias '{}' already defined", name));
         }
-        self.generic_type_aliases.insert(name, GenericTypeAlias { type_parameters, typ });
+        self.generic_type_aliases.insert(
+            name,
+            GenericTypeAlias {
+                type_parameters,
+                typ,
+            },
+        );
         Ok(())
     }
 
@@ -174,8 +180,18 @@ impl TypeEnvironment {
     pub fn is_utility_type(name: &str) -> bool {
         matches!(
             name,
-            "Partial" | "Required" | "Readonly" | "Record" | "Pick" | "Omit"
-            | "Exclude" | "Extract" | "NonNilable" | "Nilable" | "ReturnType" | "Parameters"
+            "Partial"
+                | "Required"
+                | "Readonly"
+                | "Record"
+                | "Pick"
+                | "Omit"
+                | "Exclude"
+                | "Extract"
+                | "NonNilable"
+                | "Nilable"
+                | "ReturnType"
+                | "Parameters"
         )
     }
 
@@ -223,7 +239,8 @@ mod tests {
             Span::new(0, 0, 0, 0),
         );
 
-        env.register_type_alias("MyNumber".to_string(), typ).unwrap();
+        env.register_type_alias("MyNumber".to_string(), typ)
+            .unwrap();
 
         assert!(env.lookup_type("MyNumber").is_some());
         assert!(env.lookup_type_alias("MyNumber").is_some());
@@ -238,7 +255,8 @@ mod tests {
             Span::new(0, 0, 0, 0),
         );
 
-        env.register_interface("MyInterface".to_string(), typ).unwrap();
+        env.register_interface("MyInterface".to_string(), typ)
+            .unwrap();
 
         assert!(env.lookup_type("MyInterface").is_some());
         assert!(env.lookup_interface("MyInterface").is_some());
@@ -253,7 +271,8 @@ mod tests {
             Span::new(0, 0, 0, 0),
         );
 
-        env.register_type_alias("Foo".to_string(), typ.clone()).unwrap();
+        env.register_type_alias("Foo".to_string(), typ.clone())
+            .unwrap();
         assert!(env.register_type_alias("Foo".to_string(), typ).is_err());
     }
 }

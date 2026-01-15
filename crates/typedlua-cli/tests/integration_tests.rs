@@ -1,0 +1,322 @@
+use assert_cmd::Command;
+use predicates::prelude::*;
+use std::fs;
+use tempfile::TempDir;
+
+// Helper to create typedlua command using the non-deprecated macro approach
+fn typedlua_cmd() -> Command {
+    Command::new(assert_cmd::cargo::cargo_bin!("typedlua"))
+}
+
+/// Test basic compilation of a simple file
+#[test]
+fn test_compile_simple_file() {
+    let temp_dir = TempDir::new().unwrap();
+    let input_file = temp_dir.path().join("test.tl");
+
+    fs::write(
+        &input_file,
+        r#"
+        const x: number = 42
+        const y: string = "hello"
+    "#,
+    )
+    .unwrap();
+
+    typedlua_cmd()
+        .arg(input_file.to_str().unwrap())
+        .assert()
+        .success();
+}
+
+/// Test compilation with type errors
+#[test]
+fn test_compile_with_type_error() {
+    let temp_dir = TempDir::new().unwrap();
+    let input_file = temp_dir.path().join("error.tl");
+
+    fs::write(
+        &input_file,
+        r#"
+        const x: number = "not a number"
+    "#,
+    )
+    .unwrap();
+
+    typedlua_cmd()
+        .arg(input_file.to_str().unwrap())
+        .assert()
+        .failure();
+}
+
+/// Test output directory option
+#[test]
+fn test_output_directory() {
+    let temp_dir = TempDir::new().unwrap();
+    let input_file = temp_dir.path().join("test.tl");
+    let output_dir = temp_dir.path().join("out");
+
+    fs::write(
+        &input_file,
+        r#"
+        const message: string = "hello world"
+        print(message)
+    "#,
+    )
+    .unwrap();
+
+    typedlua_cmd()
+        .arg(input_file.to_str().unwrap())
+        .arg("--out-dir")
+        .arg(output_dir.to_str().unwrap())
+        .assert()
+        .success();
+
+    assert!(output_dir.exists());
+    assert!(output_dir.join("test.lua").exists());
+}
+
+/// Test multiple input files
+#[test]
+fn test_multiple_files() {
+    let temp_dir = TempDir::new().unwrap();
+    let file1 = temp_dir.path().join("file1.tl");
+    let file2 = temp_dir.path().join("file2.tl");
+
+    fs::write(&file1, "const a: number = 1").unwrap();
+    fs::write(&file2, "const b: string = \"test\"").unwrap();
+
+    typedlua_cmd()
+        .arg(file1.to_str().unwrap())
+        .arg(file2.to_str().unwrap())
+        .assert()
+        .success();
+}
+
+/// Test --no-emit flag
+#[test]
+fn test_no_emit_flag() {
+    let temp_dir = TempDir::new().unwrap();
+    let input_file = temp_dir.path().join("test.tl");
+    let output_file = temp_dir.path().join("test.lua");
+
+    fs::write(
+        &input_file,
+        r#"
+        const x: number = 42
+    "#,
+    )
+    .unwrap();
+
+    typedlua_cmd()
+        .arg(input_file.to_str().unwrap())
+        .arg("--no-emit")
+        .assert()
+        .success();
+
+    // Output file should not exist
+    assert!(!output_file.exists());
+}
+
+/// Test Lua 5.1 target
+#[test]
+fn test_lua51_target() {
+    let temp_dir = TempDir::new().unwrap();
+    let input_file = temp_dir.path().join("test.tl");
+
+    fs::write(
+        &input_file,
+        r#"
+        const x: number = 42
+    "#,
+    )
+    .unwrap();
+
+    typedlua_cmd()
+        .arg(input_file.to_str().unwrap())
+        .arg("--target")
+        .arg("5.1")
+        .arg("--no-emit")
+        .assert()
+        .success();
+}
+
+/// Test function compilation
+#[test]
+fn test_function_compilation() {
+    let temp_dir = TempDir::new().unwrap();
+    let input_file = temp_dir.path().join("func.tl");
+    let output_file = temp_dir.path().join("func.lua");
+
+    fs::write(
+        &input_file,
+        r#"
+        function add(a: number, b: number): number
+            return a + b
+        end
+
+        const result: number = add(5, 3)
+    "#,
+    )
+    .unwrap();
+
+    typedlua_cmd()
+        .arg(input_file.to_str().unwrap())
+        .assert()
+        .success();
+
+    let output = fs::read_to_string(&output_file).unwrap();
+    assert!(output.contains("function add"));
+}
+
+/// Test class compilation
+#[test]
+fn test_class_compilation() {
+    let temp_dir = TempDir::new().unwrap();
+    let input_file = temp_dir.path().join("class.tl");
+    let output_file = temp_dir.path().join("class.lua");
+
+    fs::write(
+        &input_file,
+        r#"
+        class Point {
+            public x: number = 0
+            public y: number = 0
+        }
+    "#,
+    )
+    .unwrap();
+
+    typedlua_cmd()
+        .arg(input_file.to_str().unwrap())
+        .assert()
+        .success();
+
+    assert!(output_file.exists());
+}
+
+/// Test interface type checking
+#[test]
+fn test_interface_type_checking() {
+    let temp_dir = TempDir::new().unwrap();
+    let input_file = temp_dir.path().join("interface.tl");
+
+    fs::write(
+        &input_file,
+        r#"
+        interface User {
+            name: string
+            age: number
+        }
+    "#,
+    )
+    .unwrap();
+
+    typedlua_cmd()
+        .arg(input_file.to_str().unwrap())
+        .arg("--no-emit")
+        .assert()
+        .success();
+}
+
+/// Test invalid interface usage
+#[test]
+fn test_invalid_interface() {
+    let temp_dir = TempDir::new().unwrap();
+    let input_file = temp_dir.path().join("bad_interface.tl");
+
+    fs::write(
+        &input_file,
+        r#"
+        interface User {
+            name: string
+            age: number
+        }
+
+        const user: User = {
+            name = "Alice"
+            -- missing age field
+        }
+    "#,
+    )
+    .unwrap();
+
+    typedlua_cmd()
+        .arg(input_file.to_str().unwrap())
+        .arg("--no-emit")
+        .arg("--no-cache") // Disable cache to ensure type error is detected
+        .assert()
+        .failure();
+}
+
+/// Test --version flag
+#[test]
+fn test_version_flag() {
+    typedlua_cmd()
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("typedlua"));
+}
+
+/// Test --help flag
+#[test]
+fn test_help_flag() {
+    typedlua_cmd()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("TypedLua"));
+}
+
+/// Test nonexistent file error
+#[test]
+fn test_nonexistent_file() {
+    typedlua_cmd().arg("nonexistent.tl").assert().failure();
+}
+
+/// Test source map generation
+#[test]
+fn test_source_map_generation() {
+    let temp_dir = TempDir::new().unwrap();
+    let input_file = temp_dir.path().join("test.tl");
+    let source_map_file = temp_dir.path().join("test.lua.map");
+
+    fs::write(
+        &input_file,
+        r#"
+        const x: number = 42
+        const y: string = "hello"
+    "#,
+    )
+    .unwrap();
+
+    typedlua_cmd()
+        .arg(input_file.to_str().unwrap())
+        .arg("--source-map")
+        .assert()
+        .success();
+
+    assert!(source_map_file.exists());
+}
+
+/// Test pretty printing
+#[test]
+fn test_pretty_output() {
+    let temp_dir = TempDir::new().unwrap();
+    let input_file = temp_dir.path().join("test.tl");
+
+    fs::write(
+        &input_file,
+        r#"
+        const x: number = "wrong type"
+    "#,
+    )
+    .unwrap();
+
+    typedlua_cmd()
+        .arg(input_file.to_str().unwrap())
+        .arg("--pretty")
+        .assert()
+        .failure();
+}

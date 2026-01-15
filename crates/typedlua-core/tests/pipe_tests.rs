@@ -1,25 +1,32 @@
+use std::sync::Arc;
+use typedlua_core::codegen::CodeGenerator;
 use typedlua_core::config::CompilerOptions;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::lexer::Lexer;
 use typedlua_core::parser::Parser;
 use typedlua_core::typechecker::TypeChecker;
-use typedlua_core::codegen::CodeGenerator;
-use std::sync::Arc;
 
 fn compile_and_check(source: &str) -> Result<String, String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
 
     // Lex
     let mut lexer = Lexer::new(source, handler.clone());
-    let tokens = lexer.tokenize().map_err(|e| format!("Lexing failed: {:?}", e))?;
+    let tokens = lexer
+        .tokenize()
+        .map_err(|e| format!("Lexing failed: {:?}", e))?;
 
     // Parse
     let mut parser = Parser::new(tokens, handler.clone());
-    let program = parser.parse().map_err(|e| format!("Parsing failed: {:?}", e))?;
+    let program = parser
+        .parse()
+        .map_err(|e| format!("Parsing failed: {:?}", e))?;
 
     // Type check
-    let mut type_checker = TypeChecker::new(handler.clone()).with_options(CompilerOptions::default());
-    type_checker.check_program(&program).map_err(|e| e.message)?;
+    let mut type_checker =
+        TypeChecker::new(handler.clone()).with_options(CompilerOptions::default());
+    type_checker
+        .check_program(&program)
+        .map_err(|e| e.message)?;
 
     // Generate code
     let mut codegen = CodeGenerator::new();
@@ -49,7 +56,11 @@ fn test_simple_pipe() {
             println!("Error: {}", e);
         }
     }
-    assert!(result.is_ok(), "Simple pipe should compile: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Simple pipe should compile: {:?}",
+        result.err()
+    );
     let output = result.unwrap();
 
     // Should generate: double(value)
@@ -66,7 +77,11 @@ fn test_pipe_chain() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Pipe chain should compile: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Pipe chain should compile: {:?}",
+        result.err()
+    );
     let output = result.unwrap();
 
     // Check if pipe chain is working - may be split across multiple assignments
@@ -133,7 +148,11 @@ fn test_pipe_chain_with_calls() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Pipe chain with calls should compile: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Pipe chain with calls should compile: {:?}",
+        result.err()
+    );
     let output = result.unwrap();
 
     // Check if pipe chain with calls is working - may be split across assignments
@@ -170,7 +189,11 @@ fn test_pipe_with_object_method() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Pipe with object function should compile: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Pipe with object function should compile: {:?}",
+        result.err()
+    );
     let output = result.unwrap();
 
     assert!(output.contains("getX(point)"));
@@ -204,7 +227,11 @@ fn test_pipe_type_inference() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Pipe type inference should work: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Pipe type inference should work: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -217,7 +244,11 @@ fn test_pipe_chain_type_inference() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Pipe chain type inference should work: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Pipe chain type inference should work: {:?}",
+        result.err()
+    );
 }
 
 // ============================================================================
@@ -232,7 +263,11 @@ fn test_pipe_with_parenthesized_expression() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Pipe with parenthesized expression should compile: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Pipe with parenthesized expression should compile: {:?}",
+        result.err()
+    );
     let output = result.unwrap();
 
     // Check if pipe with parenthesized expression works - may inline the expression
@@ -249,7 +284,11 @@ fn test_pipe_in_variable_declaration() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Pipe result should be usable: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Pipe result should be usable: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -262,7 +301,11 @@ fn test_multiple_pipes_in_program() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Multiple pipe operations should work: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Multiple pipe operations should work: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -274,7 +317,11 @@ fn test_pipe_with_binary_expression() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Pipe with binary expression should compile: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Pipe with binary expression should compile: {:?}",
+        result.err()
+    );
 }
 
 // ============================================================================
@@ -291,11 +338,17 @@ fn test_pipe_functional_style() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Functional composition should work: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Functional composition should work: {:?}",
+        result.err()
+    );
     let output = result.unwrap();
 
     // Check if pipe chain is working - may be split across assignments
-    assert!(output.contains("increment(3)") || output.contains("double(") || output.contains("square("));
+    assert!(
+        output.contains("increment(3)") || output.contains("double(") || output.contains("square(")
+    );
 }
 
 #[test]
@@ -308,7 +361,11 @@ fn test_pipe_preserves_evaluation_order() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Pipe should preserve evaluation order: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Pipe should preserve evaluation order: {:?}",
+        result.err()
+    );
     let output = result.unwrap();
 
     // value should be first argument
@@ -328,7 +385,11 @@ fn test_pipe_with_const_and_local() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Pipe with const and local should work: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Pipe with const and local should work: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -339,7 +400,11 @@ fn test_pipe_in_return_statement() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Pipe in return statement should work: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Pipe in return statement should work: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -353,5 +418,9 @@ fn test_pipe_data_transformation() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Data transformation pipeline should work: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Data transformation pipeline should work: {:?}",
+        result.err()
+    );
 }

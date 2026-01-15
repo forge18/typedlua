@@ -55,6 +55,30 @@ impl SourceMapBuilder {
         }
     }
 
+    /// Create a new source map builder with multiple source files (for bundle mode)
+    pub fn new_multi_source(source_files: Vec<String>) -> Self {
+        Self {
+            file: None,
+            source_root: None,
+            sources: source_files,
+            sources_content: Vec::new(),
+            names: Vec::new(),
+            mappings: Vec::new(),
+            generated_line: 0,
+            generated_column: 0,
+        }
+    }
+
+    /// Add a source file and return its index
+    pub fn add_source(&mut self, source_file: String) -> usize {
+        if let Some(idx) = self.sources.iter().position(|s| s == &source_file) {
+            idx
+        } else {
+            self.sources.push(source_file);
+            self.sources.len() - 1
+        }
+    }
+
     pub fn set_file(&mut self, file: String) {
         self.file = Some(file);
     }
@@ -69,6 +93,16 @@ impl SourceMapBuilder {
 
     /// Add a mapping from generated position to source position
     pub fn add_mapping(&mut self, source_span: Span, name: Option<String>) {
+        self.add_mapping_with_source(source_span, 0, name);
+    }
+
+    /// Add a mapping from generated position to source position with explicit source index
+    pub fn add_mapping_with_source(
+        &mut self,
+        source_span: Span,
+        source_index: usize,
+        name: Option<String>,
+    ) {
         let name_index = name.map(|n| {
             if let Some(idx) = self.names.iter().position(|existing| existing == &n) {
                 idx
@@ -81,7 +115,7 @@ impl SourceMapBuilder {
         self.mappings.push(Mapping {
             generated_line: self.generated_line,
             generated_column: self.generated_column,
-            source_index: 0, // Always use first source for now
+            source_index,
             source_line: source_span.line as usize,
             source_column: source_span.column as usize,
             name_index,
@@ -162,7 +196,7 @@ impl SourceMapBuilder {
 
             // Name index (optional)
             if let Some(name_idx) = mapping.name_index {
-                let name_index_delta = name_idx as i32 - prev_name_index as i32;
+                let name_index_delta = name_idx as i32 - prev_name_index;
                 result.push_str(&Self::encode_vlq(name_index_delta));
                 prev_name_index = name_idx as i32;
             }
@@ -173,7 +207,8 @@ impl SourceMapBuilder {
 
     /// Encode a single value using VLQ (Variable Length Quantity) Base64 encoding
     fn encode_vlq(value: i32) -> String {
-        const BASE64_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        const BASE64_CHARS: &[u8] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
         let mut vlq = if value < 0 {
             ((-value) << 1) | 1
@@ -211,8 +246,12 @@ impl SourceMap {
     /// Generate the inline source map data URI
     pub fn to_data_uri(&self) -> Result<String, serde_json::Error> {
         let json = serde_json::to_string(self)?;
-        let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, json.as_bytes());
-        Ok(format!("data:application/json;charset=utf-8;base64,{}", encoded))
+        let encoded =
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, json.as_bytes());
+        Ok(format!(
+            "data:application/json;charset=utf-8;base64,{}",
+            encoded
+        ))
     }
 
     /// Generate the source mapping URL comment for Lua
@@ -372,7 +411,10 @@ mod tests {
         let source_map = builder.build();
 
         assert_eq!(source_map.sources_content.len(), 1);
-        assert_eq!(source_map.sources_content[0], Some("const x = 42".to_string()));
+        assert_eq!(
+            source_map.sources_content[0],
+            Some("const x = 42".to_string())
+        );
     }
 
     #[test]

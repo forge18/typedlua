@@ -1,1195 +1,1281 @@
-# TypedLua Implementation TODO
+# TypedLua TODO
 
-**Last Updated:** 2025-01-04
+**Last Updated:** 2026-01-15 (Primary Constructors completed)
 
-This is a comprehensive checklist for implementing TypedLua from start to finish.
-
----
-
-## Phase 0: Foundation (2-3 weeks) ✅ COMPLETED
-
-### Project Setup
-- [x] Create Cargo workspace
-- [x] Set up 3 crates: typedlua-core, typedlua-cli, typedlua-lsp
-- [x] Configure Cargo.toml with all dependencies
-- [x] Set up directory structure (src/{lexer,parser,typechecker,codegen,lsp,cli})
-- [x] Initialize git repository with .gitignore
-- [x] Create README.md
-
-### Core Infrastructure
-- [x] Implement Span struct with source location tracking
-- [x] Implement Diagnostic struct with error/warning support
-- [x] Create DiagnosticLevel enum (Error, Warning, Info)
-- [x] Implement DiagnosticHandler trait
-- [x] Create error types with thiserror
-
-### Dependency Injection
-- [x] Implement Container struct
-- [x] Define FileSystem trait
-- [x] Create real FileSystem implementation
-- [x] Create mock FileSystem for testing
-- [x] Define DiagnosticHandler trait
-- [x] Implement console DiagnosticHandler
-
-### Configuration System
-- [x] Define CompilerConfig struct
-- [x] Define CompilerOptions struct
-- [x] Implement YAML parsing for tlconfig.yaml
-- [x] Add default configuration values
-- [x] Implement config merging (defaults → file → CLI)
-
-### CI/CD
-- [x] Set up GitHub Actions workflow
-- [x] Configure cargo test on push
-- [x] Add cargo fmt check
-- [x] Add cargo clippy check
-- [x] Set up code coverage reporting (codecov or coveralls)
-- [x] Add build status badge to README
-
-### Testing Foundation
-- [x] Set up test directory structure
-- [x] Create test fixtures directory
-- [x] Add insta for snapshot testing
-- [x] Add criterion for benchmarking
-- [x] Write first passing test
+This file tracks implementation tasks for TypedLua. Tasks are organized by priority based on the [Additional Features Design](docs/designs/Additional-Features-Design.md) document.
 
 ---
 
-## Phase 1: Lexer & Parser (3-4 weeks)
+## Phase 1: Core Language Features (Quick Wins)
 
-### Lexer Implementation ✅ COMPLETED
-- [x] Create Token struct with kind and span
-- [x] Define TokenKind enum with all token types
-- [x] Implement Lexer struct with state tracking
-- [x] Tokenize keywords (const, local, function, if, etc.)
-- [x] Tokenize literals (number, string, boolean, nil)
-- [x] Tokenize identifiers
-- [x] Tokenize operators (+, -, *, /, ==, etc.)
-- [x] Tokenize punctuation ({, }, (, ), [, ], etc.)
-- [x] Handle single-line comments (-- Lua-style)
-- [x] Handle multi-line comments (--[[ ]]-- Lua-style)
-- [x] Handle template literals with ${} expressions
-- [x] Track line and column numbers accurately
-- [x] Handle escape sequences in strings
-- [x] Support hex numbers (0x...)
-- [x] Support binary numbers (0b...)
-- [x] Implement proper error reporting
+### 1.1 Override Keyword
+**Effort:** 2-4 hours | **Priority:** P0 | **Status:** ✅ Completed
 
-### Lexer Testing ✅ COMPLETED
-- [x] Test all keyword tokens
-- [x] Test all operator tokens
-- [x] Test number literals (decimal, hex, binary, floats)
-- [x] Test string literals with escapes
-- [x] Test template literals
-- [x] Test comments (single and multi-line)
-- [x] Test error cases (unterminated strings, invalid chars)
-- [x] Snapshot tests for complex files
+- [x] Add `Override` to `TokenKind` enum in lexer
+- [x] Add `is_override: bool` to `MethodDeclaration` AST
+- [x] Parse `override` keyword before method declarations
+- [x] Type checker: Verify parent class exists and has method
+- [x] Type checker: Verify method signatures are compatible
+- [x] Add error for override without parent method
+- [x] Add warning for overriding without `override` keyword (optional)
+- [x] Write unit tests for override validation
+- [x] Update documentation
 
-### Parser - Statements ✅ COMPLETED
-- [x] Create AST types from AST-Structure.md
-- [x] Implement Parser struct with token stream
-- [x] Parse variable declarations (const/local)
-- [x] Parse function declarations
-- [x] Parse if statements with elseif/else
-- [x] Parse while loops
-- [x] Parse for loops (numeric and generic)
-- [x] Parse return statements
-- [x] Parse break/continue statements
-- [x] Parse expression statements
-- [x] Parse blocks
+**Dependencies:** None
 
-### Parser - Expressions (Pratt Parser) ✅ COMPLETED
-- [x] Implement precedence climbing for binary ops
-- [x] Parse literals (nil, true, false, numbers, strings)
-- [x] Parse identifiers
-- [x] Parse binary operations (+, -, *, /, etc.)
-- [x] Parse unary operations (not, -, #)
-- [x] Parse member access (obj.field)
-- [x] Parse index access (arr[0])
-- [x] Parse function calls
-- [x] Parse method calls (obj:method())
-- [x] Parse array literals {1, 2, 3}
-- [x] Parse object literals {x = 1, y = 2}
-- [x] Parse parenthesized expressions
-- [x] Parse template literals (`Hello, ${name}!`)
-- [x] Parse conditional expressions (a ? b : c)
-- [x] Parse arrow functions (x => expr and (params) => expr)
-- [x] Parse function expressions
-
-### Parser - Type Annotations ✅ COMPLETED
-- [x] Parse primitive types
-- [x] Parse type references
-- [x] Parse union types (A | B)
-- [x] Parse intersection types (A & B)
-- [x] Parse object types
-- [x] Parse array types (T[])
-- [x] Parse tuple types ([string, number])
-- [x] Parse function types ((x: T) -> U)
-- [x] Parse nullable types (T?)
-- [x] Parse generic type parameters (<T>)
-- [x] Parse type constraints (T extends U)
-- [x] Parse type predicates (x is T)
-
-### Parser - Declarations ✅ COMPLETED
-- [x] Parse interface declarations
-- [x] Parse type alias declarations
-- [x] Parse enum declarations
-- [x] Parse import statements
-- [x] Parse export statements
-- [x] Parse class declarations (if enableOOP)
-- [x] Parse decorators (@decorator, @decorator(args), @namespace.decorator)
-
-### Parser - Patterns ✅ COMPLETED
-- [x] Parse identifier patterns
-- [x] Parse literal patterns
-- [x] Parse array destructuring patterns
-- [x] Parse object destructuring patterns
-- [x] Parse rest patterns (...)
-- [x] Parse wildcard patterns (_)
-
-### Parser Testing ✅ COMPLETED
-- [x] Test all statement types
-- [x] Test all expression types with correct precedence
-- [x] Test all type annotation syntax
-- [x] Test error recovery (basic synchronization)
-- [x] Test complex programs
-- [x] 24 comprehensive parser tests passing
-
-### Parser - Dual Syntax Support ✅ COMPLETED
-- [x] Support both Lua-style (`... end`) and TypeScript-style (`{ }`) syntax
-- [x] Object literals: accept both `=` (Lua) and `:` (TypeScript) for properties
-- [x] Class declarations: support both `class ... end` and `class { }`
-- [x] Method bodies: support both `method ... end` and `method { }`
-- [x] Function bodies: support both `function ... end` and `function { }`
-- [x] Constructor bodies: support both syntaxes
-- [x] Getter/setter bodies: support both syntaxes
-- [x] Allow keywords as decorator names (@readonly, @sealed)
-- [x] Fixed 13 tests (4 initial failures + 9 discovered during implementation)
-
-### Parser Error Recovery ✅ COMPLETED
-- [x] Implement error recovery strategies (synchronization)
-- [x] Continue parsing after errors when possible
-- [x] Report multiple errors per file (via synchronization in parse loop)
-- [x] Provide helpful error messages (via diagnostic handler)
+**Implementation Notes:**
+- Lexer: Added `Override` token at [token.rs:48](crates/typedlua-core/src/lexer/token.rs#L48)
+- AST: Added `is_override` field at [statement.rs:104](crates/typedlua-core/src/ast/statement.rs#L104)
+- Parser: Parses override keyword at [statement.rs:977](crates/typedlua-core/src/parser/statement.rs#L977)
+- Type Checker: Validates override semantics at [type_checker.rs:1489-1619](crates/typedlua-core/src/typechecker/type_checker.rs#L1489-L1619)
+- Type Checker: Emits warning for missing `override` keyword at [type_checker.rs:1395-1411](crates/typedlua-core/src/typechecker/type_checker.rs#L1395-L1411)
+- Tests: Comprehensive tests at [override_tests.rs](crates/typedlua-core/tests/override_tests.rs) (5 passing tests including warning test)
+- Documentation: Complete feature documentation at [docs/LANGUAGE_FEATURES.md](docs/LANGUAGE_FEATURES.md)
+- Fixed `extract_exports` function that was broken during implementation
 
 ---
 
-## Phase 2: Type System ✅ COMPLETED
+### 1.2 Final Keyword
+**Effort:** 1-2 days | **Priority:** P0 | **Status:** ✅ Completed
 
-**Status**: Phase 2 is complete with 22 comprehensive tests passing! The type system foundation includes:
-- SymbolTable with lexical scoping and shadowing
-- TypeEnvironment for managing type aliases, generic types, and interfaces
-- TypeCompatibility with structural typing and variance rules
-- Full TypeChecker implementation with type inference and checking
-- Support for all statement types, expressions, and patterns
-- Proper handling of const (literal types) vs local (widened types)
-- Interface extends with member merging
-- Interface implementation validation for classes
-- Recursive type alias detection with cycle prevention
-- Generic type aliases (type Foo<T> = ...)
+- [x] Add `Final` to `TokenKind` enum
+- [x] Add `is_final: bool` to `ClassDeclaration` AST
+- [x] Add `is_final: bool` to `MethodDeclaration` AST
+- [x] Parse `final` before class keyword
+- [x] Parse `final` before method declarations
+- [x] Type checker: Error when extending final class
+- [x] Type checker: Error when overriding final method
+- [x] Write unit tests for final validation
+- [x] Update documentation
 
-### Type Representation ✅ COMPLETED
-- [x] Define Type enum with all variants (already in AST)
-- [x] Define PrimitiveType enum (already in AST)
-- [x] Implement TypeReference struct (already in AST)
-- [x] Implement FunctionType struct (already in AST)
-- [x] Implement ObjectType struct (already in AST)
-- [x] Implement ConditionalType struct (already in AST)
-- [x] Implement MappedType struct (already in AST)
-- [x] Implement TemplateLiteralType struct (already in AST)
+**Dependencies:** None
 
-### Symbol Table ✅ COMPLETED
-- [x] Implement SymbolTable struct
-- [x] Implement Scope struct with parent links
-- [x] Implement Symbol struct
-- [x] Add methods: enter_scope, exit_scope, declare, lookup
-- [x] Support shadowing rules
-- [x] Track symbol kinds (Variable, Function, Class, etc.)
-- [x] 5 comprehensive tests passing
-
-### Type Environment ✅ COMPLETED
-- [x] Implement TypeEnvironment struct
-- [x] Register primitive types
-- [x] Register built-in types (Array, etc.)
-- [x] Support type aliases
-- [x] Support interface types
-- [x] 4 comprehensive tests passing
-
-### Type Checker Core ✅ COMPLETED
-- [x] Implement TypeChecker struct
-- [x] Type check variable declarations
-- [x] Type check function declarations
-- [x] Type check if statements
-- [x] Type check while loops
-- [x] Type check for loops
-- [x] Type check repeat statements
-- [x] Type check return statements
-- [x] Type check expressions
-- [x] Type check function calls
-- [x] Type check member access
-- [x] Type check index access
-- [x] Type check blocks with scoping
-- [x] Type check binary operations
-- [x] Type check unary operations
-- [x] Type check conditional expressions
-- [x] Pattern destructuring type checking (array/object patterns)
-- [x] 5 comprehensive tests passing
-
-### Type Inference ✅ COMPLETED
-- [x] Infer literal types from const declarations
-- [x] Widen types for local declarations
-- [x] Infer return types when not annotated
-- [x] Infer array element types
-- [x] Infer binary operation result types
-- [x] Infer unary operation result types
-- [x] Infer conditional expression types (union of branches)
-
-### Type Compatibility ✅ COMPLETED
-- [x] Implement is_assignable check
-- [x] Primitive type compatibility
-- [x] Literal type compatibility
-- [x] Function type compatibility (contravariance/covariance)
-- [x] Object type structural compatibility
-- [x] Union type compatibility
-- [x] Intersection type compatibility
-- [x] Array type compatibility
-- [x] Tuple type compatibility
-- [x] Nullable type compatibility
-- [x] Unknown/Never type handling
-- [x] 8 comprehensive tests passing
-
-### Interfaces ✅ COMPLETED
-- [x] Type check interface declarations
-- [x] Convert interface members to object type members
-- [x] Register interfaces in type environment
-- [x] Check interface extends clauses
-- [x] Merge parent interface members into child interface
-- [x] Validate interface members (check for duplicates)
-- [x] Check interface implementation in classes
-- [x] Validate required properties and methods are implemented
-- [x] Support optional properties (via AST)
-- [x] Support readonly properties (via AST)
-- [x] Support index signatures (via AST)
-
-### Type Aliases ✅ COMPLETED
-- [x] Type check type alias declarations
-- [x] Register type aliases in type environment
-- [x] Resolve type aliases via type environment
-- [x] Support recursive type aliases with cycle detection
-- [x] Support generic type aliases (type Foo<T> = ...)
-
-### Enums ✅ COMPLETED
-- [x] Type check enum declarations
-- [x] Convert enum values to literal types
-- [x] Create union type from enum variants
-- [x] Register enums as type aliases
-
-### Type Checker Testing ✅ COMPLETED
-- [x] Test simple variable declarations
-- [x] Test type mismatches
-- [x] Test type inference
-- [x] Test function type checking
-- [x] Test undefined variable errors
-- [x] 5 comprehensive TypeChecker tests
-- [x] 5 SymbolTable tests
-- [x] 4 TypeEnvironment tests
-- [x] 8 TypeCompatibility tests
-- [x] **Total: 269 type checker tests passing**
-- [x] **Total: 538 tests passing across entire suite**
+**Implementation Notes:**
+- Lexer: Added `Final` token at [token.rs:49](crates/typedlua-core/src/lexer/token.rs#L49) (length-5 keyword mapping)
+- AST: Added `is_final` field to [ClassDeclaration](crates/typedlua-core/src/ast/statement.rs#L61) and [MethodDeclaration](crates/typedlua-core/src/ast/statement.rs#L105)
+- Parser: Parses `final` and `abstract` modifiers in any order using loop
+- Type Checker: Validates final class extension at [type_checker.rs:964-976](crates/typedlua-core/src/typechecker/type_checker.rs#L964-L976)
+- Type Checker: Validates final method override at [type_checker.rs:1570-1579](crates/typedlua-core/src/typechecker/type_checker.rs#L1570-L1579)
+- Tests: Comprehensive tests at [final_tests.rs](crates/typedlua-core/tests/final_tests.rs) (8 passing tests)
+- Documentation: Complete feature documentation at [docs/LANGUAGE_FEATURES.md](docs/LANGUAGE_FEATURES.md)
+- Note: Currently only checks immediate parent for final methods (not full inheritance chain - can be enhanced later)
 
 ---
 
-## Phase 3: Code Generation ✅ COMPLETED
+### 1.3 Primary Constructors
+**Effort:** 1 week | **Priority:** P0 | **Status:** ✅ Completed
 
-**Status**: Phase 3 is complete with 122 tests passing! Full code generation with source maps, target-specific generation, snapshot tests, and roundtrip validation implemented.
+**AST Changes:**
+- [x] Add `primary_constructor: Option<Vec<ConstructorParameter>>` to `ClassDeclaration`
+- [x] Create `ConstructorParameter` struct with name, type, access modifier, readonly flag
+- [x] Add `parent_constructor_args: Option<Vec<Expression>>` to `ClassDeclaration` for forwarding
 
-### Basic Code Generation ✅ COMPLETED
-- [x] Implement CodeGenerator struct
-- [x] Generate variable declarations
-- [x] Generate function declarations
-- [x] Generate if statements
-- [x] Generate while loops
-- [x] Generate for loops (numeric and generic)
-- [x] Generate repeat statements
-- [x] Generate return statements
-- [x] Generate expressions (literals, binary, unary, assignments)
-- [x] Generate function calls
-- [x] Generate member access and index access
-- [x] Generate array literals
-- [x] Generate object literals
-- [x] Generate function expressions and arrow functions
-- [x] Generate conditional expressions
-- [x] Generate class declarations (basic)
-- [x] 5 comprehensive code generation tests passing
+**Parser:**
+- [x] Parse `class Name(params)` syntax
+- [x] Parse access modifiers on constructor parameters (`public`, `private`, `protected`)
+- [x] Parse `readonly` modifier on parameters
+- [x] Parse `extends Parent(arg1, arg2)` for constructor forwarding
+- [x] Error if both primary constructor and parameterized constructor exist
 
-### Type Erasure ✅ COMPLETED
-- [x] Remove type annotations (implicit - not generated)
-- [x] Remove type-only imports (ignored during generation)
-- [x] Convert const to local (all variables become local)
-- [x] Remove interface declarations (ignored during generation)
-- [x] Remove type alias declarations (ignored during generation)
-- [x] Remove enum declarations (ignored during generation)
+**Type Checker:**
+- [x] Create property declarations from primary constructor parameters
+- [x] Validate access modifiers on parameters
+- [x] Check parent constructor argument types
+- [x] Ensure constructor body doesn't redeclare parameter properties
 
-### Source Maps ✅ COMPLETED
-- [x] Implement SourceMapBuilder
-- [x] Track mappings during generation
-- [x] VLQ (Variable Length Quantity) encoding
-- [x] Delta encoding for efficient mappings
-- [x] JSON serialization
-- [x] Data URI generation for inline source maps
-- [x] Source map comment generation for Lua
-- [x] 3 comprehensive source map tests passing
+**Codegen:**
+- [x] Generate properties from primary constructor parameters
+- [x] Apply access modifiers (private → `_name` prefix)
+- [x] Generate parent constructor forwarding
+- [x] Support optional constructor body for validation
 
-### Target-Specific Generation ✅ COMPLETED
-- [x] Support Lua 5.1 output
-- [x] Support Lua 5.2 output
-- [x] Support Lua 5.3 output
-- [x] Support Lua 5.4 output
-- [x] Handle version-specific differences (bitwise ops, integer division)
-- [x] Bitwise operators via library calls (bit32 for 5.2)
-- [x] Integer division fallback (math.floor for pre-5.3)
-- [x] Shift operators (<<, >>) - native in 5.3+, library in 5.2, helper in 5.1
-- [x] Integer division (//) - native in 5.3+, math.floor fallback for older versions
-- [x] Switch to Lua-style comments (-- and --[[ ]]--) to support // operator
-- [x] 1 comprehensive target selection test
-- [x] 8 comprehensive target-specific tests passing
+**Implementation Notes:**
+- Modified `generate_class_declaration` at [mod.rs:771-805](crates/typedlua-core/src/codegen/mod.rs#L771-L805) to detect primary constructors
+- Created `generate_primary_constructor` function at [mod.rs:953-1062](crates/typedlua-core/src/codegen/mod.rs#L953-L1062)
+- Generates both `._init(self, params)` for initialization and `.new(params)` for instance creation
+- Private properties prefixed with `_`, public/protected use normal naming
+- Parent constructor forwarding calls `ParentClass._init(self, args)` before property initialization
+- Follows existing Lua metatable pattern for consistency with regular class generation
 
-### Code Generation Testing ✅ COMPLETED
-- [x] Roundtrip tests (parse → generate → parse) - 6 tests passing
-- [x] Snapshot tests for generated code using insta - 10 comprehensive snapshot tests
-- [x] Test source map generation - 11 comprehensive source map tests
-- [x] Verify generated code can be re-parsed successfully
-- [x] Test VLQ encoding edge cases
-- [x] Test multiline source map mappings
-- [x] Test name deduplication in source maps
+**Testing:**
+- [x] Test basic primary constructor
+- [x] Test with access modifiers
+- [x] Test with inheritance
+- [x] Test with additional properties
+- [x] Test with constructor body
+- [x] Test readonly parameters
+- [x] Test error cases (mixing patterns)
 
----
+**Implementation Notes:**
+- Comprehensive test suite at [primary_constructor_tests.rs](crates/typedlua-core/tests/primary_constructor_tests.rs) (22 passing tests)
+- Parser tests: Basic syntax, access modifiers, readonly, inheritance, error cases
+- Type checker tests: Property creation, duplicate detection, parent constructor validation
+- Codegen tests: Verify generated Lua code for constructors, access modifiers, inheritance, metatable setup
+- All tests pass successfully
 
-## Phase 4: CLI & Configuration ✅ COMPLETED
+**Documentation:**
+- [x] Update design docs with examples
+- [x] Add to language reference
 
-**Status**: Phase 4 fully complete! All 122 tests still passing. Full-featured CLI with compilation pipeline, error formatting, project initialization, watch mode, and configuration file loading.
+**Implementation Notes:**
+- Comprehensive documentation added to [LANGUAGE_FEATURES.md](docs/LANGUAGE_FEATURES.md)
+- Covers syntax, usage patterns, access modifiers, inheritance, examples, and compilation details
+- Design examples already exist in [Additional-Features-Design.md](docs/designs/Additional-Features-Design.md)
+- Documentation explains generated Lua code patterns and type checking behavior
 
-### CLI Arguments ✅ COMPLETED
-- [x] Implement Cli struct with clap
-- [x] Support file arguments
-- [x] Support --project / -p flag
-- [x] Support --out-dir flag
-- [x] Support --out-file flag
-- [x] Support --target flag (5.1, 5.2, 5.3, 5.4)
-- [x] Support --source-map flag
-- [x] Support --inline-source-map flag
-- [x] Support --no-emit flag
-- [x] Support --watch / -w flag (fully functional with debouncing)
-- [x] Support --init flag (creates tlconfig.yaml + sample project)
-- [x] Support --help / -h flag
-- [x] Support --version / -v flag
-- [x] Support --pretty flag (default: true)
-- [x] Support --diagnostics flag
-
-### Main Compiler Pipeline ✅ COMPLETED
-- [x] Read input files from command line
-- [x] Lex source code with error handling
-- [x] Parse tokens with error handling
-- [x] Compile each file (lex → parse → codegen)
-- [x] Generate Lua code with target-specific features
-- [x] Write output files to specified locations
-- [x] Support --out-dir for output directory
-- [x] Support --out-file for single file output
-- [x] Generate source maps when --source-map specified
-- [x] Write separate .lua.map files
-- [x] Report diagnostics with pretty formatting
-- [x] Return appropriate exit code (0 success, 1 error)
-
-### Error Formatting ✅ COMPLETED
-- [x] Implement pretty error formatter with colors
-- [x] Show source code context
-- [x] Show caret (^) under error location
-- [x] Colorize output with ANSI escape codes
-- [x] Support --pretty flag (enabled by default)
-- [x] Support plain text output (--pretty=false)
-- [x] Handle Error, Warning, and Info diagnostic levels
-
-### Project Initialization ✅ COMPLETED
-- [x] --init creates tlconfig.yaml with defaults
-- [x] Create src/ directory structure
-- [x] Generate sample src/main.tl file
-- [x] Show helpful getting started message
-
-### Watch Mode ✅ COMPLETED
-- [x] Implement file watching with notify crate
-- [x] Watch input files for changes
-- [x] Recompile on change
-- [x] Debounce rapid changes (100ms debounce)
-- [x] Initial compilation before watching
-
-### Configuration Management ✅ COMPLETED
-- [x] Load configuration from tlconfig.yaml
-- [x] Auto-detect tlconfig.yaml in current directory
-- [x] Merge default → file → CLI flags
-- [x] CLI flags override config file settings
-- [x] Support target, outDir, sourceMap options from config
-
-### CLI Testing ✅ COMPLETED
-- [x] Manual testing of all CLI flags
-- [x] Test watch mode with file modifications
-- [x] Test error formatting variations (pretty and plain)
-- [x] Test configuration loading and merging
-- [x] Test exit codes (0 for success, 1 for errors)
+**Dependencies:** Class system must be implemented
 
 ---
 
-## Phase 5: Advanced Type Features (3-4 weeks) 🚧 IN PROGRESS
+### 1.4 Null Coalescing Operator (`??`)
+**Effort:** 2-3 days | **Priority:** P1 | **Status:** Not Started
 
-**Status**: Generics fully implemented! 149 tests passing. Complete support for parsing, type checking, type inference, and constraint validation.
+**Lexer:**
+- [ ] Add `QuestionQuestion` to `TokenKind`
+- [ ] Parse `??` as single token (not two `?`)
 
-### Generics ✅ COMPLETED
-- [x] Parse generic type parameters (`<T>`, `<T, U>`)
-- [x] Parse generic type parameter constraints (`<T extends U>`)
-- [x] Parse default type parameters (`<T = number>`)
-- [x] Parse generic type application (`Array<number>`, `Map<string, number>`)
-- [x] Handle nested generics (`Array<Array<T>>`) with `>>` token splitting
-- [x] Add comprehensive tests for generic parsing (10 parsing tests)
-- [x] Implement type parameter substitution/instantiation
-- [x] Implement type constraint checking with TypeCompatibility
-- [x] Type check generic functions - type parameters available in function body
-- [x] Type check generic classes - basic support for generic classes
-- [x] Type check generic interfaces - generic interfaces register correctly
-- [x] Type check generic type aliases - full support via TypeEnvironment
-- [x] Add integration tests (10 type checker tests)
-- [x] Implement type argument inference from call arguments
-- [x] Support inference for simple types, arrays, and generic types
-- [x] Validate type arguments against constraints
-- [x] Add 4 tests for type inference and constraint validation
+**AST:**
+- [ ] Add `NullCoalesce` to `BinaryOp` enum
 
-### Utility Types ✅ COMPLETED
-- [x] Implement Partial<T> - makes all properties optional
-- [x] Implement Required<T> - makes all properties required
-- [x] Implement Readonly<T> - makes all properties readonly
-- [x] Implement Pick<T, K> - picks subset of properties from object type
-- [x] Implement Omit<T, K> - omits properties from object type
-- [x] Implement Record<K, V> - creates object type with index signature
-- [x] Implement Exclude<T, U> - excludes types from union
-- [x] Implement Extract<T, U> - extracts types from union
-- [x] Implement NonNilable<T> - removes nil and void from type
-- [x] Implement Nilable<T> - adds nil to type (T | nil)
-- [x] Implement Parameters<F> - extracts parameter types as tuple
-- [x] Implement ReturnType<F> - extracts return type from function
-- [x] Create utility_types module with all implementations
-- [x] Integrate with TypeEnvironment for type resolution
-- [x] Add resolve_type_reference to type checker
-- [x] Add 15 integration tests for all utility types
-- [x] Add 8 unit tests in utility_types module
-- [x] Support utility type composition (e.g., Partial<Readonly<T>>)
-- [x] Support utility types with generic types (e.g., Partial<Container<T>>)
+**Parser:**
+- [ ] Parse `??` with correct precedence (lower than comparison, higher than `or`)
 
-### Mapped Types ✅ COMPLETED
-- [x] Parse mapped type syntax `{ [K in T]: V }`
-- [x] Parse readonly modifier in mapped types
-- [x] Parse optional modifier (?) in mapped types
-- [x] Implement mapped type evaluation/transformation
-- [x] Transform string literal unions into object properties
-- [x] Apply readonly and optional modifiers to generated properties
-- [x] Integrate with type checker via check_type_alias
-- [x] Add 4 parsing tests for mapped types
-- [x] Add 5 integration tests for mapped type evaluation
-- [x] Support inline string literal unions (e.g., `"a" | "b" | "c"`)
-- [x] Resolve type references in `in` clause by passing TypeEnvironment
-- [x] Support keyof operator in mapped types (e.g., `[K in keyof T]`)
-- [x] Add 3 tests for mapped types with keyof
+**Type Checker:**
+- [ ] Type left operand as any type
+- [ ] Type right operand compatible with non-nil version of left
+- [ ] Result type: non-nil union of both sides
 
-**keyof Operator:**
-- [x] Add `Keyof` token to lexer
-- [x] Parse `keyof T` syntax in type parser
-- [x] Implement `evaluate_keyof` to extract property names from object types
-- [x] Resolve type references when evaluating keyof
-- [x] Return union of string literals for property names
-- [x] Return `never` type for empty interfaces
-- [x] Integrate with type checker via `evaluate_type`
-- [x] Add 5 integration tests for keyof operator
-- [x] Support keyof with interfaces, inline objects, and methods
+**Codegen:**
+- [ ] Simple form: `(a ~= nil and a or b)` for identifiers
+- [ ] IIFE form for complex expressions (avoid double evaluation)
+- [ ] Optimization: Detect when to use each form
 
-### Conditional Types ✅ COMPLETED
-- [x] Parse conditional type syntax (`T extends U ? X : Y`)
-- [x] Parse nested conditional types
-- [x] Implement conditional type evaluation
-- [x] Check type assignability using TypeCompatibility
-- [x] Resolve type references before evaluation
-- [x] Support distributive conditional types over unions
-- [x] Automatically distribute when check type is a union
-- [x] Collapse results when all branches return same type
-- [x] Integrate with type checker via `evaluate_type`
-- [x] Add 9 integration tests covering:
-  - Basic conditional types
-  - True/false branch evaluation
-  - Nested conditionals
-  - Distributive behavior over unions
-  - Exclude-like and Extract-like patterns
-  - Conditional with interfaces
-  - Never type handling
+**Optimizer (O2):**
+- [ ] Eliminate nil checks when left operand proven non-nil by type analysis
 
-**Infer Keyword:** ✅ COMPLETED
-- [x] Add `Infer` token to lexer
-- [x] Add `Infer(Ident)` variant to TypeKind AST
-- [x] Parse `infer R` syntax in type expressions
-- [x] Implement pattern matching with inferred type extraction
-- [x] Support infer in array types: `T extends (infer U)[]`
-- [x] Support infer in function return types: `T extends () -> infer R`
-- [x] Support infer in function parameters: `T extends (arg: infer P) -> unknown`
-- [x] Support infer in tuple types: `T extends [infer A, infer B]`
-- [x] Support multiple infer positions in same pattern
-- [x] Implement type variable substitution in true branch
-- [x] Add 7 integration tests for infer patterns
-- [x] Test nested/recursive infer usage
+**Testing:**
+- [ ] Test with simple identifiers
+- [ ] Test with complex expressions
+- [ ] Test with `false` values (vs `or` operator)
+- [ ] Test type inference
+- [ ] Test optimization elimination
 
-### Template Literal Types ✅ COMPLETED
-- [x] Parse template literal type syntax (backtick syntax with `${}` interpolation)
-- [x] Evaluate template literal types with cartesian product expansion
-- [x] Expand to string literal unions
-- [x] Support string literal interpolation
-- [x] Support number and boolean literal interpolation
-- [x] Support union type interpolation (automatic expansion)
-- [x] Support multiple interpolations in single template
-- [x] Support nested template literal types
-- [x] Add 10 integration tests covering all scenarios
-- [x] Integrate with type checker evaluation pipeline
+**Documentation:**
+- [ ] Add to language reference
+- [ ] Add examples comparing to `or` operator
 
-### Type Narrowing ✅ COMPLETED
-- [x] Implement control flow analysis framework
-- [x] Create NarrowingContext for tracking refined types
-- [x] Implement branch merging for if/else join points
-- [x] Support typeof checks (`typeof x == "string"`)
-- [x] Support equality narrowing (`x == nil`, `x != nil`)
-- [x] Support truthiness narrowing (falsy: nil, false)
-- [x] Support logical operators (and, or, not)
-- [x] Implement type exclusion and union filtering
-- [x] Add 4 comprehensive unit tests
-- [x] Create integration examples showing how to use narrowing in if statements
-- [x] Add TypePredicate variant to TypeKind AST
-- [x] Parse type predicate syntax (`x is T`)
-- [x] Add `is` and `instanceof` keywords to lexer
-- [x] Add Instanceof binary operator to AST
-- [x] Implement type guard function call narrowing (heuristic-based for `is*` functions)
-- [x] Implement instanceof narrowing logic
-- [x] Add 2 tests for type guards and instanceof
-- [x] Generate Lua code for instanceof (metatable check)
-- [x] Update type checker to handle instanceof operator
-- [x] Full integration with type checker for if statements
-- [x] Proper type predicate function signature checking
-
-### Advanced Types Testing
-- [x] Test all utility types
-- [x] Test generic inference
-- [x] Test mapped types
-- [x] Test conditional types
-- [x] Test template literal types
-- [x] Test type narrowing
+**Dependencies:** None
 
 ---
 
-## Phase 6: OOP Features (3-4 weeks)
+### 1.5 Safe Navigation Operator (`?.`)
+**Effort:** 3-4 days | **Priority:** P1 | **Status:** Not Started
 
-### Class Parsing
-- [x] Parse class declarations
-- [x] Parse class members (properties, methods, constructor)
-- [x] Parse access modifiers (public, private, protected)
-- [x] Parse static modifier
-- [x] Parse abstract modifier
-- [x] Parse readonly modifier
-- [x] Parse extends clause
-- [x] Parse implements clause
-- [x] Parse getter/setter declarations
+**Lexer:**
+- [ ] Add `QuestionDot` to `TokenKind` for `?.`
+- [ ] Add `QuestionLeftBracket` to `TokenKind` for `?.[`
 
-### Class Type Checking ✅ COMPLETED
-- [x] Check class declarations
-- [x] Check extends clause (valid base class)
-- [x] Check implements clause (interface compatibility)
-- [x] Check constructor
-- [x] Check method declarations
-- [x] Check property declarations
-- [x] Check getter/setter pairs
-- [x] Enforce access modifiers (compile-time) - private, protected, public
-- [x] Validate access within class context and subclass inheritance
-- [x] Check abstract method implementations
-- [x] Support generic classes with type parameters
-- [x] Validate abstract methods don't have bodies
-- [x] Validate non-abstract classes don't have abstract methods
-- [x] Validate classes only have one constructor
-- [x] Parser bug fixed: check_identifier now correctly compares identifier values
-- [x] 26 comprehensive tests passing (all class type checking tests)
-- [x] 10 access modifier tests passing (covers all access levels)
+**AST:**
+- [ ] Add `is_optional: bool` to member access expressions
+- [ ] Or create `OptionalMember`, `OptionalIndex`, `OptionalCall` expression kinds
 
-### Class Code Generation ✅ COMPLETED
-- [x] Generate class as metatable
-- [x] Generate constructor function (custom and default)
-- [x] Generate __index metamethod
-- [x] Generate methods (instance and static)
-- [x] Generate properties (initialized in constructor)
-- [x] Generate getters/setters (with prefixing)
-- [x] Generate inheritance chain (setmetatable)
-- [x] Generate super calls in methods (translates to ParentClass.method(self, args))
-- [x] Generate super() constructor chaining (uses _init pattern matching TypeScript)
-- [x] Generate static members (using dot notation)
-- [x] Handle abstract methods (skip code generation)
-- [x] 10 comprehensive code generation tests passing (including super calls and constructor chaining)
+**Parser:**
+- [ ] Parse `?.` as optional member access
+- [ ] Parse `?.[` as optional index access
+- [ ] Parse `?.method()` as optional method call
 
-### OOP Testing ✅ COMPLETED
-- [x] Test class declarations (4 tests: simple, with constructor, with methods, with static methods)
-- [x] Test inheritance (3 tests: basic, with constructor chaining, multi-level)
-- [x] Test method overriding (2 tests: simple override, override with super)
-- [x] Test access modifiers (10 comprehensive tests for private, protected, public)
-- [x] Test abstract classes (2 tests: abstract class, implementation)
-- [x] Test interfaces (2 tests: single interface, multiple interfaces)
-- [x] Test generated Lua code (all tests verify code generation)
-- [x] 14 comprehensive OOP integration tests in tests/oop_tests.rs
-- [x] 10 comprehensive access modifier tests in tests/access_modifiers_tests.rs
-- [x] All tests verify both type checking and code generation
-- [x] **Total: 477 tests passing across entire suite**
+**Type Checker:**
+- [ ] If receiver is `T | nil`, result is `PropertyType | nil`
+- [ ] Chain of `?.` accumulates nil possibility
 
-### Configuration ✅ COMPLETED
-- [x] Check enableOOP flag before allowing classes
-- [x] Provide clear error if OOP disabled
-- [x] 8 comprehensive configuration tests in tests/config_tests.rs
-- [x] Test class/interface rejection when OOP disabled
-- [x] Test default configuration allows OOP
-- [x] Test non-OOP code unaffected by flag
+**Codegen:**
+- [ ] IIFE form for long chains (3+ levels)
+- [ ] Simple `and` chaining for short chains (optimization)
+
+**Optimizer (O2):**
+- [ ] Skip nil checks when receiver proven non-nil by type analysis
+- [ ] Especially valuable in hot loops
+
+**Testing:**
+- [ ] Test property access chains
+- [ ] Test method calls
+- [ ] Test indexed access
+- [ ] Test mixed chains
+- [ ] Test type inference through chains
+- [ ] Test optimization elimination
+
+**Documentation:**
+- [ ] Add to language reference
+- [ ] Show chaining examples
+
+**Dependencies:** None
 
 ---
 
-## Phase 7: FP Features (2-3 weeks)
+### 1.6 Operator Overloading
+**Effort:** 1-2 weeks | **Priority:** P1 | **Status:** Not Started
 
-### Pattern Matching ✅ COMPLETED
-- [x] Parse match expressions
-- [x] Parse match arms with patterns
-- [x] Parse when guards
-- [x] Type check match expressions
-- [x] Pattern variable binding in type checker
-- [x] Guard expression validation (must be boolean or boolean literal)
-- [x] Ensure all arms return compatible types (union type inference)
-- [x] Generate if-elseif chain in Lua (as IIFE for expression context)
-- [x] Generate pattern match conditions (literal, wildcard, array, object)
-- [x] Generate pattern bindings (destructuring in match arms)
-- [x] 10 comprehensive pattern matching tests
-- [x] Check exhaustiveness (boolean, literal, union types)
-- [x] Narrow types in each arm (literal, array, object patterns)
-- [x] 18 exhaustiveness checking tests
-- [x] 20 type narrowing tests
+**Lexer:**
+- [ ] Add `Operator` keyword to `TokenKind`
 
-### Destructuring ✅ COMPLETED
-- [x] Parse array destructuring (with rest, holes, nesting)
-- [x] Parse object destructuring (with rename, nesting)
-- [x] Type check array destructuring
-- [x] Type check object destructuring
-- [x] Generate array destructuring code (converts to multiple local statements)
-- [x] Generate object destructuring code (property access)
-- [x] Support nested destructuring (arrays in objects, objects in arrays)
-- [x] 19 comprehensive destructuring tests
+**AST:**
+- [ ] Create `OperatorDeclaration` struct
+- [ ] Create `OperatorKind` enum (Add, Sub, Mul, Div, Mod, Pow, Eq, Lt, Le, Concat, Len, Index, NewIndex, Call, Unm)
 
-### Spread Operator ✅ COMPLETED
-- [x] Parse array spread syntax (`[...arr]`)
-- [x] Parse object spread syntax (`{...obj}`)
-- [x] Type check array spread (extracts element types, creates unions for mixed types)
-- [x] Type check object spread (merges object type members)
-- [x] Generate array spread code (uses IIFE with table.insert and ipairs loop)
-- [x] Generate object spread code (uses IIFE with pairs loop)
-- [x] Optimize: skip IIFE for arrays/objects without spreads
-- [x] 22 comprehensive spread operator tests
+**Parser:**
+- [ ] Parse `operator` followed by operator symbol in class body
+- [ ] Parse parameter list and body
 
-### Pipe Operator ✅
-- [x] Parse pipe expressions (|>)
-- [x] Type check pipe chains
-- [x] Generate pipe code
-- [x] Test pipe operator (20 comprehensive tests)
+**Type Checker:**
+- [ ] Validate operator signatures (e.g., `operator ==` must return boolean)
+- [ ] Binary operators take one parameter (right operand)
+- [ ] Unary operators take no parameters
 
-### Rest Parameters ✅ COMPLETED
-- [x] Parse rest parameters in functions (already implemented)
-- [x] Type check rest parameters as arrays
-- [x] Validate rest parameter position (must be last)
-- [x] Generate vararg code (`...` and `{...}`)
-- [x] Test rest parameters (19 comprehensive tests)
+**Codegen:**
+- [ ] Map to Lua metamethods (`__add`, `__sub`, etc.)
+- [ ] Cache operator functions as named locals for performance
+- [ ] Store as direct methods for O3 devirtualization
 
-### FP Testing ✅ COMPLETED
-- [x] Test pattern matching (10 tests)
-- [x] Test exhaustiveness checking (18 tests)
-- [x] Test destructuring (19 tests)
-- [x] Test spread operator (22 tests)
-- [x] Test pipe operator (20 tests)
-- [x] Test rest parameters (19 tests)
+**Testing:**
+- [ ] Test all supported operators (+, -, *, /, %, ^, ==, <, <=, .., #, [], []=, ())
+- [ ] Test type checking of operators
+- [ ] Test usage in expressions
+- [ ] Test operator chaining
 
-### Configuration ✅ COMPLETED
-- [x] Check enableFP flag for all FP features
-- [x] Provide clear error messages when FP disabled
-- [x] Add comprehensive FP configuration tests (16 tests)
+**Documentation:**
+- [ ] Document all supported operators and their metamethod mappings
+- [ ] Add Vector example
+
+**Dependencies:** None
 
 ---
 
-## Phase 8: Decorators ✅ COMPLETED
+## Phase 2: Advanced Features
 
-**Status**: Phase 8 is complete with 31 comprehensive decorator tests passing (14 infrastructure + 17 built-in)! Full decorator support including parsing, type checking, code generation, configuration, and built-in decorators (@readonly, @sealed, @deprecated) with runtime library.
+### 2.1 Exception Handling
+**Effort:** 2-3 weeks | **Priority:** P1 | **Status:** Not Started
 
-### Decorator Parsing ✅ COMPLETED
-- [x] Parse @ syntax
-- [x] Parse decorator identifiers
-- [x] Parse decorator calls with arguments
-- [x] Parse decorator member access
-- [x] Support multiple decorators on same target
+**Lexer:**
+- [ ] Add `Throw`, `Try`, `Catch`, `Finally`, `Rethrow` to `TokenKind`
+- [ ] Add `BangBang` for `!!` operator
 
-### Decorator Type Checking ✅ COMPLETED
-- [x] Type check decorator expressions
-- [x] Validate decorator targets (classes, methods, properties, getters, setters)
-- [x] Check decorator function signatures (basic validation)
-- [x] Configuration flag enforcement
+**AST:**
+- [ ] Create `TryStatement` struct
+- [ ] Create `CatchClause` struct
+- [ ] Create `CatchPattern` enum (Untyped, Typed, MultiTyped, Destructured)
+- [ ] Create `ThrowStatement` struct
+- [ ] Create `TryExpression` struct
+- [ ] Create `ErrorChainExpression` struct for `!!`
+- [ ] Add `throws: Option<Vec<Type>>` to `FunctionDeclaration`
 
-### Decorator Code Generation ✅ COMPLETED
-- [x] Generate class decorators (Class = decorator(Class))
-- [x] Generate method decorators (Class.method = decorator(Class.method))
-- [x] Generate field decorators (via property decorators)
-- [x] Generate accessor decorators (getter/setter decorators)
-- [x] Apply decorators in correct order
+**Parser:**
+- [ ] Parse `throw` statement
+- [ ] Parse `try`/`catch`/`finally` blocks
+- [ ] Parse catch patterns (simple, typed, multi-typed, destructured)
+- [ ] Parse `rethrow` statement
+- [ ] Parse `try ... catch ...` as expression
+- [ ] Parse `!!` operator
+- [ ] Parse `throws` clause on functions
 
-### Built-in Decorators ✅ COMPLETED
-- [x] Implement @readonly (runtime enforcement with metatables)
-- [x] Implement @sealed (runtime enforcement with metatables)
-- [x] Implement @deprecated (runtime enforcement with function wrapping)
-- [x] Create TypedLua runtime library with built-in decorators
-- [x] Auto-embed runtime when built-in decorators are used
-- [x] Export global aliases (readonly, sealed, deprecated) for convenience
-- [x] Support both plain names (@readonly) and namespaced names (@TypedLua.readonly)
-- [x] Add 17 comprehensive builtin decorator tests
+**Type Checker:**
+- [ ] Type `throw` expression (any type)
+- [ ] Type catch blocks with declared types
+- [ ] Type try expression as union of try and catch results
+- [ ] Validate `rethrow` only in catch blocks
+- [ ] `throws` annotation is informational only
 
-### Decorator Testing ✅ COMPLETED
-- [x] Test all decorator types (14 comprehensive tests)
-- [x] Test decorator application (class, method, static method decorators)
-- [x] Test decorator with arguments
-- [x] Test namespaced decorators
-- [x] Test multiple decorators
-- [x] Test generated code
-- [x] Test decorator integration with inheritance and interfaces
+**Codegen:**
+- [ ] Automatic pcall vs xpcall selection based on complexity
+- [ ] Simple catch → pcall (30% faster)
+- [ ] Typed/multi-catch → xpcall (full-featured)
+- [ ] Finally blocks with guaranteed execution
+- [ ] Try expressions → inline pcall
+- [ ] Error chaining `!!` operator
 
-### Configuration ✅ COMPLETED
-- [x] Check enableDecorators flag
-- [x] Provide clear error if decorators disabled
-- [x] Add 2 configuration tests for decorators
+**Built-in Error Classes:**
+- [ ] Implement `Error` base class
+- [ ] Implement `ArgumentError`
+- [ ] Implement `StateError`
+- [ ] Implement `IOError`
+- [ ] Implement `ParseError`
+- [ ] Add debug info capture (file, line, stack)
 
----
+**Helper Functions:**
+- [ ] Implement `require()` function
+- [ ] Implement `check()` function
+- [ ] Implement `unreachable()` function
 
-## Phase 9: Language Server Protocol (4-5 weeks) ✅ COMPLETED
+**Optimizer (O2):**
+- [ ] Inline simple try-catch blocks
+- [ ] Choose optimal pcall/xpcall based on AST analysis
 
-**Status**: Phase 9 is complete with 52 comprehensive tests passing (29 provider unit tests + 23 integration tests)! All LSP providers implemented with full test coverage. The only remaining items require symbol table integration which will be added in future iterations.
+**Testing:**
+- [ ] Test throw/catch
+- [ ] Test typed catches
+- [ ] Test multi-type catches
+- [ ] Test finally blocks
+- [ ] Test try expressions
+- [ ] Test rethrow
+- [ ] Test error chaining `!!`
+- [ ] Test pattern matching catch
+- [ ] Test pcall vs xpcall selection
 
-### LSP Infrastructure ✅ COMPLETED
-- [x] Set up tower-lsp dependency
-- [x] Create LanguageServer struct
-- [x] Implement initialize handler
-- [x] Implement shutdown handler
-- [x] Advertise all capabilities
-- [x] Set up JSON-RPC communication
+**Documentation:**
+- [ ] Document exception handling syntax
+- [ ] Document built-in error classes
+- [ ] Document helper functions
+- [ ] Show examples of all patterns
 
-### Document Management ✅ COMPLETED
-- [x] Implement DocumentManager
-- [x] Handle textDocument/didOpen
-- [x] Handle textDocument/didChange (incremental)
-- [x] Handle textDocument/didClose
-- [x] Handle textDocument/didSave
-- [x] Cache parsed ASTs
-- [x] Invalidate caches on change
-
-### Diagnostics ✅ COMPLETED
-- [x] Implement DiagnosticsProvider
-- [x] Publish diagnostics on document change
-- [x] Publish diagnostics on document save
-- [x] Clear diagnostics on document close
-- [x] Include related information
-- [x] Include code actions for fixes
-
-### Completion ✅ COMPLETED
-- [x] Implement CompletionProvider
-- [x] Complete keywords
-- [x] Complete members after dot (.) (infrastructure ready)
-- [x] Complete methods after colon (:) (infrastructure ready)
-- [x] Complete types in annotations
-- [x] Complete decorators after @
-- [x] Resolve completion items with details
-- [x] Provide documentation in completion
-- [x] 3 comprehensive completion tests passing
-
-**Note**: Advanced completion features (identifiers from scope, import paths) deferred for symbol table integration phase.
-
-### Hover ✅ COMPLETED
-- [x] Implement HoverProvider
-- [x] Show type information on hover
-- [x] Show documentation on hover
-- [x] Format hover content as markdown
-- [x] Show function signatures
-- [x] 1 comprehensive hover test passing
-
-### Go to Definition ✅ COMPLETED
-- [x] Implement DefinitionProvider
-- [x] Infrastructure for navigation (ready for symbol table integration)
-- [x] 1 comprehensive definition test passing
-
-### Find References ✅ COMPLETED
-- [x] Implement ReferencesProvider
-- [x] Infrastructure for reference finding (ready for symbol table integration)
-- [x] Include/exclude declaration
-- [x] Highlight references
-- [x] 1 comprehensive references test passing
-
-### Rename ✅ COMPLETED
-- [x] Implement RenameProvider
-- [x] Validate new name
-- [x] Infrastructure for rename operations (ready for symbol table integration)
-- [x] Support prepare rename
-- [x] 1 comprehensive rename test passing
-
-### Document Symbols ✅ COMPLETED
-- [x] Implement DocumentSymbolProvider
-- [x] Return all symbols in document (full AST integration)
-- [x] Support hierarchical symbols
-- [x] Include symbol kinds
-- [x] 1 comprehensive symbols test passing (7 symbol types tested)
-
-### Formatting ✅ COMPLETED
-- [x] Implement FormattingProvider
-- [x] Format entire document (full implementation)
-- [x] Format selection/range (full implementation)
-- [x] Respect formatting config
-- [x] Preserve comments
-- [x] On-type formatting for 'end' keyword
-- [x] 2 comprehensive formatting tests passing
-
-### Code Actions ✅ COMPLETED
-- [x] Implement CodeActionProvider
-- [x] Quick fix infrastructure (ready for diagnostics integration)
-- [x] Refactor infrastructure (ready for AST integration)
-- [x] Source action infrastructure
-- [x] 3 comprehensive code action tests passing
-
-### Signature Help ✅ COMPLETED
-- [x] Implement SignatureHelpProvider
-- [x] Show parameter info while typing (infrastructure ready)
-- [x] Highlight active parameter
-- [x] Context analysis for function calls
-- [x] Parameter counting logic
-- [x] 2 comprehensive signature help tests passing
-
-### Inlay Hints ✅ COMPLETED
-- [x] Implement InlayHintProvider
-- [x] Infrastructure for type hints (ready for type checker integration)
-- [x] Infrastructure for parameter hints
-- [x] Hint positioning and validation
-- [x] 3 comprehensive inlay hints tests passing
-
-### Performance ✅
-- [x] Implement incremental parsing (already implemented in DocumentManager)
-- [x] Cache analysis results (AST caching already in Document struct)
-- [x] Background analysis worker (async/tokio architecture supports this)
-- [x] Debounce diagnostics (naturally debounced via document lifecycle events)
-
-### LSP Testing ✅ COMPLETED
-- [x] Unit test each provider (29 comprehensive tests passing)
-- [x] Integration test LSP protocol (23 comprehensive tests passing)
-- [x] Test with real VS Code (manual test plan documented)
-- [x] All empty test stubs converted to functional tests
-- [x] **Total: 52 LSP tests passing**
-
-### Additional LSP Features ✅ COMPLETED
-- [x] Implement FoldingRangeProvider (code blocks, comments, table literals)
-- [x] Implement SelectionRangeProvider (smart expand/shrink selection)
-- [x] Implement SemanticTokensProvider (semantic syntax highlighting)
-- [x] Add on-type formatting triggers (newline, end, }, ])
-- [x] Integrate all providers with main.rs LSP server
-- [x] All advertised capabilities have implementations
-- [x] 6 folding range tests passing
-- [x] 5 selection range tests passing
-- [x] 7 semantic tokens tests passing
+**Dependencies:** None
 
 ---
 
-## Phase 9b: VS Code Extension (part of Phase 9)
+### 2.2 Rich Enums (Java-style)
+**Effort:** 2-3 weeks | **Priority:** P1 | **Status:** Not Started
 
-### Extension Setup ✅
-- [x] Create editors/vscode directory structure
-- [x] Set up package.json with extension manifest (comprehensive settings)
-- [x] Create src/extension.ts with LSP client implementation
-- [x] Add TypeScript build configuration (tsconfig.json, .eslintrc.json)
-- [x] Add language configuration (brackets, comments, auto-closing, indentation)
-- [x] Create README.md and .vscodeignore
-- [x] Install dependencies and verify compilation (307 packages, 0 vulnerabilities)
-- [x] TextMate grammar (inherited from previous setup in syntaxes/)
+**AST:**
+- [ ] Extend `EnumDeclaration` with fields, constructor, methods
+- [ ] Update `EnumMember` to include constructor arguments
+- [ ] Create `EnumField` struct
 
-### LSP Client ✅
-- [x] Implement extension activation
-- [x] Start LSP server process via stdio
-- [x] Connect to server with proper configuration
-- [x] Configure document selector (.tl files)
-- [x] Register commands (restart server, show output)
-- [x] Handle server errors with user-friendly messages
-- [x] Pass configuration options to server (checkOnSave, strictNullChecks, formatting, inlay hints)
+**Parser:**
+- [ ] Parse enum members with constructor arguments syntax
+- [ ] Parse field declarations inside enum
+- [ ] Parse constructor inside enum
+- [ ] Parse methods inside enum
 
-### Extension Configuration ✅
-- [x] Add typedlua.trace.server setting (off/messages/verbose)
-- [x] Add typedlua.server.path setting (default: typedlua-lsp)
-- [x] Add typedlua.compiler.checkOnSave setting (default: true)
-- [x] Add typedlua.compiler.strictNullChecks setting (default: true)
-- [x] Add typedlua.format.enable setting (default: true)
-- [x] Add typedlua.format.indentSize setting (default: 4)
-- [x] Add typedlua.inlayHints.typeHints setting (default: true)
-- [x] Add typedlua.inlayHints.parameterHints setting (default: true)
+**Type Checker:**
+- [ ] Validate constructor parameters match field declarations
+- [ ] Validate enum member arguments match constructor signature
+- [ ] Type check methods with `self` bound to enum type
+- [ ] Auto-generate signatures for `name()`, `ordinal()`, `values()`, `valueOf()`
 
-### Extension Commands ✅
-- [x] Restart Language Server command (typedlua.restartServer)
-- [x] Show Output Channel command (typedlua.showOutputChannel)
+**Codegen:**
+- [ ] Generate enum constructor function
+- [ ] Generate enum instances as constants
+- [ ] Generate `name()` and `ordinal()` methods
+- [ ] Generate `values()` static method
+- [ ] Generate `valueOf()` with O(1) hash lookup (not O(n) iteration)
+- [ ] Generate static `__byName` lookup table
+- [ ] Prevent instantiation via metatable
 
-### Extension Testing ✅
-- [x] Create comprehensive testing guide (TESTING.md)
-- [x] Create quick start guide (QUICKSTART.md)
-- [x] Set up VS Code launch configuration (.vscode/launch.json)
-- [x] Create build tasks (.vscode/tasks.json)
-- [x] Create sample test files (4 test files: basic, types, errors, features)
-- [x] Document test checklist (60+ test cases)
-- [x] Document troubleshooting procedures
-- [x] Ready for manual testing in VS Code (press F5 to test)
+**Optimizer (O2):**
+- [ ] Pre-compute enum instances at compile time
+- [ ] Mark small methods as inlinable (O3)
 
-### Publishing ✅
-- [x] Create extension icon (typedlua-icon-128.png, 9KB optimized from 1024x1024 original)
-- [x] Enhance extension README with comprehensive features, examples, and troubleshooting
-- [x] Create CHANGELOG.md (detailed release notes for v0.1.0)
-- [x] Create PUBLISHING.md (step-by-step marketplace publishing guide)
-- [x] Package with vsce (automated via scripts: scripts/build-extension.sh, scripts/reload-extension.sh)
-- [x] Organize scripts into scripts/ directory (rebuild-and-install-extension.sh, build-extension.sh, reload-extension.sh)
-- [ ] Publish to VS Code Marketplace (ready - follow editors/vscode/PUBLISHING.md when ready)
+**Testing:**
+- [ ] Test basic rich enums
+- [ ] Test with constructors
+- [ ] Test with instance methods
+- [ ] Test `name()`, `ordinal()` built-ins
+- [ ] Test `values()`, `valueOf()` static methods
+- [ ] Test Planet example from design doc
+
+**Documentation:**
+- [ ] Document rich enum syntax
+- [ ] Show Planet example
+- [ ] Document built-in methods
+
+**Dependencies:** None
 
 ---
 
-## Phase 10: Standard Library (2-3 weeks) ✅ COMPLETED
+### 2.3 Interfaces with Default Implementations
+**Effort:** 1-2 weeks | **Priority:** P1 | **Status:** Not Started
 
-**Status**: Phase 10 is complete with 264 tests passing! Full declaration file parsing implemented with comprehensive parser support for all TypeScript/TypedLua declaration syntax.
+**AST:**
+- [ ] Add `DefaultMethod(MethodDeclaration)` to `InterfaceMember` enum
 
-### Infrastructure ✅
-- [x] Create stdlib directory structure (crates/typedlua-core/src/stdlib/)
-- [x] Create stdlib README.md with documentation
-- [x] Create builtins.d.tl (all built-in functions with type signatures)
+**Parser:**
+- [ ] Parse interface methods with `{` after signature as default methods
+- [ ] Parse interface methods without `{` as abstract methods
 
-### Core Libraries ✅
-- [x] Create lua51.d.tl
-- [x] Create lua52.d.tl
-- [x] Create lua53.d.tl
-- [x] Create lua54.d.tl
+**Type Checker:**
+- [ ] Track which methods are abstract vs default
+- [ ] Error if abstract method not implemented
+- [ ] Allow default methods to be optional (use default if not overridden)
+- [ ] Type `self` in default methods as implementing class
 
-### Type Checker Integration ✅
-- [x] Embed stdlib files into binary with include_str!
-- [x] Load appropriate stdlib based on CompilerOptions.target
-- [x] Create stdlib module (mod.rs) with file embedding
-- [x] Integrate stdlib loading into TypeChecker::new()
-- [x] Implement declaration file parsing (declare function, declare namespace, declare type)
-- [x] Parse stdlib .d.tl files during type checker initialization
-- [x] Add stdlib declarations to global scope
-- [x] Test stdlib availability in type checker (builtins, string, math, etc.)
+**Codegen:**
+- [ ] Generate interface table with default methods
+- [ ] Copy default implementations to implementing class: `User.print = User.print or Printable.print`
 
-### Parser Enhancements ✅
-- [x] Add support for variadic return types (`...string[]`)
-- [x] Add support for function type arrow syntax (`=>` in addition to `->`)
-- [x] Allow keywords as parameter names in function type signatures
-- [x] Implement sophisticated tuple type parsing to distinguish from function types
-- [x] Support unnamed index signatures (`[number]: T` in addition to `[key: number]: T`)
-- [x] Fix parenthesized/tuple/function type ambiguity with lookahead parser
+**Optimizer (O3):**
+- [ ] Inline default methods when implementing class is known
+- [ ] Add memoization hints for pure methods (marked with `@pure` decorator)
 
-### String Library ✅
-- [x] All string functions defined in version-specific .d.tl files
-- [x] string.upper, string.lower, string.len
-- [x] string.sub, string.find, string.gsub
-- [x] string.match, string.gmatch
-- [x] string.byte, string.char
-- [x] string.format, string.rep, string.reverse
+**Testing:**
+- [ ] Test abstract methods (must implement)
+- [ ] Test default methods (optional override)
+- [ ] Test multiple interfaces
+- [ ] Test overriding default methods
+- [ ] Test `self` typing in default methods
 
-### Table Library ✅
-- [x] All table functions defined in version-specific .d.tl files
-- [x] table.insert, table.remove, table.concat, table.sort
-- [x] table.pack, table.unpack (version-specific)
+**Documentation:**
+- [ ] Document interface default implementation syntax
+- [ ] Show Printable/Serializable example
 
-### Math Library ✅
-- [x] All math functions defined in version-specific .d.tl files
-- [x] math.floor, math.ceil, math.abs, math.min, math.max
-- [x] math.sqrt, math.pow, math.exp, math.log
-- [x] math.sin, math.cos, math.tan, math.asin, math.acos, math.atan
-- [x] math.random, math.randomseed
-- [x] math constants (pi, huge, maxinteger, mininteger)
-
-### I/O Library ✅
-- [x] All io functions defined in version-specific .d.tl files
-- [x] io.open, io.close, io.read, io.write
-- [x] io.input, io.output
-- [x] File handle methods
-
-### OS Library ✅
-- [x] All os functions defined in version-specific .d.tl files
-- [x] os.date, os.time, os.clock
-- [x] os.exit, os.getenv, os.execute
-- [x] os.remove, os.rename
-
-### Coroutine Library ✅
-- [x] All coroutine functions defined in version-specific .d.tl files
-- [x] coroutine.create, coroutine.resume, coroutine.yield
-- [x] coroutine.status, coroutine.wrap
-
-### Global Functions ✅
-- [x] print, assert, error (in builtins.d.tl)
-- [x] tonumber, tostring (in builtins.d.tl)
-- [x] type, pairs, ipairs (in builtins.d.tl)
-- [x] next, select (in builtins.d.tl)
-- [x] pcall, xpcall (in builtins.d.tl)
-- [x] setmetatable, getmetatable (in builtins.d.tl)
-- [x] rawget, rawset, rawequal (in builtins.d.tl)
-- [x] load, loadfile, dofile, loadstring (in builtins.d.tl)
-- [x] collectgarbage, len, rawlen, unpack (in builtins.d.tl)
-- [x] getfenv, setfenv (Lua 5.1 only, in builtins.d.tl)
-
-### Function Overloads ✅
-- [x] Multiple function declarations with same name supported
-- [x] All overloads documented in declaration files
-
-### Testing ✅
-- [x] Verify stdlib types work (3 tests passing)
-- [x] Test builtins loaded (test_stdlib_builtins_loaded)
-- [x] Test string library accessible (test_stdlib_string_library)
-- [x] Test math library accessible (test_stdlib_math_library)
+**Dependencies:** None
 
 ---
 
-## Phase 11: Polish & Optimization (3-4 weeks) ✅ COMPLETED
+### 2.4 File-Based Namespaces
+**Effort:** 1-2 weeks | **Priority:** P2 | **Status:** Not Started
 
-**Status**: Phase 11 complete! 279 tests passing. Comprehensive performance optimization infrastructure implemented including lexer optimizations, parallel compilation, arena allocation, structured diagnostics, and tracing.
+**Lexer:**
+- [ ] Add `Namespace` to `TokenKind`
 
-### Performance ✅ COMPLETED
+**AST:**
+- [ ] Add `NamespaceDeclaration` to `Statement` enum with path: `Vec<String>`
 
-#### Lexer Optimization ✅ COMPLETED
-**Phase 1: Quick Wins** (15-25% improvement)
-- [x] Pre-allocate strings in hot paths (identifiers, numbers, strings, templates)
-- [x] Pre-allocate token vector based on source size estimate
-- [x] Optimize template string with `mem::take()` instead of `.clone()`
-- [x] Add inline attributes to hot functions (`current()`, `peek()`, `is_at_end()`, `advance()`, `skip_whitespace()`)
-- [x] Replace keyword linear search with length-based bucketing (O(1) length check + small match per bucket)
+**Parser:**
+- [ ] Parse `namespace Math.Vector;` at file start
+- [ ] Error if namespace appears after other statements
+- [ ] Only allow semicolon syntax (no block `{}` syntax)
+- [ ] Store namespace path in module metadata
 
-**Phase 2: Simple Optimizations** (5-10% improvement)
-- [x] Pre-allocate `Vec<char>` during lexer creation (reduces reallocation overhead)
-- [x] Whitespace fast-path optimization (match on common ASCII whitespace)
-- [x] Skip complex optimizations (Vec<char> → byte-based iteration deemed too complex for benefit)
+**Type Checker:**
+- [ ] Track namespace for each module
+- [ ] Include namespace prefix when resolving imports
+- [ ] If `enforceNamespacePath: true`, verify namespace matches file path
+- [ ] Make namespace types accessible via dot notation
 
-**Total Lexer Improvement**: 20-30% faster, all optimizations zero-cost abstractions with no external dependencies
+**Codegen:**
+- [ ] Generate nested table structure for namespace
+- [ ] Export namespace root table
 
-#### Data Structures ✅ COMPLETED
-- [x] Replace HashMap with FxHashMap (10-15% improvement)
-- [x] Optimize Span to use u32 instead of usize (5-10% improvement)
+**Config:**
+- [ ] Add `enforceNamespacePath` boolean option (default: false)
 
-#### String & Memory Optimization ✅ COMPLETED
-- [x] Implement string interning infrastructure (ready for integration)
-- [x] Implement Bumpalo Arena allocation for AST (15-20% improvement potential)
-- [x] Create arena usage documentation with examples and benchmarks
-- [x] Add arena module with full API (new, with_capacity, alloc, reset)
-- [x] 6 comprehensive arena tests
+**Testing:**
+- [ ] Test basic namespace declaration
+- [ ] Test namespace imports (full path, aliasing, specific exports)
+- [ ] Test namespace path enforcement
+- [ ] Test with declaration files (.d.tl)
+- [ ] Test Godot example from design doc
 
-#### Diagnostics & Logging ✅ COMPLETED
-- [x] Add tracing logger integration (1-3% improvement)
-- [x] Instrument lexer and parser with #[instrument] and debug logs
-- [x] Initialize tracing in CLI and LSP with env_filter
-- [x] Implement structured diagnostics with DiagnosticCode
-- [x] Add DiagnosticRelatedInformation for multi-span diagnostics
-- [x] Add DiagnosticSuggestion for quick fixes
-- [x] Enhanced console output with codes and suggestions
-- [x] 8 comprehensive diagnostic tests
+**Documentation:**
+- [ ] Document namespace syntax
+- [ ] Show modules vs namespaces comparison
+- [ ] Show declaration file use case
+- [ ] Document config option
 
-#### Parallel Compilation ✅ COMPLETED
-- [x] Add rayon for parallel file processing (50%+ improvement for multi-file)
-- [x] Two-phase compilation: parallel file processing + sequential output
-- [x] CompilationResult structures for clean error handling
-- [x] Deterministic error reporting
-
-### Error Messages ✅ COMPLETED
-- [x] Implement pattern-based error code assignment in parser
-- [x] Smart error code detection based on message content
-- [x] Improved error messages for common parsing issues
-- [x] Review all error messages for clarity and consistency
-- [x] Add helpful suggestions to 20+ common error types
-- [x] Improve error recovery with better synchronization points
-- [x] Add more context to errors with user-friendly token formatting
-- [x] Add format_token_name helper for readable error messages
-- [x] Enhanced suggestions for:
-  - Missing closing tokens (`, ], }, end)
-  - Missing keywords (then, do, end)
-  - Configuration issues (OOP, decorators, FP features disabled)
-  - Invalid literals and enum values
-  - Type annotation errors
-  - Pattern and expression errors
-- [x] Improved error recovery with expanded synchronization points
-- [x] Tested error messages with sample code
-
-### Testing
-- [ ] Achieve >80% code coverage
-- [ ] Add stress tests
-- [ ] Test edge cases
-- [ ] Fuzz test parser
+**Dependencies:** Module system must exist
 
 ---
 
-## Ongoing Tasks (Throughout All Phases)
+### 2.5 Template Literal Enhancements (Auto-Dedenting)
+**Effort:** 3-5 days | **Priority:** P2 | **Status:** Not Started
 
-### Documentation
-- [ ] Keep design docs updated
-- [ ] Write inline code documentation
-- [ ] Update README as features are added
-- [ ] Document breaking changes
+**Lexer:**
+- [ ] Track indentation of each line when parsing template literals
+- [ ] Store raw string with indentation metadata
 
-### Testing
-- [ ] Write tests for every new feature
-- [ ] Maintain >90% code coverage
-- [ ] Run tests before every commit
-- [ ] Fix failing tests immediately
+**Codegen:**
+- [ ] Implement dedenting algorithm:
+  - Find first/last non-empty lines
+  - Find minimum indentation
+  - Remove common indentation
+  - Trim first/last blank lines
+  - Join with `\n`
+- [ ] Apply dedenting during codegen
+- [ ] Handle edge cases: tabs vs spaces, first-line content, explicit `\n`
 
-### Code Quality
-- [ ] Run cargo fmt before every commit
-- [ ] Run cargo clippy and fix warnings
-- [ ] Review PRs carefully
-- [ ] Refactor when needed
+**Testing:**
+- [ ] Test basic multi-line dedenting
+- [ ] Test preserving relative indentation
+- [ ] Test trimming leading/trailing blank lines
+- [ ] Test single-line templates (no dedenting)
+- [ ] Test tabs vs spaces error
+- [ ] Test first line on same line as backtick
+- [ ] Test SQL/HTML/JSON examples
 
-### Git Workflow
-- [ ] Use conventional commits
-- [ ] Create feature branches
-- [ ] Squash commits before merging
-- [ ] Write good commit messages
+**Documentation:**
+- [ ] Document auto-dedenting behavior
+- [ ] Show SQL, HTML examples
+- [ ] Document edge cases
 
----
-
-## Success Metrics
-
-**Phase Completion:**
-- All checkboxes ticked
-- All tests passing
-- Documentation complete
-- Examples working
-
-**v1.0.0 Release:**
-- Compiler working for all features
-- LSP fully functional in VS Code
-- >90% test coverage
-- Complete documentation
-- Published to package managers
-- Positive user feedback
+**Dependencies:** Template literals must already exist
 
 ---
 
-## Manual Validation Tasks
+### 2.6 Reflection System
+**Effort:** 2-3 weeks | **Priority:** P2 | **Status:** Not Started
 
-These tasks require manual validation with external tools and are tracked separately:
+**Rust Native Module (`crates/typedlua-reflect-native/`):**
+- [ ] Set up cargo project with mlua dependency
+- [ ] Implement type registry with compile-time metadata
+- [ ] Implement `is_instance()` with O(1) ancestor bitmask checks
+- [ ] Implement `typeof()` returning type info
+- [ ] Implement `get_fields()` with lazy building
+- [ ] Implement `get_methods()` with lazy building
+- [ ] Implement field/method lookup with HashMap (O(1))
+- [ ] String interning for type/field/method names
+- [ ] Compact binary metadata with bitflags
 
-### Code Generation Validation
-- [ ] Test output is valid Lua (requires Lua interpreter installation)
-- [ ] Test with actual Lua interpreter (manual validation step)
+**LuaRocks Distribution:**
+- [ ] Create `.rockspec` file
+- [ ] Set up cargo build command
+- [ ] Pre-compile binaries for Linux (x64, ARM), macOS (x64, ARM), Windows (x64)
+- [ ] Publish to LuaRocks
+- [ ] Publish to GitHub releases
+
+**Runtime Integration:**
+- [ ] Create Lua runtime wrapper for native module
+- [ ] Implement `Runtime.isInstance()`
+- [ ] Implement `Runtime.typeof()`
+- [ ] Implement `Runtime.getFields()`
+
+**Codegen:**
+- [ ] Assign unique `__typeId` to each class
+- [ ] Generate `__ancestorMask` bitset for inheritance
+- [ ] Generate lazy `_buildFields()` function
+- [ ] Generate lazy `_buildMethods()` function
+- [ ] Generate lazy `_resolveType()` functions
+- [ ] Use bitflags for field modifiers (readonly, optional)
+- [ ] Use string interning for names
+
+**Testing:**
+- [ ] Test `isInstance()` with inheritance
+- [ ] Test `typeof()` with various types
+- [ ] Test `getFields()` with lazy loading
+- [ ] Test `getMethods()` with lazy loading
+- [ ] Test field info (name, isOptional, isReadonly, getType)
+- [ ] Test method info (name, isStatic, isAbstract, getSignature)
+- [ ] Performance benchmarks vs pure Lua
+
+**Documentation:**
+- [ ] Document reflection API
+- [ ] Document installation via LuaRocks
+- [ ] Show usage examples
+- [ ] Document performance characteristics
+
+**Dependencies:** Rust toolchain, mlua library, LuaRocks infrastructure
 
 ---
 
-**Total Checkboxes:** ~500+
+## Phase 3: Compiler Optimizations
 
-**Start Date:** [YOUR START DATE]  
-**Target v1.0.0:** [+7-10 months]
+### 3.1 Optimization Infrastructure
+**Effort:** 1 week | **Priority:** P2 | **Status:** Not Started
 
-**Let's build TypedLua! 🚀**
+- [ ] Create `Optimizer` struct with optimization passes
+- [ ] Implement `OptimizationPass` trait
+- [ ] Add optimization level config option (0-3)
+- [ ] Integrate optimizer into compilation pipeline
+
+**Dependencies:** Type checker must provide type information
+
+---
+
+### 3.2 O1 Optimizations (Basic)
+**Effort:** 1-2 weeks | **Priority:** P2 | **Status:** Not Started
+
+- [ ] **Constant Folding:** Evaluate constant expressions at compile time
+- [ ] **Dead Code Elimination:** Remove unreachable code
+- [ ] **Table Pre-allocation:** Pre-size tables when size known
+- [ ] **Global Localization:** Cache frequently-used globals as locals
+- [ ] **Algebraic Simplification:** Simplify identities and strength reduction
+
+**Testing:**
+- [ ] Test each optimization individually
+- [ ] Test combined effect
+- [ ] Benchmark performance improvement
+
+**Dependencies:** Optimization infrastructure
+
+---
+
+### 3.3 O2 Optimizations (Standard)
+**Effort:** 2-3 weeks | **Priority:** P2 | **Status:** Not Started
+
+- [ ] **Function Inlining:** Replace small function calls with body (threshold: 5 statements)
+- [ ] **Loop Optimization:** Convert ipairs to numeric for (3-5x faster)
+- [ ] **Null Coalescing Optimization:** Choose inline vs IIFE based on complexity
+- [ ] **Safe Navigation Optimization:** Simple and vs long chain early exit
+- [ ] **Exception Handling Optimization:** Auto-select pcall vs xpcall
+- [ ] **String Concatenation Optimization:** Use table.concat for 3+ parts
+- [ ] **Dead Store Elimination:** Remove assignments to never-read variables
+- [ ] **Method to Function Call:** Convert `:` to `.` when type known
+- [ ] **Tail Call Optimization:** Convert tail recursion to loops
+- [ ] **Rich Enum Optimization:** Pre-compute enum instances
+
+**Testing:**
+- [ ] Test each optimization individually
+- [ ] Test combined effect
+- [ ] Benchmark performance improvement (target: 2-5x vs naive)
+
+**Dependencies:** O1 optimizations
+
+---
+
+### 3.4 O3 Optimizations (Aggressive)
+**Effort:** 1-2 weeks | **Priority:** P3 | **Status:** Not Started
+
+- [ ] **Devirtualization:** Direct calls instead of metatable lookups when type known
+- [ ] **Generic Specialization:** Generate type-specific versions of generic functions
+- [ ] **Operator Inlining:** Inline operator methods when type known
+- [ ] **Interface Method Inlining:** Inline default interface methods when class known
+- [ ] **Aggressive Inlining:** Increase threshold to 15 statements
+
+**Testing:**
+- [ ] Test each optimization individually
+- [ ] Test combined effect
+- [ ] Benchmark performance improvement (target: 3-7x vs naive)
+
+**Dependencies:** O2 optimizations
+
+---
+
+## Phase 4: Testing & Documentation
+
+### 4.1 Integration Tests
+**Effort:** 1-2 weeks | **Priority:** P1 | **Status:** Not Started
+
+- [ ] Write integration tests for all features combined
+- [ ] Test feature interactions (e.g., primary constructors + operator overloading)
+- [ ] Test edge cases and error conditions
+- [ ] Test with different optimization levels
+- [ ] Performance regression tests
+
+**Dependencies:** All features implemented
+
+---
+
+### 4.2 Documentation
+**Effort:** 1 week | **Priority:** P1 | **Status:** Not Started
+
+- [ ] Update language reference with all new features
+- [ ] Create tutorial/guide for each major feature
+- [ ] Document optimization levels and what they do
+- [ ] Document reflection API
+- [ ] Create migration guide from plain Lua
+- [ ] Update README with feature showcase
+
+**Dependencies:** All features implemented
+
+---
+
+## Summary
+
+**Total Features:** 13
+**Total Estimated Effort:** 22-31 weeks (5.5-7.75 months)
+
+**Priority Breakdown:**
+- **P0 (Critical):** ~~Override~~ ✅, ~~Final~~ ✅, ~~Primary Constructors~~ ✅ (All P0 features complete!)
+- **P1 (High):** Null coalescing, Safe navigation, Operators, Exceptions, Rich Enums, Interfaces (9-15 weeks)
+- **P2 (Medium):** Namespaces, Template dedenting, Reflection, Optimizations (10-13 weeks)
+- **P3 (Low):** O3 optimizations (1-2 weeks)
+
+**See:** [docs/designs/Additional-Features-Design.md](docs/designs/Additional-Features-Design.md) for complete specifications.
+
+---
+
+## Active Work
+
+All P0 (Critical) features are now complete! Ready to move to P1 (High Priority) features.
+
+---
+
+## Known Issues
+
+None.
+
+---
+
+## Future Enhancements
+
+### Library Adoption & Tooling (Infrastructure)
+
+**Status:** Dependencies added to Cargo.toml, infrastructure setup in progress
+
+#### Rust Library Ecosystem Integration
+**Effort:** 1-2 weeks total | **Priority:** P0-P2 | **Impact:** Better testing, profiling, and development experience
+
+**Decision Summary:** Adopt 9 libraries to improve code quality, testing, and performance measurement.
+
+---
+
+#### id-arena - Arena with Stable IDs
+**Effort:** Integrated during salsa | **Priority:** P1 | **Impact:** Graph structure management, eliminates lifetime issues
+
+**Decision:** ✅ **ADOPT during salsa integration**
+
+**Why:**
+- Perfect for graph structures (type checker, module graph)
+- `Id<T>` is `Copy` with no lifetime constraints (eliminates borrowck fights)
+- Serialization-friendly (IDs are u32)
+- salsa loves index-based structures
+- AST redesign from `Box<T>` → `Id<T>` is already required for salsa
+
+**Implementation:**
+- [ ] Use id-arena for type checker graph during salsa Phase 3-4
+- [ ] Use id-arena for module graph during salsa Phase 3-4
+- [ ] Replace `Box<Expression>` / `Box<Statement>` with `ExpressionId` / `StatementId`
+- [ ] Thread arena context through type checker
+- [ ] Update serialization to use IDs instead of pointers
+
+**Expected Results:**
+- No lifetime hell in graph structures
+- Safer incremental compilation (stable IDs across recompilation)
+- Cleaner code for complex dependency tracking
+
+**Dependencies:** salsa integration (Phase 3-4)
+
+---
+
+#### indexmap - Ordered HashMap
+**Effort:** 2-3 hours | **Priority:** P2 | **Impact:** Deterministic ordering for LSP and diagnostics
+
+**Decision:** ✅ **ADOPT SELECTIVELY** (use alongside FxHashMap)
+
+**Strategy:**
+- **Use indexmap for:** LSP symbol tables, diagnostic collection, export tables (where ordering matters)
+- **Keep FxHashMap for:** Performance-critical internal structures (where ordering doesn't matter)
+
+**Why:**
+- Deterministic iteration order (better debugging, stable error messages)
+- Stable snapshot testing with insta
+- Consistent LSP completion order (better UX)
+- Only 5-10% slower than FxHashMap (acceptable for UI-facing structures)
+
+**Implementation:**
+- [ ] Replace symbol tables in LSP with `IndexMap` at [symbol_index.rs](crates/typedlua-lsp/src/symbol_index.rs)
+- [ ] Use `IndexMap` for diagnostic collection in [diagnostics.rs](crates/typedlua-core/src/diagnostics.rs)
+- [ ] Use `IndexMap` for export tables in module system
+- [ ] Keep `FxHashMap` for internal type checker structures
+
+**Expected Results:**
+- Deterministic diagnostic ordering
+- Stable LSP completion results
+- Better snapshot testing with insta
+
+**Dependencies:** None
+
+---
+
+#### indoc - Indented String Literals
+**Effort:** 5 minutes | **Priority:** P0 | **Impact:** Dramatically cleaner test code
+
+**Decision:** ✅ **ADOPT IMMEDIATELY**
+
+**Why:**
+- Zero runtime cost (compile-time macro)
+- Tiny, widely-used dependency
+- Pure quality-of-life win for test maintainability
+- Hundreds of existing test strings would benefit
+- No downside whatsoever
+
+**Implementation:**
+- [x] Add `indoc = "2.0"` to workspace dependencies (DONE)
+- [ ] Convert existing test strings to use `indoc!` macro opportunistically
+- [ ] Use `indoc!` for all new multi-line test strings
+
+**Example:**
+```rust
+// Before
+let source = "\
+    function add(a: number, b: number): number\n\
+        return a + b\n\
+    end\n\
+";
+
+// After
+let source = indoc! {"
+    function add(a: number, b: number): number
+        return a + b
+    end
+"};
+```
+
+**Dependencies:** None
+
+---
+
+#### cargo-fuzz - Coverage-Guided Fuzzing
+**Effort:** 2-4 hours | **Priority:** P1 | **Impact:** Find parser edge cases and security issues
+
+**Decision:** ✅ **ADOPT for lexer and parser**
+
+**Why:**
+- Parsers are PRIME fuzzing targets (industry standard practice)
+- WILL find edge cases that unit tests miss (malformed input, stack overflow, panics)
+- Continuous security testing
+- Catches DoS vulnerabilities before production
+
+**Implementation:**
+- [x] Add `cargo-fuzz = "0.12"` to workspace dependencies (DONE)
+- [ ] Initialize fuzz directory: `cargo fuzz init` (requires nightly)
+- [ ] Create fuzz target for lexer at `fuzz/fuzz_targets/lexer.rs`
+- [ ] Create fuzz target for parser at `fuzz/fuzz_targets/parser.rs`
+- [ ] Add CI job for continuous fuzzing (OSS-Fuzz integration)
+- [ ] Document fuzzing setup in CONTRIBUTING.md
+
+**Example Fuzz Target:**
+```rust
+// fuzz/fuzz_targets/lexer.rs
+#![no_main]
+use libfuzzer_sys::fuzz_target;
+use typedlua_core::Lexer;
+
+fuzz_target!(|data: &[u8]| {
+    if let Ok(s) = std::str::from_utf8(data) {
+        let _ = Lexer::new(s).collect::<Vec<_>>();
+    }
+});
+```
+
+**Expected Results:**
+- Discovery of edge cases in lexer/parser
+- Prevention of panic-based DoS attacks
+- Improved robustness for malformed input
+
+**Dependencies:** None (nightly Rust required for fuzzing)
+
+---
+
+#### proptest - Property-Based Testing
+**Effort:** 1-2 weeks (ongoing) | **Priority:** P2 | **Impact:** Find invariant violations
+
+**Decision:** ✅ **ADOPT for critical paths only**
+
+**Why:**
+- Finds edge cases humans don't think of
+- Shrinking finds minimal failing examples (excellent debugging)
+- Perfect for testing invariants (parse roundtrips, type soundness)
+- Complements existing unit tests and snapshot tests
+
+**Use Cases:**
+- Parser round-trip testing: `parse(print(ast)) == ast`
+- Type checker soundness: Type operations preserve soundness
+- Code generator correctness: Generated Lua is valid
+
+**Implementation:**
+- [x] Add `proptest = "1.5"` to workspace dependencies (DONE)
+- [ ] Add proptest to parser tests for round-trip property
+- [ ] Add proptest to type checker for soundness properties
+- [ ] Add proptest to codegen for correctness properties
+
+**Example:**
+```rust
+use proptest::prelude::*;
+
+proptest! {
+    #[test]
+    fn parse_print_roundtrip(code in "function.*end") {
+        let ast = parse(&code)?;
+        let printed = print(&ast);
+        let reparsed = parse(&printed)?;
+        prop_assert_eq!(ast, reparsed);
+    }
+}
+```
+
+**Expected Results:**
+- Discovery of parser bugs through roundtrip testing
+- Type checker invariant validation
+- Better confidence in compiler correctness
+
+**Dependencies:** None
+
+---
+
+#### criterion - Statistical Benchmarking
+**Effort:** 30 minutes | **Priority:** P0 | **Impact:** Baseline measurements before optimization
+
+**Decision:** ✅ **CREATE BENCHMARKS NOW** (already in Cargo.toml but unused)
+
+**Why:**
+- **CRITICAL:** Cannot validate optimization work without baselines
+- Already configured in Cargo.toml but NO benchmarks exist
+- Need measurements before arena allocation integration
+- Need measurements before string interning integration
+- Statistical analysis detects regressions
+
+**Implementation:**
+- [x] `criterion = "0.5"` already in workspace dependencies
+- [x] Create `crates/typedlua-core/benches/` directory (DONE)
+- [x] Create `lexer_bench.rs` for lexer baseline (DONE)
+- [x] Create `parser_bench.rs` for parser baseline (DONE)
+- [x] Create `type_checker_bench.rs` for type checker baseline (DONE)
+- [ ] Run benchmarks to establish baseline: `cargo bench`
+- [ ] Document baseline results in TODO.md or separate BENCHMARKS.md
+- [ ] Add benchmark CI job for regression detection
+
+**Expected Results:**
+- Baseline lexer performance (tokens/sec)
+- Baseline parser performance (AST nodes/sec)
+- Baseline type checker performance (lines/sec)
+- Ability to validate 15-20% speedup claims for arena allocation
+- Ability to validate 30-50% memory savings claims for string interning
+
+**Dependencies:** None - URGENT (needed before optimization work)
+
+---
+
+#### dhat - Heap Profiler
+**Effort:** 1 hour | **Priority:** P0 | **Impact:** Measure actual allocation patterns before optimization
+
+**Decision:** ✅ **ADOPT for optimization validation**
+
+**Why:**
+- **CRITICAL:** Need to measure ACTUAL allocation hotspots (not guess)
+- Validate arena allocation actually reduces allocations
+- Validate string interning actually saves memory
+- Find unexpected allocations in hot loops
+- Zero production cost (dev-only tool)
+
+**Implementation:**
+- [x] Add `dhat = "0.3"` to workspace dependencies (DONE)
+- [ ] Create profiling harness at `crates/typedlua-core/benches/profile_allocations.rs`
+- [ ] Profile current baseline allocations (before optimization)
+- [ ] Document baseline allocation patterns
+- [ ] Re-profile after arena integration to measure improvement
+- [ ] Re-profile after string interning to measure improvement
+
+**Example:**
+```rust
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
+fn main() {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+
+    // Run compiler on large file
+    let source = include_str!("large_test.tl");
+    let mut parser = Parser::new(source);
+    parser.parse().unwrap();
+}
+```
+
+**Expected Results:**
+- Identify allocation hotspots (lexer, parser, type checker)
+- Measure reduction in allocations after arena integration (target: 80%+ reduction)
+- Measure memory savings after string interning (target: 30-50% reduction)
+- Validate optimization claims with data
+
+**Dependencies:** None - URGENT (needed before optimization work)
+
+---
+
+#### insta - Snapshot Testing
+**Effort:** Ongoing | **Priority:** P1 | **Impact:** Better test maintainability
+
+**Decision:** ✅ **EXPAND USAGE** (already in Cargo.toml, underutilized)
+
+**Why:**
+- Already configured but only 10 uses (massive underutilization)
+- Perfect for parser AST snapshots
+- Perfect for type checker error messages
+- Perfect for code generator output
+- Review diffs instead of manually updating assertions
+
+**Implementation:**
+- [x] `insta = "1.40"` already in workspace dependencies
+- [ ] Convert parser tests to use `insta::assert_snapshot!` for AST output
+- [ ] Convert type checker tests to use snapshots for error messages
+- [ ] Convert codegen tests to use snapshots for Lua output
+- [ ] Make snapshot testing the DEFAULT for all new tests
+- [ ] Run `cargo insta review` after test changes
+
+**Example:**
+```rust
+#[test]
+fn test_class_parsing() {
+    let source = "class User { name: string }";
+    let ast = parse(source);
+    insta::assert_snapshot!(format!("{:#?}", ast));
+}
+```
+
+**Expected Results:**
+- Easier test maintenance (review diffs vs manual updates)
+- Better visibility of AST/error message changes
+- Catch unintended changes during refactoring
+
+**Dependencies:** None
+
+---
+
+### Performance Optimizations (Memory & Speed)
+
+**Status:** High-impact improvements with existing infrastructure ready
+
+#### String Interning Integration
+**Effort:** 1-2 days | **Priority:** P0 | **Impact:** 30-50% memory reduction, faster equality checks
+
+Infrastructure already exists at [string_interner.rs](crates/typedlua-core/src/string_interner.rs) but is unused in production code. Integration will deduplicate repeated strings (identifiers, keywords, type names) and replace string comparisons with u32 comparisons.
+
+**Implementation Tasks:**
+- [ ] Thread `&mut StringInterner` from compilation entry point through lexer/parser/type checker
+- [ ] Change `Token::Identifier(String)` → `Token::Identifier(StringId)` in [lexer/mod.rs](crates/typedlua-core/src/lexer/mod.rs)
+- [ ] Change `TypeKind::Named(String)` → `TypeKind::Named(StringId)` in [ast/types.rs](crates/typedlua-core/src/ast/types.rs)
+- [ ] Change `Symbol.name: String` → `Symbol.name: StringId` in [typechecker/symbol_table.rs](crates/typedlua-core/src/typechecker/symbol_table.rs)
+- [ ] Intern common keywords and builtin type names at startup
+- [ ] Add resolver methods where string display is needed (diagnostics, codegen)
+- [ ] Update all Symbol/Type-related code to work with StringId
+- [ ] Write tests for interning correctness and memory savings
+
+**Expected Results:**
+- Every repeated identifier (`local`, `function`, `User`, `string`, etc.) stored once as u32
+- Symbol lookups use integer hash instead of string hash (faster)
+- 30-50% memory reduction for identifier-heavy code
+
+**Dependencies:** None - infrastructure complete
+
+---
+
+#### Arena Allocation Integration
+**Effort:** 2-3 days | **Priority:** P0 | **Impact:** 15-20% parsing speedup, better cache locality
+
+Infrastructure already exists at [arena.rs](crates/typedlua-core/src/arena.rs) with bumpalo but is only used in tests. Integration will replace individual `Box<T>` allocations with bulk arena allocation for AST nodes.
+
+**Implementation Tasks:**
+- [ ] Thread `&'arena Arena` lifetime parameter through parser
+- [ ] Change AST node types from `Box<Statement>` → `&'arena Statement`
+- [ ] Change AST node types from `Box<Expression>` → `&'arena Expression`
+- [ ] Change AST node types from `Box<Type>` → `&'arena Type`
+- [ ] Replace all `Box::new(...)` calls with `arena.alloc(...)`
+- [ ] Create arena at compilation entry point, pass through pipeline
+- [ ] Update parser methods to accept `&'arena Arena` parameter
+- [ ] Update type checker to work with arena-allocated AST
+- [ ] Consider arena for temporary types during type checking
+- [ ] Write benchmarks comparing Box vs Arena performance
+
+**Expected Results:**
+- Single bulk allocation instead of thousands of individual heap allocations
+- Better CPU cache locality (nodes allocated contiguously)
+- 15-20% parsing speedup per existing benchmarks
+- Faster deallocation (entire arena dropped at once)
+
+**Dependencies:** None - infrastructure complete
+
+---
+
+#### Aggressive Inline Annotations
+**Effort:** 2-4 hours | **Priority:** P1 | **Impact:** 5-10% speedup on hot paths
+
+Add `#[inline]` annotations to small, frequently-called functions that cross crate boundaries. Compiler can still choose to ignore hints, but enables cross-crate inlining with LTO.
+
+**Implementation Tasks:**
+- [ ] Add `#[inline]` to [span.rs](crates/typedlua-core/src/span.rs) methods: `len()`, `is_empty()`, `merge()`, `combine()`
+- [ ] Add `#[inline]` to [lexer/token.rs](crates/typedlua-core/src/lexer/token.rs) predicates (if any exist)
+- [ ] Add `#[inline]` to parser helper methods: `check()`, `match_token()`, `is_at_end()`, `peek()`
+- [ ] Add `#[inline]` to small type comparison helpers in type checker
+- [ ] Add `#[inline]` to frequently-called accessor methods (≤5 lines, hot path)
+- [ ] Avoid inlining large functions (>10 lines) to prevent binary bloat
+- [ ] Profile with `cargo flamegraph` to identify additional hot paths
+
+**Rule of Thumb:**
+- Function ≤5 lines + called frequently + crosses crate boundary → `#[inline]`
+- Compiler can ignore hints if it would hurt performance
+
+**Expected Results:**
+- Cross-crate inlining on hot paths (especially with LTO enabled)
+- 5-10% speedup on tight loops (lexing, type comparison)
+
+**Dependencies:** None
+
+---
+
+#### Supply Chain Security (cargo-deny)
+**Effort:** 5 minutes | **Priority:** P1 | **Impact:** Continuous dependency auditing
+
+Add cargo-deny for automated scanning of dependencies for security vulnerabilities, license violations, and unmaintained crates.
+
+**Implementation Tasks:**
+- [ ] Create `deny.toml` configuration file in repo root
+- [ ] Configure advisory checks (RustSec vulnerability database)
+- [ ] Configure license checks (ensure all deps are MIT/Apache-2.0 compatible)
+- [ ] Configure ban checks (prevent known-bad crates)
+- [ ] Configure source checks (only allow crates.io, github.com)
+- [ ] Add `cargo deny check` to CI pipeline
+- [ ] Document in README how to run locally
+
+**Expected Results:**
+- Automatic alerting on vulnerable dependencies
+- License compliance verification
+- Protection against typosquatting attacks
+
+**Dependencies:** None
+
+---
+
+#### Undefined Behavior Detection (miri)
+**Effort:** 10 minutes | **Priority:** P1 | **Impact:** Safety insurance, no production overhead
+
+Add miri to CI for detecting undefined behavior in test suite. Runs tests in slow interpreter that catches UB the compiler misses.
+
+**Implementation Tasks:**
+- [ ] Add CI job for `cargo +nightly miri test`
+- [ ] Configure to run on nightly schedule (not every commit, since it's slow)
+- [ ] Document in CONTRIBUTING.md how to run locally
+- [ ] Fix any UB issues discovered (likely none, minimal unsafe code)
+
+**Expected Results:**
+- Detection of use-after-free, uninitialized memory, data races
+- Zero production performance impact (test-time only)
+- Insurance against future unsafe code bugs
+
+**Dependencies:** None
+
+---
+
+#### Cow for Error Messages (Optional)
+**Effort:** 1 day | **Priority:** P2 | **Impact:** Minor memory optimization
+
+Use `Cow<'static, str>` for error messages to avoid allocating static strings.
+
+**Implementation Tasks:**
+- [ ] Change diagnostic messages to use `Cow::Borrowed` for static strings
+- [ ] Change diagnostic messages to use `Cow::Owned(format!(...))` for dynamic messages
+- [ ] Apply to parser error messages
+- [ ] Apply to type checker error messages
+- [ ] Apply to type display/formatting
+
+**Expected Results:**
+- Avoid allocations for common error messages
+- Minor memory savings (less impactful than string interning)
+
+**Dependencies:** None
+
+---
+
+#### Index-Based Module Graph (Optional)
+**Effort:** 2-3 days | **Priority:** P2 | **Impact:** Cleaner dependency tracking
+
+Replace PathBuf-based `ModuleId` with numeric indices stored in a central `Vec<Module>`. Makes mutation easier and avoids borrow checker issues with graph-like structures.
+
+**Implementation Tasks:**
+- [ ] Create `ModuleId` as `usize` or newtype wrapper
+- [ ] Store all modules in `Vec<Module>` in registry
+- [ ] Change dependencies from `Vec<PathBuf>` → `Vec<ModuleId>`
+- [ ] Update module resolver to work with indices
+- [ ] Update cache manifest to serialize/deserialize module graph
+
+**Expected Results:**
+- Easier mutation of module graph (no lifetime issues)
+- Cleaner dependency tracking
+- Easier serialization for incremental compilation
+
+**Dependencies:** None
+
+---
+
+#### salsa Framework Integration
+**Effort:** 2-3 weeks | **Priority:** P1 | **Impact:** Fine-grained incremental compilation for CLI + LSP
+
+**Decision:** APPROVED - TypedLua LSP is sophisticated enough (10+ IDE features) to benefit from fine-grained incremental recomputation. Manual file-level caching helps CLI but not LSP keystroke responsiveness.
+
+**Why salsa:**
+- ✅ LSP has hover, completion, diagnostics, rename, references, etc. (IDE-first toolchain)
+- ✅ Manual caching: CLI optimization (switching files), LSP bottleneck remains (editing within file)
+- ✅ salsa: Function-level granularity - editing line 50 doesn't invalidate entire 5000-line file
+- ✅ Battle-tested by rust-analyzer (100K+ line crates with instant responses)
+- ✅ Automatic dependency tracking (no manual invalidation logic)
+
+**Implementation Plan:**
+
+**Phase 1: Add salsa Dependency & Core Database (Week 1)**
+- [ ] Add `salsa = "0.17"` to `Cargo.toml`
+- [ ] Create `crates/typedlua-core/src/db/mod.rs` - Database trait
+- [ ] Create `crates/typedlua-core/src/db/inputs.rs` - Input queries (source text)
+- [ ] Create `crates/typedlua-core/src/db/queries.rs` - Query group definitions
+- [ ] Define `#[salsa::input]` for source files: `source_text(FileId) -> Arc<String>`
+- [ ] Define `#[salsa::tracked]` for parsing: `parse(FileId) -> Arc<Program>`
+- [ ] Define `#[salsa::tracked]` for type checking: `type_check(FileId) -> Arc<TypeCheckResult>`
+- [ ] Create database struct implementing all query groups
+
+**Phase 2: Integrate with Parser & Type Checker (Week 1-2)**
+- [ ] Modify lexer to work with salsa inputs
+- [ ] Modify parser to be pure function: `fn parse(db: &dyn Db, file: FileId) -> Arc<Program>`
+- [ ] Modify type checker to be pure function: `fn type_check(db: &dyn Db, file: FileId) -> Arc<TypeCheckResult>`
+- [ ] Handle imports/dependencies: `#[salsa::tracked] fn dependencies(FileId) -> Vec<FileId>`
+- [ ] Ensure all queries are deterministic (no global state)
+
+**Phase 3: CLI Integration (Week 2)**
+- [ ] Create `RootDatabase` in CLI entry point
+- [ ] Set input queries from file system
+- [ ] Call `db.type_check(file)` instead of direct calls
+- [ ] salsa automatically handles caching/invalidation
+- [ ] Test: Modify one file → only recompiles dependents
+
+**Phase 4: LSP Integration (Week 2-3)**
+- [ ] Integrate `RootDatabase` into LSP server state
+- [ ] On file change: `db.set_source_text(file, new_text)`
+- [ ] Diagnostics: `db.type_check(file)` (auto-cached)
+- [ ] Hover: `db.type_at_position(file, pos)` (add granular query)
+- [ ] Completion: `db.symbols_at_position(file, pos)` (add granular query)
+- [ ] Test: Type character → only re-analyzes changed function
+
+**Phase 5: Fine-Grained Queries (Week 3+)**
+- [ ] `#[salsa::tracked] fn symbol_at_position(FileId, Position) -> Option<Symbol>`
+- [ ] `#[salsa::tracked] fn type_of_symbol(FileId, SymbolId) -> Type`
+- [ ] `#[salsa::tracked] fn references_to_symbol(SymbolId) -> Vec<(FileId, Span)>`
+- [ ] Enable sub-file invalidation (editing function foo doesn't invalidate bar)
+
+**Testing:**
+- [ ] Unit tests: Verify salsa invalidation works correctly
+- [ ] Integration tests: Modify file, verify only dependents recompiled
+- [ ] LSP tests: Edit file, verify hover on unrelated symbol is instant (cached)
+- [ ] Performance benchmarks: Measure LSP keystroke latency on large files
+
+**Expected Results:**
+- CLI: 5-10x speedup on single-file changes (file-level caching)
+- LSP: 10-50x speedup on keystroke response (function-level caching)
+- Large files (5000+ lines): No noticeable lag when editing single function
+- Hover/completion: Instant even during active typing (cached queries)
+
+**Migration Strategy:**
+- Keep existing incremental cache plan as reference (good design ideas)
+- salsa replaces manual manifest/invalidation with framework
+- Existing cache infrastructure (hashing, serialization) may still be useful for persistent caching
+
+**Dependencies:** None - can start immediately
+
+---
+
+### Code Quality Improvements (Low Priority - Polish)
+
+**Status:** Optional refactoring for consistency - current code is production-ready
+
+#### Iterator and Functional Style Consistency
+**Effort:** 1-2 days | **Priority:** P3 | **Impact:** Code consistency, no functional changes
+
+The codebase currently uses a pragmatic mix of functional (iterator chains) and imperative (for loops with push) patterns. This is acceptable but could be more consistent.
+
+**Current State (Good - 70/100):**
+- ✅ Strong iterator adoption: ~173 `.iter()` calls, ~194 closures
+- ✅ Good use of `.map()` (66), `.collect()` (82), `.any()` (40), `.filter()` (14)
+- ✅ Appropriate functional patterns in utility_types.rs, diagnostics, cache
+- ⚠️ Mixed patterns in parser and type checker (some functional, some imperative)
+- ⚠️ Underutilized: `.fold()` (0 uses), `.flat_map()` (1 use), `.find()` (3 uses)
+
+**Potential Improvements (Not Required):**
+- [ ] Replace imperative Vec building with `.iter().map().collect()` patterns
+  - Locations: `parser/statement.rs`, `typechecker/type_checker.rs`, `utility_types.rs`
+  - Example: `let mut v = Vec::new(); for x in items { v.push(f(x)); }` → `items.iter().map(f).collect()`
+- [ ] Use `.fold()` for accumulation patterns instead of mutable accumulators
+- [ ] Use `.flat_map()` for nested iteration instead of nested for-loops
+- [ ] Replace index-based loops with `.enumerate()` or `.windows()` where appropriate
+
+**Note:** Do NOT over-refactor:
+- Parser needs imperative loops for error recovery complexity ✅
+- Type checker has complex control flow with early returns ✅
+- Imperative code with `push()` is NOT inherently bad ✅
+- Readability > dogmatic functional style ✅
+- Performance difference is negligible ✅
+
+**Guideline for New Code:**
+- Simple transformations → `.iter().map().collect()`
+- Boolean checks → `.any()`, `.all()`
+- Finding items → `.find()`, `.find_map()`
+- Accumulation → `.fold()` instead of `let mut`
+- Complex state management → Imperative for-loops are fine
+
+### Publishing
+- [ ] Publish VS Code extension to marketplace (see `editors/vscode/PUBLISHING.md`)
+
+---

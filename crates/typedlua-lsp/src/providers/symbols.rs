@@ -1,8 +1,8 @@
 use crate::document::Document;
+use lsp_types::*;
 use std::sync::Arc;
-use lsp_types::{*, Uri};
+use typedlua_core::ast::statement::{ClassMember, Statement};
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
-use typedlua_core::ast::statement::{Statement, ClassMember};
 use typedlua_core::{Lexer, Parser, Span};
 
 /// Provides document symbols (outline view)
@@ -85,7 +85,11 @@ impl SymbolsProvider {
                     deprecated: None,
                     range: span_to_range(&func_decl.span),
                     selection_range: span_to_range(&func_decl.name.span),
-                    children: if children.is_empty() { None } else { Some(children) },
+                    children: if children.is_empty() {
+                        None
+                    } else {
+                        Some(children)
+                    },
                 })
             }
             Statement::Class(class_decl) => {
@@ -106,45 +110,43 @@ impl SymbolsProvider {
                     deprecated: None,
                     range: span_to_range(&class_decl.span),
                     selection_range: span_to_range(&class_decl.name.span),
-                    children: if children.is_empty() { None } else { Some(children) },
+                    children: if children.is_empty() {
+                        None
+                    } else {
+                        Some(children)
+                    },
                 })
             }
-            Statement::Interface(interface_decl) => {
-                Some(DocumentSymbol {
-                    name: interface_decl.name.node.clone(),
-                    detail: None,
-                    kind: SymbolKind::INTERFACE,
-                    tags: None,
-                    deprecated: None,
-                    range: span_to_range(&interface_decl.span),
-                    selection_range: span_to_range(&interface_decl.name.span),
-                    children: None,
-                })
-            }
-            Statement::TypeAlias(type_decl) => {
-                Some(DocumentSymbol {
-                    name: type_decl.name.node.clone(),
-                    detail: None,
-                    kind: SymbolKind::TYPE_PARAMETER,
-                    tags: None,
-                    deprecated: None,
-                    range: span_to_range(&type_decl.span),
-                    selection_range: span_to_range(&type_decl.name.span),
-                    children: None,
-                })
-            }
-            Statement::Enum(enum_decl) => {
-                Some(DocumentSymbol {
-                    name: enum_decl.name.node.clone(),
-                    detail: None,
-                    kind: SymbolKind::ENUM,
-                    tags: None,
-                    deprecated: None,
-                    range: span_to_range(&enum_decl.span),
-                    selection_range: span_to_range(&enum_decl.name.span),
-                    children: None,
-                })
-            }
+            Statement::Interface(interface_decl) => Some(DocumentSymbol {
+                name: interface_decl.name.node.clone(),
+                detail: None,
+                kind: SymbolKind::INTERFACE,
+                tags: None,
+                deprecated: None,
+                range: span_to_range(&interface_decl.span),
+                selection_range: span_to_range(&interface_decl.name.span),
+                children: None,
+            }),
+            Statement::TypeAlias(type_decl) => Some(DocumentSymbol {
+                name: type_decl.name.node.clone(),
+                detail: None,
+                kind: SymbolKind::TYPE_PARAMETER,
+                tags: None,
+                deprecated: None,
+                range: span_to_range(&type_decl.span),
+                selection_range: span_to_range(&type_decl.name.span),
+                children: None,
+            }),
+            Statement::Enum(enum_decl) => Some(DocumentSymbol {
+                name: enum_decl.name.node.clone(),
+                detail: None,
+                kind: SymbolKind::ENUM,
+                tags: None,
+                deprecated: None,
+                range: span_to_range(&enum_decl.span),
+                selection_range: span_to_range(&enum_decl.name.span),
+                children: None,
+            }),
             _ => None,
         }
     }
@@ -152,73 +154,57 @@ impl SymbolsProvider {
     /// Extract a document symbol from a class member
     fn extract_symbol_from_class_member(&self, member: &ClassMember) -> Option<DocumentSymbol> {
         match member {
-            ClassMember::Property(prop) => {
-                Some(DocumentSymbol {
-                    name: prop.name.node.clone(),
-                    detail: None,
-                    kind: SymbolKind::PROPERTY,
-                    tags: None,
-                    deprecated: None,
-                    range: span_to_range(&prop.span),
-                    selection_range: span_to_range(&prop.name.span),
-                    children: None,
-                })
-            }
-            ClassMember::Constructor(ctor) => {
-                Some(DocumentSymbol {
-                    name: "constructor".to_string(),
-                    detail: None,
-                    kind: SymbolKind::CONSTRUCTOR,
-                    tags: None,
-                    deprecated: None,
-                    range: span_to_range(&ctor.span),
-                    selection_range: span_to_range(&ctor.span),
-                    children: None,
-                })
-            }
-            ClassMember::Method(method) => {
-                Some(DocumentSymbol {
-                    name: method.name.node.clone(),
-                    detail: None,
-                    kind: SymbolKind::METHOD,
-                    tags: None,
-                    deprecated: None,
-                    range: span_to_range(&method.span),
-                    selection_range: span_to_range(&method.name.span),
-                    children: None,
-                })
-            }
-            ClassMember::Getter(getter) => {
-                Some(DocumentSymbol {
-                    name: getter.name.node.clone(),
-                    detail: Some("get".to_string()),
-                    kind: SymbolKind::PROPERTY,
-                    tags: None,
-                    deprecated: None,
-                    range: span_to_range(&getter.span),
-                    selection_range: span_to_range(&getter.name.span),
-                    children: None,
-                })
-            }
-            ClassMember::Setter(setter) => {
-                Some(DocumentSymbol {
-                    name: setter.name.node.clone(),
-                    detail: Some("set".to_string()),
-                    kind: SymbolKind::PROPERTY,
-                    tags: None,
-                    deprecated: None,
-                    range: span_to_range(&setter.span),
-                    selection_range: span_to_range(&setter.name.span),
-                    children: None,
-                })
-            }
+            ClassMember::Property(prop) => Some(DocumentSymbol {
+                name: prop.name.node.clone(),
+                detail: None,
+                kind: SymbolKind::PROPERTY,
+                tags: None,
+                deprecated: None,
+                range: span_to_range(&prop.span),
+                selection_range: span_to_range(&prop.name.span),
+                children: None,
+            }),
+            ClassMember::Constructor(ctor) => Some(DocumentSymbol {
+                name: "constructor".to_string(),
+                detail: None,
+                kind: SymbolKind::CONSTRUCTOR,
+                tags: None,
+                deprecated: None,
+                range: span_to_range(&ctor.span),
+                selection_range: span_to_range(&ctor.span),
+                children: None,
+            }),
+            ClassMember::Method(method) => Some(DocumentSymbol {
+                name: method.name.node.clone(),
+                detail: None,
+                kind: SymbolKind::METHOD,
+                tags: None,
+                deprecated: None,
+                range: span_to_range(&method.span),
+                selection_range: span_to_range(&method.name.span),
+                children: None,
+            }),
+            ClassMember::Getter(getter) => Some(DocumentSymbol {
+                name: getter.name.node.clone(),
+                detail: Some("get".to_string()),
+                kind: SymbolKind::PROPERTY,
+                tags: None,
+                deprecated: None,
+                range: span_to_range(&getter.span),
+                selection_range: span_to_range(&getter.name.span),
+                children: None,
+            }),
+            ClassMember::Setter(setter) => Some(DocumentSymbol {
+                name: setter.name.node.clone(),
+                detail: Some("set".to_string()),
+                kind: SymbolKind::PROPERTY,
+                tags: None,
+                deprecated: None,
+                range: span_to_range(&setter.span),
+                selection_range: span_to_range(&setter.name.span),
+                children: None,
+            }),
         }
-    }
-
-    /// Provide workspace symbols matching a query
-    pub fn provide_workspace_symbols(&self, _query: &str) -> Vec<SymbolInformation> {
-        // For now, return empty until we have workspace access
-        Vec::new()
     }
 }
 
@@ -245,55 +231,35 @@ mod tests {
         let provider = SymbolsProvider::new();
 
         // Test function symbol
-        let doc = Document {
-            text: "function foo() end".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("function foo() end".to_string(), 1);
         let symbols = provider.provide(&doc);
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "foo");
         assert_eq!(symbols[0].kind, SymbolKind::FUNCTION);
 
         // Test variable symbol (local)
-        let doc = Document {
-            text: "local x = 10".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("local x = 10".to_string(), 1);
         let symbols = provider.provide(&doc);
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "x");
         assert_eq!(symbols[0].kind, SymbolKind::VARIABLE);
 
         // Test constant symbol
-        let doc = Document {
-            text: "const PI = 3.14".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("const PI = 3.14".to_string(), 1);
         let symbols = provider.provide(&doc);
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "PI");
         assert_eq!(symbols[0].kind, SymbolKind::CONSTANT);
 
         // Test class symbol
-        let doc = Document {
-            text: "class Point end".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("class Point end".to_string(), 1);
         let symbols = provider.provide(&doc);
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "Point");
         assert_eq!(symbols[0].kind, SymbolKind::CLASS);
 
         // Test interface symbol
-        let doc = Document {
-            text: "interface Drawable end".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("interface Drawable end".to_string(), 1);
         let symbols = provider.provide(&doc);
         // Parser might not recognize 'interface' keyword yet
         if symbols.len() > 0 {
@@ -302,22 +268,14 @@ mod tests {
         }
 
         // Test enum symbol
-        let doc = Document {
-            text: "enum Color { Red, Green, Blue }".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("enum Color { Red, Green, Blue }".to_string(), 1);
         let symbols = provider.provide(&doc);
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "Color");
         assert_eq!(symbols[0].kind, SymbolKind::ENUM);
 
         // Test type alias symbol
-        let doc = Document {
-            text: "type Point = { x: number, y: number }".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("type Point = { x: number, y: number }".to_string(), 1);
         let symbols = provider.provide(&doc);
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "Point");

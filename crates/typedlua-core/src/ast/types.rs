@@ -1,11 +1,13 @@
 use super::{
-    expression::Expression, expression::Literal,
+    expression::Expression,
+    expression::Literal,
     statement::{IndexSignature, MethodSignature, Parameter, PropertySignature, TypeParameter},
     Ident,
 };
 use crate::span::Span;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Type {
     pub kind: TypeKind,
     pub span: Span,
@@ -17,7 +19,7 @@ impl Type {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TypeKind {
     Primitive(PrimitiveType),
     Reference(TypeReference),
@@ -36,12 +38,12 @@ pub enum TypeKind {
     TemplateLiteral(TemplateLiteralType),
     Nullable(Box<Type>),
     Parenthesized(Box<Type>),
-    Infer(Ident),  // infer R - captures type in conditional
-    TypePredicate(TypePredicate),  // x is T - type guard predicate
-    Variadic(Box<Type>),  // ...T[] - variadic return type
+    Infer(Ident),                 // infer R - captures type in conditional
+    TypePredicate(TypePredicate), // x is T - type guard predicate
+    Variadic(Box<Type>),          // ...T[] - variadic return type
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PrimitiveType {
     Nil,
     Boolean,
@@ -55,34 +57,35 @@ pub enum PrimitiveType {
     Coroutine,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypeReference {
     pub name: Ident,
     pub type_arguments: Option<Vec<Type>>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObjectType {
     pub members: Vec<ObjectTypeMember>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ObjectTypeMember {
     Property(PropertySignature),
     Method(MethodSignature),
     Index(IndexSignature),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionType {
+    pub type_parameters: Option<Vec<crate::ast::statement::TypeParameter>>,
     pub parameters: Vec<Parameter>,
     pub return_type: Box<Type>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConditionalType {
     pub check_type: Box<Type>,
     pub extends_type: Box<Type>,
@@ -91,7 +94,7 @@ pub struct ConditionalType {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MappedType {
     pub is_readonly: bool,
     pub type_parameter: Box<TypeParameter>,
@@ -101,19 +104,19 @@ pub struct MappedType {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TemplateLiteralType {
     pub parts: Vec<TemplateLiteralTypePart>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TemplateLiteralTypePart {
     String(String),
     Type(Type),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypePredicate {
     pub parameter_name: Ident,
     pub type_annotation: Box<Type>,

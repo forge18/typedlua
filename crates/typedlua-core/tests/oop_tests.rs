@@ -1,24 +1,30 @@
+use std::sync::Arc;
 use typedlua_core::codegen::CodeGenerator;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::lexer::Lexer;
 use typedlua_core::parser::Parser;
 use typedlua_core::typechecker::TypeChecker;
-use std::sync::Arc;
 
 fn compile_and_check(source: &str) -> Result<String, String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
 
     // Lex
     let mut lexer = Lexer::new(source, handler.clone());
-    let tokens = lexer.tokenize().map_err(|e| format!("Lexing failed: {:?}", e))?;
+    let tokens = lexer
+        .tokenize()
+        .map_err(|e| format!("Lexing failed: {:?}", e))?;
 
     // Parse
     let mut parser = Parser::new(tokens, handler.clone());
-    let program = parser.parse().map_err(|e| format!("Parsing failed: {:?}", e))?;
+    let program = parser
+        .parse()
+        .map_err(|e| format!("Parsing failed: {:?}", e))?;
 
     // Type check
     let mut type_checker = TypeChecker::new(handler.clone());
-    type_checker.check_program(&program).map_err(|e| e.message)?;
+    type_checker
+        .check_program(&program)
+        .map_err(|e| e.message)?;
 
     // Generate code
     let mut codegen = CodeGenerator::new();
@@ -306,7 +312,10 @@ fn test_abstract_class_implementation() {
     if let Err(ref e) = result {
         eprintln!("Error: {}", e);
     }
-    assert!(result.is_ok(), "Abstract class implementation should compile");
+    assert!(
+        result.is_ok(),
+        "Abstract class implementation should compile"
+    );
 
     let output = result.unwrap();
     assert!(output.contains("function Rectangle:getArea()"));
@@ -337,7 +346,10 @@ fn test_class_implements_interface() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Class implementing interface should compile");
+    assert!(
+        result.is_ok(),
+        "Class implementing interface should compile"
+    );
 
     let output = result.unwrap();
     assert!(output.contains("function Circle:draw()"));
@@ -370,7 +382,10 @@ fn test_class_implements_multiple_interfaces() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Class implementing multiple interfaces should compile");
+    assert!(
+        result.is_ok(),
+        "Class implementing multiple interfaces should compile"
+    );
 
     let output = result.unwrap();
     assert!(output.contains("function GameObject:draw()"));

@@ -1,6 +1,6 @@
 use crate::document::Document;
+use lsp_types::*;
 use std::sync::Arc;
-use lsp_types::{*, Uri};
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::{Lexer, Parser};
 
@@ -13,7 +13,11 @@ impl FormattingProvider {
     }
 
     /// Format the entire document
-    pub fn format_document(&self, document: &Document, options: FormattingOptions) -> Vec<TextEdit> {
+    pub fn format_document(
+        &self,
+        document: &Document,
+        options: FormattingOptions,
+    ) -> Vec<TextEdit> {
         // Parse the document to ensure it's valid
         let handler = Arc::new(CollectingDiagnosticHandler::new());
         let mut lexer = Lexer::new(&document.text, handler.clone());
@@ -87,7 +91,9 @@ impl FormattingProvider {
 
             if trimmed == "end" {
                 // Calculate correct indentation for 'end'
-                if let Some(indent_level) = self.calculate_end_indent(document, position.line as usize) {
+                if let Some(indent_level) =
+                    self.calculate_end_indent(document, position.line as usize)
+                {
                     let indent = self.make_indent(indent_level, &options);
 
                     edits.push(TextEdit {
@@ -147,7 +153,10 @@ impl FormattingProvider {
             }
 
             // Decrease indent for closing keywords
-            if trimmed.starts_with("end") || trimmed.starts_with("else") || trimmed.starts_with("elseif") {
+            if trimmed.starts_with("end")
+                || trimmed.starts_with("else")
+                || trimmed.starts_with("elseif")
+            {
                 indent_level = indent_level.saturating_sub(1);
             }
 
@@ -233,7 +242,10 @@ impl FormattingProvider {
             }
 
             // Decrease indent for closing keywords
-            if trimmed.starts_with("end") || trimmed.starts_with("else") || trimmed.starts_with("elseif") {
+            if trimmed.starts_with("end")
+                || trimmed.starts_with("else")
+                || trimmed.starts_with("elseif")
+            {
                 indent_level = indent_level.saturating_sub(1);
             }
 
@@ -285,7 +297,10 @@ impl FormattingProvider {
             }
 
             // Decrease for closing keywords
-            if trimmed.starts_with("end") || trimmed.starts_with("else") || trimmed.starts_with("elseif") {
+            if trimmed.starts_with("end")
+                || trimmed.starts_with("else")
+                || trimmed.starts_with("elseif")
+            {
                 level = level.saturating_sub(1);
             }
 
@@ -333,11 +348,7 @@ mod tests {
         let provider = FormattingProvider::new();
 
         // Test with spaces
-        let doc = Document {
-            text: "function foo()\nlocal x = 1\nend".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("function foo()\nlocal x = 1\nend".to_string(), 1);
 
         let options = FormattingOptions {
             tab_size: 4,
@@ -371,11 +382,10 @@ mod tests {
         let provider = FormattingProvider::new();
 
         // Test indentation normalization
-        let doc = Document {
-            text: "function foo()\n        local x = 1\n    end".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test(
+            "function foo()\n        local x = 1\n    end".to_string(),
+            1,
+        );
 
         let options = FormattingOptions {
             tab_size: 4,
@@ -391,11 +401,7 @@ mod tests {
         assert!(edits.len() > 0);
 
         // Test trailing whitespace removal
-        let doc = Document {
-            text: "local x = 1   \nlocal y = 2  ".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("local x = 1   \nlocal y = 2  ".to_string(), 1);
 
         let options2 = FormattingOptions {
             tab_size: 4,
@@ -411,11 +417,10 @@ mod tests {
         assert!(edits.len() > 0);
 
         // Test on-type formatting for 'end' keyword
-        let doc = Document {
-            text: "function foo()\n    local x = 1\n        end".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test(
+            "function foo()\n    local x = 1\n        end".to_string(),
+            1,
+        );
 
         let options3 = FormattingOptions {
             tab_size: 4,
@@ -426,9 +431,12 @@ mod tests {
             trim_final_newlines: Some(false),
         };
 
-        let position = Position { line: 2, character: 11 }; // After 'end'
-        let edits = provider.format_on_type(&doc, position, "d", options3);
+        let position = Position {
+            line: 2,
+            character: 11,
+        }; // After 'end'
+        let _edits = provider.format_on_type(&doc, position, "d", options3);
         // Should auto-indent 'end' to correct level
-        assert!(edits.len() >= 0); // May or may not produce edits depending on state
+        // May or may not produce edits depending on state
     }
 }

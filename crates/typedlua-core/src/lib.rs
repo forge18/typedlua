@@ -1,5 +1,6 @@
 pub mod arena;
 pub mod ast;
+pub mod cache;
 pub mod codegen;
 pub mod config;
 pub mod di;
@@ -7,6 +8,7 @@ pub mod diagnostics;
 pub mod errors;
 pub mod fs;
 pub mod lexer;
+pub mod module_resolver;
 pub mod parser;
 pub mod span;
 pub mod stdlib;
@@ -27,4 +29,6 @@ pub use lexer::{Lexer, Token, TokenKind};
 pub use parser::Parser;
 pub use span::Span;
 pub use string_interner::{StringId, StringInterner};
-pub use typechecker::{SymbolTable, TypeChecker, TypeEnvironment};
+pub use typechecker::{
+    SerializableSymbol, SerializableSymbolTable, SymbolTable, TypeChecker, TypeEnvironment,
+};

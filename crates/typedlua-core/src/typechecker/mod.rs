@@ -1,22 +1,27 @@
-mod symbol_table;
-mod type_environment;
-mod type_checker;
-mod type_compat;
 mod generics;
-mod utility_types;
 mod narrowing;
 mod narrowing_integration;
+mod symbol_table;
+mod type_checker;
+mod type_compat;
+mod type_environment;
+mod utility_types;
 
 #[cfg(test)]
 mod tests;
 
-pub use symbol_table::{Symbol, SymbolKind, SymbolTable, Scope};
-pub use type_environment::TypeEnvironment;
+pub use generics::{check_type_constraints, infer_type_arguments, instantiate_type};
+pub use narrowing::{narrow_type_from_condition, NarrowingContext};
+pub use symbol_table::{
+    Scope, SerializableSymbol, SerializableSymbolTable, Symbol, SymbolKind, SymbolTable,
+};
 pub use type_checker::TypeChecker;
 pub use type_compat::TypeCompatibility;
-pub use generics::{instantiate_type, check_type_constraints, infer_type_arguments};
-pub use utility_types::{apply_utility_type, evaluate_mapped_type, evaluate_keyof, evaluate_conditional_type, evaluate_template_literal_type};
-pub use narrowing::{NarrowingContext, narrow_type_from_condition};
+pub use type_environment::TypeEnvironment;
+pub use utility_types::{
+    apply_utility_type, evaluate_conditional_type, evaluate_keyof, evaluate_mapped_type,
+    evaluate_template_literal_type,
+};
 
 use crate::span::Span;
 
@@ -38,7 +43,11 @@ impl TypeCheckError {
 
 impl std::fmt::Display for TypeCheckError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} at {}:{}", self.message, self.span.line, self.span.column)
+        write!(
+            f,
+            "{} at {}:{}",
+            self.message, self.span.line, self.span.column
+        )
     }
 }
 

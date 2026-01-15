@@ -1,5 +1,7 @@
 use crate::ast::expression::Literal;
-use crate::ast::types::{FunctionType, ObjectType, ObjectTypeMember, PrimitiveType, Type, TypeKind};
+use crate::ast::types::{
+    FunctionType, ObjectType, ObjectTypeMember, PrimitiveType, Type, TypeKind,
+};
 
 /// Type compatibility checker
 pub struct TypeCompatibility;
@@ -95,10 +97,47 @@ impl TypeCompatibility {
             (TypeKind::Parenthesized(s_inner), _) => Self::is_assignable(s_inner, target),
             (_, TypeKind::Parenthesized(t_inner)) => Self::is_assignable(source, t_inner),
 
-            // Type references - for now, names must match exactly
-            
+            // Type references
+            // NOTE: Ideally we would resolve type aliases to their underlying types
+            // and check structural compatibility. For now, we use name-based matching.
+            // This means:
+            //   type A = number; type B = number;
+            //   A and B are NOT compatible (should be, but requires type resolution)
+            //
+            // Future enhancement: Pass TypeEnvironment to resolve_type_reference() and
+            // recursively check is_assignable on the resolved types.
             (TypeKind::Reference(s_ref), TypeKind::Reference(t_ref)) => {
-                s_ref.name.node == t_ref.name.node
+                // Check if names match exactly
+                if s_ref.name.node == t_ref.name.node {
+                    // Same type reference name - check type arguments if present
+                    match (&s_ref.type_arguments, &t_ref.type_arguments) {
+                        (None, None) => true,
+                        (Some(s_args), Some(t_args)) if s_args.len() == t_args.len() => {
+                            // Check all type arguments are compatible
+                            s_args
+                                .iter()
+                                .zip(t_args.iter())
+                                .all(|(s_arg, t_arg)| Self::is_assignable(s_arg, t_arg))
+                        }
+                        _ => false,
+                    }
+                } else {
+                    // Different names - could still be compatible if they resolve to
+                    // the same underlying type, but we don't have type environment here
+                    false
+                }
+            }
+
+            // Type reference vs concrete type - would need type resolution
+            (TypeKind::Reference(_), _) => {
+                // We can't resolve the reference without a type environment
+                // Conservative: assume incompatible
+                false
+            }
+            (_, TypeKind::Reference(_)) => {
+                // We can't resolve the reference without a type environment
+                // Conservative: assume incompatible
+                false
             }
 
             _ => false,
@@ -138,7 +177,9 @@ impl TypeCompatibility {
 
         // Parameters are contravariant: target params must be assignable to source params
         for (s_param, t_param) in source.parameters.iter().zip(target.parameters.iter()) {
-            if let (Some(s_type), Some(t_type)) = (&s_param.type_annotation, &t_param.type_annotation) {
+            if let (Some(s_type), Some(t_type)) =
+                (&s_param.type_annotation, &t_param.type_annotation)
+            {
                 if !Self::is_assignable(t_type, s_type) {
                     return false;
                 }
@@ -159,7 +200,10 @@ impl TypeCompatibility {
                     let found = source.members.iter().any(|s_member| {
                         if let ObjectTypeMember::Property(s_prop) = s_member {
                             s_prop.name.node == t_prop.name.node
-                                && Self::is_assignable(&s_prop.type_annotation, &t_prop.type_annotation)
+                                && Self::is_assignable(
+                                    &s_prop.type_annotation,
+                                    &t_prop.type_annotation,
+                                )
                         } else {
                             false
                         }
@@ -174,7 +218,6 @@ impl TypeCompatibility {
                     let found = source.members.iter().any(|s_member| {
                         if let ObjectTypeMember::Method(s_method) = s_member {
                             s_method.name.node == t_method.name.node
-                        
                         } else {
                             false
                         }
@@ -184,9 +227,7 @@ impl TypeCompatibility {
                         return false;
                     }
                 }
-                ObjectTypeMember::Index(_) => {
-                    
-                }
+                ObjectTypeMember::Index(_) => {}
             }
         }
 
@@ -247,8 +288,14 @@ mod tests {
         let number_array = make_type(TypeKind::Array(Box::new(number.clone())));
         let string_array = make_type(TypeKind::Array(Box::new(string.clone())));
 
-        assert!(TypeCompatibility::is_assignable(&number_array, &number_array));
-        assert!(!TypeCompatibility::is_assignable(&number_array, &string_array));
+        assert!(TypeCompatibility::is_assignable(
+            &number_array,
+            &number_array
+        ));
+        assert!(!TypeCompatibility::is_assignable(
+            &number_array,
+            &string_array
+        ));
     }
 
     #[test]

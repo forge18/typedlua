@@ -1,9 +1,8 @@
-use typedlua_core::config::CompilerOptions;
+use std::sync::Arc;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::lexer::Lexer;
 use typedlua_core::parser::Parser;
 use typedlua_core::typechecker::TypeChecker;
-use std::sync::Arc;
 
 fn type_check(source: &str) -> Result<(), String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
@@ -14,14 +13,7 @@ fn type_check(source: &str) -> Result<(), String> {
     let program = parser.parse().map_err(|e| format!("{:?}", e))?;
 
     let mut checker = TypeChecker::new(handler);
-    checker = checker.with_options(CompilerOptions {
-        enable_oop: true,
-        ..Default::default()
-    });
-
-    checker
-        .check_program(&program)
-        .map_err(|e| e.message)?;
+    checker.check_program(&program).map_err(|e| e.message)?;
 
     Ok(())
 }
@@ -40,7 +32,10 @@ fn test_interface_method_correct_signature() {
         }
     "#;
 
-    assert!(type_check(source).is_ok(), "Correct method signature should pass");
+    assert!(
+        type_check(source).is_ok(),
+        "Correct method signature should pass"
+    );
 }
 
 #[test]
@@ -57,7 +52,10 @@ fn test_interface_method_wrong_param_count() {
         }
     "#;
 
-    assert!(type_check(source).is_err(), "Wrong parameter count should fail");
+    assert!(
+        type_check(source).is_err(),
+        "Wrong parameter count should fail"
+    );
 }
 
 #[test]
@@ -74,7 +72,10 @@ fn test_interface_method_wrong_param_type() {
         }
     "#;
 
-    assert!(type_check(source).is_err(), "Wrong parameter type should fail");
+    assert!(
+        type_check(source).is_err(),
+        "Wrong parameter type should fail"
+    );
 }
 
 #[test]
@@ -118,7 +119,10 @@ fn test_interface_multiple_methods_all_correct() {
         }
     "#;
 
-    assert!(type_check(source).is_ok(), "All correct signatures should pass");
+    assert!(
+        type_check(source).is_ok(),
+        "All correct signatures should pass"
+    );
 }
 
 #[test]
@@ -145,7 +149,10 @@ fn test_interface_multiple_methods_one_wrong() {
         }
     "#;
 
-    assert!(type_check(source).is_err(), "One wrong signature should fail");
+    assert!(
+        type_check(source).is_err(),
+        "One wrong signature should fail"
+    );
 }
 
 #[test]
@@ -183,7 +190,10 @@ fn test_interface_method_compatible_types() {
 
     // This should pass - the test is actually redundant with test_interface_method_correct_signature
     // but keeping it for clarity
-    assert!(type_check(source).is_ok(), "Compatible return type should pass");
+    assert!(
+        type_check(source).is_ok(),
+        "Compatible return type should pass"
+    );
 }
 
 #[test]
@@ -210,7 +220,10 @@ fn test_interface_method_mixed_types() {
         }
     "#;
 
-    assert!(type_check(source).is_ok(), "Mixed types with correct signatures should pass");
+    assert!(
+        type_check(source).is_ok(),
+        "Mixed types with correct signatures should pass"
+    );
 }
 
 #[test]
@@ -232,5 +245,8 @@ fn test_interface_method_no_params() {
         }
     "#;
 
-    assert!(type_check(source).is_ok(), "Methods with no params should work");
+    assert!(
+        type_check(source).is_ok(),
+        "Methods with no params should work"
+    );
 }

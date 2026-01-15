@@ -229,8 +229,6 @@ impl Parser {
             TokenKind::LeftParen => self.parse_function_type(),
 
             // Parenthesized type: (T)
-            
-
             _ => Err(ParserError {
                 message: format!("Unexpected token in type: {:?}", self.current().kind),
                 span: start_span,
@@ -352,6 +350,7 @@ impl Parser {
 
         Ok(Type {
             kind: TypeKind::Function(FunctionType {
+                type_parameters: None,
                 parameters,
                 return_type,
                 span: start_span.combine(&end_span),

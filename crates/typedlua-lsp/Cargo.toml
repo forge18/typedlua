@@ -6,6 +6,10 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[lib]
+name = "typedlua_lsp"
+path = "src/lib.rs"
+
 [[bin]]
 name = "typedlua-lsp"
 path = "src/main.rs"

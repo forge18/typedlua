@@ -1,8 +1,8 @@
 use crate::document::Document;
+use lsp_types::*;
 use std::sync::Arc;
-use lsp_types::{*, Uri};
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
-use typedlua_core::typechecker::{TypeChecker, Symbol, SymbolKind};
+use typedlua_core::typechecker::{Symbol, SymbolKind, TypeChecker};
 use typedlua_core::{Lexer, Parser};
 
 /// Provides code completion (IntelliSense)
@@ -22,11 +22,11 @@ impl CompletionProvider {
 
         match context {
             CompletionContext::MemberAccess => {
-                
+
                 // Would need type information from type checker
             }
             CompletionContext::MethodCall => {
-                
+
                 // Would need type information from type checker
             }
             CompletionContext::TypeAnnotation => {
@@ -36,7 +36,7 @@ impl CompletionProvider {
                 items.extend(self.complete_decorators());
             }
             CompletionContext::Import => {
-                
+
                 // Would need file system access
             }
             CompletionContext::Statement => {
@@ -85,7 +85,9 @@ impl CompletionProvider {
         if let Some(colon_pos) = before_cursor.rfind(':') {
             let after_colon = &before_cursor[colon_pos + 1..].trim_start();
             // If we're right after a colon or typing a type, we're in type context
-            if after_colon.is_empty() || after_colon.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            if after_colon.is_empty()
+                || after_colon.chars().all(|c| c.is_alphanumeric() || c == '_')
+            {
                 return CompletionContext::TypeAnnotation;
             }
         }
@@ -102,8 +104,16 @@ impl CompletionProvider {
     fn complete_keywords(&self) -> Vec<CompletionItem> {
         let keywords = vec![
             ("const", "Constant declaration", CompletionItemKind::KEYWORD),
-            ("local", "Local variable declaration", CompletionItemKind::KEYWORD),
-            ("function", "Function declaration", CompletionItemKind::KEYWORD),
+            (
+                "local",
+                "Local variable declaration",
+                CompletionItemKind::KEYWORD,
+            ),
+            (
+                "function",
+                "Function declaration",
+                CompletionItemKind::KEYWORD,
+            ),
             ("if", "If statement", CompletionItemKind::KEYWORD),
             ("then", "Then clause", CompletionItemKind::KEYWORD),
             ("else", "Else clause", CompletionItemKind::KEYWORD),
@@ -117,22 +127,50 @@ impl CompletionProvider {
             ("until", "Until condition", CompletionItemKind::KEYWORD),
             ("return", "Return statement", CompletionItemKind::KEYWORD),
             ("break", "Break statement", CompletionItemKind::KEYWORD),
-            ("continue", "Continue statement", CompletionItemKind::KEYWORD),
+            (
+                "continue",
+                "Continue statement",
+                CompletionItemKind::KEYWORD,
+            ),
             ("and", "Logical and", CompletionItemKind::OPERATOR),
             ("or", "Logical or", CompletionItemKind::OPERATOR),
             ("not", "Logical not", CompletionItemKind::OPERATOR),
             ("true", "Boolean true", CompletionItemKind::VALUE),
             ("false", "Boolean false", CompletionItemKind::VALUE),
             ("nil", "Nil value", CompletionItemKind::VALUE),
-            ("type", "Type alias declaration", CompletionItemKind::KEYWORD),
-            ("interface", "Interface declaration", CompletionItemKind::KEYWORD),
+            (
+                "type",
+                "Type alias declaration",
+                CompletionItemKind::KEYWORD,
+            ),
+            (
+                "interface",
+                "Interface declaration",
+                CompletionItemKind::KEYWORD,
+            ),
             ("enum", "Enum declaration", CompletionItemKind::KEYWORD),
             ("class", "Class declaration", CompletionItemKind::KEYWORD),
             ("extends", "Extends clause", CompletionItemKind::KEYWORD),
-            ("implements", "Implements clause", CompletionItemKind::KEYWORD),
-            ("public", "Public access modifier", CompletionItemKind::KEYWORD),
-            ("private", "Private access modifier", CompletionItemKind::KEYWORD),
-            ("protected", "Protected access modifier", CompletionItemKind::KEYWORD),
+            (
+                "implements",
+                "Implements clause",
+                CompletionItemKind::KEYWORD,
+            ),
+            (
+                "public",
+                "Public access modifier",
+                CompletionItemKind::KEYWORD,
+            ),
+            (
+                "private",
+                "Private access modifier",
+                CompletionItemKind::KEYWORD,
+            ),
+            (
+                "protected",
+                "Protected access modifier",
+                CompletionItemKind::KEYWORD,
+            ),
             ("static", "Static modifier", CompletionItemKind::KEYWORD),
             ("abstract", "Abstract modifier", CompletionItemKind::KEYWORD),
             ("readonly", "Readonly modifier", CompletionItemKind::KEYWORD),
@@ -205,7 +243,7 @@ impl CompletionProvider {
 
     /// Format symbol detail for completion
     fn format_symbol_detail(symbol: &Symbol) -> String {
-        use typedlua_core::ast::types::{TypeKind, PrimitiveType};
+        use typedlua_core::ast::types::{PrimitiveType, TypeKind};
 
         let kind_str = match symbol.kind {
             SymbolKind::Const => "const",
@@ -237,10 +275,18 @@ impl CompletionProvider {
     fn complete_types(&self) -> Vec<CompletionItem> {
         let types = vec![
             ("nil", "Nil type", CompletionItemKind::TYPE_PARAMETER),
-            ("boolean", "Boolean type", CompletionItemKind::TYPE_PARAMETER),
+            (
+                "boolean",
+                "Boolean type",
+                CompletionItemKind::TYPE_PARAMETER,
+            ),
             ("number", "Number type", CompletionItemKind::TYPE_PARAMETER),
             ("string", "String type", CompletionItemKind::TYPE_PARAMETER),
-            ("unknown", "Unknown type", CompletionItemKind::TYPE_PARAMETER),
+            (
+                "unknown",
+                "Unknown type",
+                CompletionItemKind::TYPE_PARAMETER,
+            ),
             ("never", "Never type", CompletionItemKind::TYPE_PARAMETER),
             ("void", "Void type", CompletionItemKind::TYPE_PARAMETER),
             ("any", "Any type", CompletionItemKind::TYPE_PARAMETER),
@@ -262,9 +308,21 @@ impl CompletionProvider {
     /// Complete decorator names
     fn complete_decorators(&self) -> Vec<CompletionItem> {
         let decorators = vec![
-            ("readonly", "Make property readonly", "TypedLua built-in decorator"),
-            ("sealed", "Seal class from extension", "TypedLua built-in decorator"),
-            ("deprecated", "Mark as deprecated", "TypedLua built-in decorator"),
+            (
+                "readonly",
+                "Make property readonly",
+                "TypedLua built-in decorator",
+            ),
+            (
+                "sealed",
+                "Seal class from extension",
+                "TypedLua built-in decorator",
+            ),
+            (
+                "deprecated",
+                "Mark as deprecated",
+                "TypedLua built-in decorator",
+            ),
         ];
 
         decorators
@@ -281,8 +339,8 @@ impl CompletionProvider {
     }
 
     /// Resolve additional details for a completion item
+    #[allow(dead_code)]
     pub fn resolve(&self, item: CompletionItem) -> CompletionItem {
-        
         // For now, just return the item as-is
         item
     }

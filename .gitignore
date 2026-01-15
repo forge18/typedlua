@@ -1,1 +1,60 @@
+# Rust
 /target
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# Build artifacts
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Test artifacts
+*.profraw
+*.profdata
+/coverage
+/tarpaulin-report.html
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Claude Code
+.claude/logs/
+.claude/cache/
+
+# Documentation build
+/docs/_build
+/docs/.doctrees
+
+# Temporary files
+*.tmp
+*.bak
+*.log
+.git/commit-log.txt
+
+# OS-specific
+Thumbs.db
+.Spotlight-V100
+.Trashes
+
+# Project-specific
+knowledge/
+/fuzz/corpus/
+/fuzz/artifacts/
+
+# Environment
+.env
+.env.local
+*.pem
+*.key
+credentials.json
+
+TODO.md

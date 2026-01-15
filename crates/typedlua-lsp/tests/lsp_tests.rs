@@ -1,8 +1,6 @@
 #[cfg(test)]
 mod provider_tests {
 
-    
-
     #[test]
     fn test_document_manager() {
         // Test document lifecycle
@@ -144,8 +142,6 @@ mod provider_tests {
 
 #[cfg(test)]
 mod integration_tests {
-
-    
 
     #[test]
     fn test_initialize_request() {

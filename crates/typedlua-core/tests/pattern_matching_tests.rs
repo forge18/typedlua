@@ -1,24 +1,30 @@
+use std::sync::Arc;
 use typedlua_core::codegen::CodeGenerator;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::lexer::Lexer;
 use typedlua_core::parser::Parser;
 use typedlua_core::typechecker::TypeChecker;
-use std::sync::Arc;
 
 fn compile_and_check(source: &str) -> Result<String, String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
 
     // Lex
     let mut lexer = Lexer::new(source, handler.clone());
-    let tokens = lexer.tokenize().map_err(|e| format!("Lexing failed: {:?}", e))?;
+    let tokens = lexer
+        .tokenize()
+        .map_err(|e| format!("Lexing failed: {:?}", e))?;
 
     // Parse
     let mut parser = Parser::new(tokens, handler.clone());
-    let program = parser.parse().map_err(|e| format!("Parsing failed: {:?}", e))?;
+    let program = parser
+        .parse()
+        .map_err(|e| format!("Parsing failed: {:?}", e))?;
 
     // Type check
     let mut type_checker = TypeChecker::new(handler.clone());
-    type_checker.check_program(&program).map_err(|e| e.message)?;
+    type_checker
+        .check_program(&program)
+        .map_err(|e| e.message)?;
 
     // Generate code
     let mut codegen = CodeGenerator::new();
@@ -124,7 +130,7 @@ fn test_match_with_array_pattern() {
 
 #[test]
 fn test_match_with_object_pattern() {
-    
+
     // on separate lines aren't being parsed correctly when there are object literals.
     // The parser only parses the first statement. Once this parser issue is fixed,
     // re-enable this test.
@@ -207,7 +213,10 @@ fn test_match_empty_arms_error() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_err(), "Match with no arms should fail type checking");
+    assert!(
+        result.is_err(),
+        "Match with no arms should fail type checking"
+    );
     let error = result.unwrap_err();
     assert!(error.contains("must have at least one arm"));
 }

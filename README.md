@@ -1,8 +1,8 @@
 # TypedLua
 
-[![CI](https://github.com/forge18/typed-lua/actions/workflows/ci.yml/badge.svg)](https://github.com/forge18/typed-lua/actions/workflows/ci.yml)
+[![Alpha](https://img.shields.io/badge/status-alpha-orange.svg)](https://github.com/forge18/typed-lua)
 [![codecov](https://codecov.io/gh/forge18/typed-lua/branch/main/graph/badge.svg)](https://codecov.io/gh/forge18/typed-lua)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/forge18/typed-lua/actions/workflows/ci.yml/badge.svg)](https://github.com/forge18/typed-lua/actions/workflows/ci.yml)
 
 A typed superset of Lua with gradual typing, inspired by TypeScript's approach to JavaScript.
 
@@ -183,7 +183,20 @@ TypedLua provides a rich type system inspired by TypeScript:
 - Interfaces: table shapes only
 - Type aliases: everything except table shapes
 
-See [docs/TypedLua-Design.md](docs/TypedLua-Design.md) for complete type system documentation.
+See [docs/designs/TypedLua-Design.md](docs/designs/TypedLua-Design.md) for complete type system documentation.
+
+## Language Features
+
+TypedLua includes powerful OOP features for building robust applications:
+
+- **`override` keyword** - Explicit method overriding with compile-time validation
+- **`final` keyword** - Prevent inheritance and method overriding
+- Classes, interfaces, and inheritance
+- Access modifiers (public, private, protected)
+- Decorators and metadata
+- Pattern matching and destructuring
+
+See [docs/LANGUAGE_FEATURES.md](docs/LANGUAGE_FEATURES.md) for detailed documentation and examples.
 
 ## Roadmap
 

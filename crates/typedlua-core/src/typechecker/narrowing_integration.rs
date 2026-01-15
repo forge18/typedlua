@@ -1,7 +1,6 @@
 /// Integration module for type narrowing with the type checker
 /// This provides the scaffolding for how narrowing will be used during type checking
-
-use super::narrowing::{NarrowingContext, narrow_type_from_condition};
+use super::narrowing::{narrow_type_from_condition, NarrowingContext};
 use crate::ast::expression::Expression;
 use crate::ast::types::Type;
 use rustc_hash::FxHashMap;
@@ -34,11 +33,8 @@ impl IfStatementNarrowingExample {
         variable_types: &FxHashMap<String, Type>,
     ) -> (NarrowingContext, NarrowingContext) {
         // Step 1: Analyze the condition to produce narrowed contexts
-        let (then_context, else_context) = narrow_type_from_condition(
-            condition,
-            base_context,
-            variable_types,
-        );
+        let (then_context, else_context) =
+            narrow_type_from_condition(condition, base_context, variable_types);
 
         // Step 2: When type checking the then-branch, use then_context
         // to get narrowed types for variables
@@ -65,7 +61,6 @@ impl IfStatementNarrowingExample {
         (then_context, else_context)
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -120,11 +115,17 @@ mod tests {
 
         // In then branch: x should be narrowed to string
         let then_type = then_ctx.get_narrowed_type("x").unwrap();
-        assert!(matches!(then_type.kind, TypeKind::Primitive(PrimitiveType::String)));
+        assert!(matches!(
+            then_type.kind,
+            TypeKind::Primitive(PrimitiveType::String)
+        ));
 
         // In else branch: x should be nil
         let else_type = else_ctx.get_narrowed_type("x").unwrap();
-        assert!(matches!(else_type.kind, TypeKind::Primitive(PrimitiveType::Nil)));
+        assert!(matches!(
+            else_type.kind,
+            TypeKind::Primitive(PrimitiveType::Nil)
+        ));
     }
 
     #[test]
@@ -182,11 +183,17 @@ mod tests {
 
         // In then branch: x should be string
         let then_type = then_ctx.get_narrowed_type("x").unwrap();
-        assert!(matches!(then_type.kind, TypeKind::Primitive(PrimitiveType::String)));
+        assert!(matches!(
+            then_type.kind,
+            TypeKind::Primitive(PrimitiveType::String)
+        ));
 
         // In else branch: x should be number
         let else_type = else_ctx.get_narrowed_type("x").unwrap();
-        assert!(matches!(else_type.kind, TypeKind::Primitive(PrimitiveType::Number)));
+        assert!(matches!(
+            else_type.kind,
+            TypeKind::Primitive(PrimitiveType::Number)
+        ));
     }
 
     #[test]
@@ -235,14 +242,21 @@ mod tests {
 
         // In then branch: x should be narrowed to string
         let then_type = then_ctx.get_narrowed_type("x").unwrap();
-        assert!(matches!(then_type.kind, TypeKind::Primitive(PrimitiveType::String)));
+        assert!(matches!(
+            then_type.kind,
+            TypeKind::Primitive(PrimitiveType::String)
+        ));
 
         // In else branch: x should be number | nil
         let else_type = else_ctx.get_narrowed_type("x").unwrap();
         if let TypeKind::Union(types) = &else_type.kind {
             assert_eq!(types.len(), 2);
-            assert!(types.iter().any(|t| matches!(t.kind, TypeKind::Primitive(PrimitiveType::Number))));
-            assert!(types.iter().any(|t| matches!(t.kind, TypeKind::Primitive(PrimitiveType::Nil))));
+            assert!(types
+                .iter()
+                .any(|t| matches!(t.kind, TypeKind::Primitive(PrimitiveType::Number))));
+            assert!(types
+                .iter()
+                .any(|t| matches!(t.kind, TypeKind::Primitive(PrimitiveType::Nil))));
         } else {
             panic!("Expected union type for else branch");
         }

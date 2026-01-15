@@ -81,7 +81,10 @@ impl Parser {
         let body = if self.check(&TokenKind::LeftBrace) {
             self.advance();
             let block = self.parse_block()?;
-            self.consume(TokenKind::RightBrace, "Expected '}' after arrow function body")?;
+            self.consume(
+                TokenKind::RightBrace,
+                "Expected '}' after arrow function body",
+            )?;
             ArrowBody::Block(block)
         } else {
             let expr = self.parse_assignment()?;
@@ -174,11 +177,7 @@ impl Parser {
             let right = self.parse_bitwise_and()?;
             let span = expr.span.combine(&right.span);
             expr = Expression {
-                kind: ExpressionKind::Binary(
-                    BinaryOp::BitwiseXor,
-                    Box::new(expr),
-                    Box::new(right),
-                ),
+                kind: ExpressionKind::Binary(BinaryOp::BitwiseXor, Box::new(expr), Box::new(right)),
                 span,
             };
         }
@@ -193,11 +192,7 @@ impl Parser {
             let right = self.parse_equality()?;
             let span = expr.span.combine(&right.span);
             expr = Expression {
-                kind: ExpressionKind::Binary(
-                    BinaryOp::BitwiseAnd,
-                    Box::new(expr),
-                    Box::new(right),
-                ),
+                kind: ExpressionKind::Binary(BinaryOp::BitwiseAnd, Box::new(expr), Box::new(right)),
                 span,
             };
         }
@@ -242,7 +237,11 @@ impl Parser {
             let right = self.parse_shift()?;
             let span = expr.span.combine(&right.span);
             expr = Expression {
-                kind: ExpressionKind::Binary(BinaryOp::Concatenate, Box::new(expr), Box::new(right)),
+                kind: ExpressionKind::Binary(
+                    BinaryOp::Concatenate,
+                    Box::new(expr),
+                    Box::new(right),
+                ),
                 span,
             };
         }
@@ -311,6 +310,29 @@ impl Parser {
     }
 
     fn parse_unary(&mut self) -> Result<Expression, ParserError> {
+        // Handle 'new' keyword for class instantiation
+        if self.check(&TokenKind::New) {
+            let start_span = self.current_span();
+            self.advance(); // consume 'new'
+
+            let constructor = self.parse_postfix()?;
+
+            // new expressions must be followed by a call
+            // e.g., new Config() or new Point(x, y)
+            if let ExpressionKind::Call(callee, args) = constructor.kind {
+                let span = start_span.combine(&constructor.span);
+                return Ok(Expression {
+                    kind: ExpressionKind::New(callee, args),
+                    span,
+                });
+            } else {
+                return Err(ParserError {
+                    message: "Expected function call after 'new' keyword".to_string(),
+                    span: constructor.span,
+                });
+            }
+        }
+
         if let Some(op) = self.match_unary_op() {
             let expr = self.parse_unary()?;
             let start_span = self.current_span();
@@ -441,20 +463,37 @@ impl Parser {
                 })
             }
             TokenKind::LeftParen => {
-                self.advance();
-                let expr = self.parse_expression()?;
-                let end_span = self.current_span();
-                self.consume(TokenKind::RightParen, "Expected ')' after expression")?;
-                Ok(Expression {
-                    kind: ExpressionKind::Parenthesized(Box::new(expr)),
-                    span: start_span.combine(&end_span),
-                })
+                // Handle deeply nested parentheses iteratively to avoid stack overflow
+                let mut paren_count = 0;
+
+                // Count consecutive left parens
+                while self.check(&TokenKind::LeftParen) {
+                    self.advance();
+                    paren_count += 1;
+                }
+
+                // Parse the inner expression
+                let mut expr = self.parse_expression()?;
+
+                // Consume matching right parens and wrap in Parenthesized nodes
+                for _ in 0..paren_count {
+                    let end_span = self.current_span();
+                    self.consume(TokenKind::RightParen, "Expected ')' after expression")?;
+                    expr = Expression {
+                        kind: ExpressionKind::Parenthesized(Box::new(expr)),
+                        span: start_span.combine(&end_span),
+                    };
+                }
+
+                Ok(expr)
             }
             TokenKind::LeftBrace => self.parse_object_or_table(),
             TokenKind::LeftBracket => self.parse_array(),
             TokenKind::Function => self.parse_function_expression(),
             TokenKind::Match => self.parse_match_expression(),
-            TokenKind::TemplateString(parts) => self.parse_template_literal(parts.clone(), start_span),
+            TokenKind::TemplateString(parts) => {
+                self.parse_template_literal(parts.clone(), start_span)
+            }
             TokenKind::Super => {
                 self.advance();
                 Ok(Expression {

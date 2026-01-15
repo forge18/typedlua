@@ -1,25 +1,32 @@
+use std::sync::Arc;
+use typedlua_core::codegen::CodeGenerator;
 use typedlua_core::config::CompilerOptions;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::lexer::Lexer;
 use typedlua_core::parser::Parser;
 use typedlua_core::typechecker::TypeChecker;
-use typedlua_core::codegen::CodeGenerator;
-use std::sync::Arc;
 
 fn compile_and_check(source: &str) -> Result<String, String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
 
     // Lex
     let mut lexer = Lexer::new(source, handler.clone());
-    let tokens = lexer.tokenize().map_err(|e| format!("Lexing failed: {:?}", e))?;
+    let tokens = lexer
+        .tokenize()
+        .map_err(|e| format!("Lexing failed: {:?}", e))?;
 
     // Parse
     let mut parser = Parser::new(tokens, handler.clone());
-    let program = parser.parse().map_err(|e| format!("Parsing failed: {:?}", e))?;
+    let program = parser
+        .parse()
+        .map_err(|e| format!("Parsing failed: {:?}", e))?;
 
     // Type check
-    let mut type_checker = TypeChecker::new(handler.clone()).with_options(CompilerOptions::default());
-    type_checker.check_program(&program).map_err(|e| e.message)?;
+    let mut type_checker =
+        TypeChecker::new(handler.clone()).with_options(CompilerOptions::default());
+    type_checker
+        .check_program(&program)
+        .map_err(|e| e.message)?;
 
     // Generate code
     let mut codegen = CodeGenerator::new();
@@ -45,12 +52,24 @@ fn test_simple_rest_parameter() {
     if let Ok(ref output) = result {
         println!("Generated code:\n{}", output);
     }
-    assert!(result.is_ok(), "Simple rest parameter should compile: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Simple rest parameter should compile: {:?}",
+        result.err()
+    );
     let output = result.unwrap();
 
     // Should generate: local function sum(...) with local numbers = {...}
-    assert!(output.contains("function sum(...)"), "Output should contain 'function sum(...)' but got:\n{}", output);
-    assert!(output.contains("local numbers = {...}"), "Output should contain 'local numbers = {{...}}' but got:\n{}", output);
+    assert!(
+        output.contains("function sum(...)"),
+        "Output should contain 'function sum(...)' but got:\n{}",
+        output
+    );
+    assert!(
+        output.contains("local numbers = {...}"),
+        "Output should contain 'local numbers = {{...}}' but got:\n{}",
+        output
+    );
 }
 
 #[test]
@@ -62,12 +81,24 @@ fn test_rest_parameter_with_regular_params() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Rest parameter with regular params should compile: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Rest parameter with regular params should compile: {:?}",
+        result.err()
+    );
     let output = result.unwrap();
 
     // Should generate: local function greet(greeting, ...)
-    assert!(output.contains("function greet(greeting, ...)"), "Output should contain 'function greet(greeting, ...)' but got:\n{}", output);
-    assert!(output.contains("local names = {...}"), "Output should contain 'local names = {{...}}' but got:\n{}", output);
+    assert!(
+        output.contains("function greet(greeting, ...)"),
+        "Output should contain 'function greet(greeting, ...)' but got:\n{}",
+        output
+    );
+    assert!(
+        output.contains("local names = {...}"),
+        "Output should contain 'local names = {{...}}' but got:\n{}",
+        output
+    );
 }
 
 #[test]
@@ -79,11 +110,23 @@ fn test_multiple_params_with_rest() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Multiple params with rest should compile: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Multiple params with rest should compile: {:?}",
+        result.err()
+    );
     let output = result.unwrap();
 
-    assert!(output.contains("function format(template, prefix, ...)"), "Output should contain 'function format(template, prefix, ...)' but got:\n{}", output);
-    assert!(output.contains("local args = {...}"), "Output should contain 'local args = {{...}}' but got:\n{}", output);
+    assert!(
+        output.contains("function format(template, prefix, ...)"),
+        "Output should contain 'function format(template, prefix, ...)' but got:\n{}",
+        output
+    );
+    assert!(
+        output.contains("local args = {...}"),
+        "Output should contain 'local args = {{...}}' but got:\n{}",
+        output
+    );
 }
 
 // ============================================================================
@@ -100,11 +143,19 @@ fn test_rest_parameter_access() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Rest parameter access should compile: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Rest parameter access should compile: {:?}",
+        result.err()
+    );
     let output = result.unwrap();
 
     // Should be able to access rest param as array
-    assert!(output.contains("local first = items[1]"), "Output should contain 'local first = items[1]' but got:\n{}", output);
+    assert!(
+        output.contains("local first = items[1]"),
+        "Output should contain 'local first = items[1]' but got:\n{}",
+        output
+    );
 }
 
 #[test]
@@ -130,11 +181,18 @@ fn test_rest_parameter_length() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Getting length of rest parameter should compile");
+    assert!(
+        result.is_ok(),
+        "Getting length of rest parameter should compile"
+    );
     let output = result.unwrap();
 
     // Should access length with #
-    assert!(output.contains("#items"), "Output should contain '#items' but got:\n{}", output);
+    assert!(
+        output.contains("#items"),
+        "Output should contain '#items' but got:\n{}",
+        output
+    );
 }
 
 // ============================================================================
@@ -150,7 +208,10 @@ fn test_rest_parameter_type_annotation() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Rest parameter with type annotation should compile");
+    assert!(
+        result.is_ok(),
+        "Rest parameter with type annotation should compile"
+    );
 }
 
 #[test]
@@ -162,7 +223,10 @@ fn test_rest_parameter_string_type() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Rest parameter with string type should compile");
+    assert!(
+        result.is_ok(),
+        "Rest parameter with string type should compile"
+    );
 }
 
 #[test]
@@ -174,7 +238,10 @@ fn test_rest_parameter_any_type() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Rest parameter without type annotation should compile");
+    assert!(
+        result.is_ok(),
+        "Rest parameter without type annotation should compile"
+    );
 }
 
 // ============================================================================
@@ -190,9 +257,16 @@ fn test_rest_parameter_must_be_last() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_err(), "Rest parameter not in last position should fail");
+    assert!(
+        result.is_err(),
+        "Rest parameter not in last position should fail"
+    );
     let error = result.unwrap_err();
-    assert!(error.contains("must be the last parameter") || error.contains("rest"), "Error should mention rest parameter constraint but got: {}", error);
+    assert!(
+        error.contains("must be the last parameter") || error.contains("rest"),
+        "Error should mention rest parameter constraint but got: {}",
+        error
+    );
 }
 
 #[test]
@@ -235,7 +309,10 @@ fn test_rest_parameter_call() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Calling function with rest parameter should compile");
+    assert!(
+        result.is_ok(),
+        "Calling function with rest parameter should compile"
+    );
 }
 
 #[test]
@@ -249,7 +326,10 @@ fn test_rest_parameter_with_local_vars() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Rest parameter with local variables should compile");
+    assert!(
+        result.is_ok(),
+        "Rest parameter with local variables should compile"
+    );
 }
 
 #[test]
@@ -262,7 +342,10 @@ fn test_empty_rest_parameter() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Calling rest parameter function with no args should compile");
+    assert!(
+        result.is_ok(),
+        "Calling rest parameter function with no args should compile"
+    );
 }
 
 #[test]
@@ -274,7 +357,10 @@ fn test_rest_parameter_shadowing() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Rest parameter names should work independently");
+    assert!(
+        result.is_ok(),
+        "Rest parameter names should work independently"
+    );
 }
 
 // ============================================================================
@@ -320,5 +406,8 @@ fn test_rest_parameter_type_inference() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Type inference with rest parameters should work");
+    assert!(
+        result.is_ok(),
+        "Type inference with rest parameters should work"
+    );
 }

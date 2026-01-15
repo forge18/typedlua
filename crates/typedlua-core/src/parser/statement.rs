@@ -1,6 +1,6 @@
 use super::{ExpressionParser, Parser, ParserError, PatternParser, TypeParser};
 use crate::ast::statement::*;
-use crate::ast::types::{Type, TypeKind, PrimitiveType};
+use crate::ast::types::{PrimitiveType, Type, TypeKind};
 use crate::ast::Ident;
 use crate::ast::Spanned;
 use crate::lexer::TokenKind;
@@ -41,7 +41,9 @@ impl StatementParser for Parser {
             TokenKind::Enum => self.parse_enum_declaration(),
             TokenKind::Import => self.parse_import_declaration(),
             TokenKind::Export => self.parse_export_declaration(),
-            TokenKind::Abstract | TokenKind::Class => self.parse_class_declaration(),
+            TokenKind::Abstract | TokenKind::Final | TokenKind::Class => {
+                self.parse_class_declaration()
+            }
             TokenKind::Declare => self.parse_declare_statement(),
             _ => {
                 // Expression statement
@@ -102,10 +104,7 @@ impl Parser {
             None
         };
 
-        self.consume(
-            TokenKind::Equal,
-            "Expected '=' in variable declaration",
-        )?;
+        self.consume(TokenKind::Equal, "Expected '=' in variable declaration")?;
 
         let initializer = self.parse_expression()?;
         let end_span = initializer.span;
@@ -267,14 +266,16 @@ impl Parser {
             self.consume(TokenKind::End, "Expected 'end' after for body")?;
             let end_span = self.current_span();
 
-            Ok(Statement::For(ForStatement::Numeric(ForNumeric {
-                variable: first_var,
-                start,
-                end,
-                step,
-                body,
-                span: start_span.combine(&end_span),
-            })))
+            Ok(Statement::For(Box::new(ForStatement::Numeric(Box::new(
+                ForNumeric {
+                    variable: first_var,
+                    start,
+                    end,
+                    step,
+                    body,
+                    span: start_span.combine(&end_span),
+                },
+            )))))
         } else {
             // Generic for: for k, v in iterator do
             let mut variables = vec![first_var];
@@ -295,12 +296,14 @@ impl Parser {
             self.consume(TokenKind::End, "Expected 'end' after for body")?;
             let end_span = self.current_span();
 
-            Ok(Statement::For(ForStatement::Generic(ForGeneric {
-                variables,
-                iterators,
-                body,
-                span: start_span.combine(&end_span),
-            })))
+            Ok(Statement::For(Box::new(ForStatement::Generic(
+                ForGeneric {
+                    variables,
+                    iterators,
+                    body,
+                    span: start_span.combine(&end_span),
+                },
+            ))))
         }
     }
 
@@ -313,7 +316,11 @@ impl Parser {
         // Return can have no values
         if !matches!(
             &self.current().kind,
-            TokenKind::End | TokenKind::Else | TokenKind::Elseif | TokenKind::Until | TokenKind::Eof
+            TokenKind::End
+                | TokenKind::Else
+                | TokenKind::Elseif
+                | TokenKind::Until
+                | TokenKind::Eof
         ) {
             values.push(self.parse_expression()?);
 
@@ -569,6 +576,14 @@ impl Parser {
         let start_span = self.current_span();
         self.consume(TokenKind::Import, "Expected 'import'")?;
 
+        // Check for "import type { ... }"
+        let is_type_only = if self.check(&TokenKind::Type) {
+            self.advance(); // consume 'type'
+            true
+        } else {
+            false
+        };
+
         // Parse import clause
         let clause = if self.match_token(&[TokenKind::Star]) {
             // import * as name from "source"
@@ -576,13 +591,23 @@ impl Parser {
             let name = self.parse_identifier()?;
             ImportClause::Namespace(name)
         } else if self.check(&TokenKind::LeftBrace) {
-            // import { a, b as c } from "source"
+            // import { a, b as c } from "source" OR import type { a, b } from "source"
             self.consume(TokenKind::LeftBrace, "Expected '{'")?;
             let specifiers = self.parse_import_specifiers()?;
             self.consume(TokenKind::RightBrace, "Expected '}'")?;
-            ImportClause::Named(specifiers)
+            if is_type_only {
+                ImportClause::TypeOnly(specifiers)
+            } else {
+                ImportClause::Named(specifiers)
+            }
         } else {
             // import name from "source"
+            if is_type_only {
+                return Err(ParserError {
+                    message: "Type-only imports must use named import syntax: import type { Name } from '...'".to_string(),
+                    span: self.current_span(),
+                });
+            }
             let name = self.parse_identifier()?;
             ImportClause::Default(name)
         };
@@ -660,11 +685,31 @@ impl Parser {
             let expr = self.parse_expression()?;
             ExportKind::Default(expr)
         } else if self.check(&TokenKind::LeftBrace) {
-            // export { a, b as c }
+            // export { a, b as c } [from './source']
             self.consume(TokenKind::LeftBrace, "Expected '{'")?;
             let specifiers = self.parse_export_specifiers()?;
             self.consume(TokenKind::RightBrace, "Expected '}'")?;
-            ExportKind::Named(specifiers)
+
+            // Check for 'from' clause (re-export)
+            let source = if self.match_token(&[TokenKind::From]) {
+                match &self.current().kind {
+                    TokenKind::String(s) => {
+                        let source_string = s.clone();
+                        self.advance();
+                        Some(source_string)
+                    }
+                    _ => {
+                        return Err(ParserError {
+                            message: "Expected string literal after 'from'".to_string(),
+                            span: self.current_span(),
+                        });
+                    }
+                }
+            } else {
+                None
+            };
+
+            ExportKind::Named { specifiers, source }
         } else {
             // export declaration
             let decl = self.parse_statement()?;
@@ -711,7 +756,7 @@ impl Parser {
     }
 
     fn parse_declare_statement(&mut self) -> Result<Statement, ParserError> {
-        let start_span = self.current_span();
+        let _start_span = self.current_span();
         self.consume(TokenKind::Declare, "Expected 'declare'")?;
 
         match &self.current().kind {
@@ -855,7 +900,19 @@ impl Parser {
         // Parse decorators
         let decorators = self.parse_decorators()?;
 
-        let is_abstract = self.match_token(&[TokenKind::Abstract]);
+        let mut is_abstract = false;
+        let mut is_final = false;
+
+        // Allow abstract and final in any order
+        loop {
+            if self.match_token(&[TokenKind::Abstract]) {
+                is_abstract = true;
+            } else if self.match_token(&[TokenKind::Final]) {
+                is_final = true;
+            } else {
+                break;
+            }
+        }
 
         self.consume(TokenKind::Class, "Expected 'class'")?;
 
@@ -867,10 +924,45 @@ impl Parser {
             None
         };
 
-        let extends = if self.match_token(&[TokenKind::Extends]) {
-            Some(self.parse_type()?)
+        // Parse primary constructor parameters: class Name(params)
+        let primary_constructor = if self.match_token(&[TokenKind::LeftParen]) {
+            let params = self.parse_primary_constructor_parameters()?;
+            self.consume(
+                TokenKind::RightParen,
+                "Expected ')' after primary constructor parameters",
+            )?;
+            Some(params)
         } else {
             None
+        };
+
+        // Parse extends clause with optional parent constructor arguments
+        let (extends, parent_constructor_args) = if self.match_token(&[TokenKind::Extends]) {
+            let parent_type = self.parse_type()?;
+
+            // Parse parent constructor arguments: extends Parent(arg1, arg2)
+            let parent_args = if self.match_token(&[TokenKind::LeftParen]) {
+                let mut args = Vec::new();
+                if !self.check(&TokenKind::RightParen) {
+                    loop {
+                        args.push(self.parse_expression()?);
+                        if !self.match_token(&[TokenKind::Comma]) {
+                            break;
+                        }
+                    }
+                }
+                self.consume(
+                    TokenKind::RightParen,
+                    "Expected ')' after parent constructor arguments",
+                )?;
+                Some(args)
+            } else {
+                None
+            };
+
+            (Some(parent_type), parent_args)
+        } else {
+            (None, None)
         };
 
         let mut implements = Vec::new();
@@ -901,14 +993,31 @@ impl Parser {
             self.consume(TokenKind::End, "Expected 'end' after class body")?;
         }
 
+        // Validate: cannot have both primary constructor and parameterized constructor
+        if primary_constructor.is_some() {
+            let has_parameterized_constructor = members
+                .iter()
+                .any(|m| matches!(m, ClassMember::Constructor(c) if !c.parameters.is_empty()));
+
+            if has_parameterized_constructor {
+                return Err(ParserError {
+                    message: "Cannot have both a primary constructor and a parameterized constructor in the same class".to_string(),
+                    span: start_span,
+                });
+            }
+        }
+
         let end_span = self.current_span();
 
         Ok(Statement::Class(ClassDeclaration {
             decorators,
             is_abstract,
+            is_final,
             name,
             type_parameters,
+            primary_constructor,
             extends,
+            parent_constructor_args,
             implements,
             members,
             span: start_span.combine(&end_span),
@@ -930,7 +1039,20 @@ impl Parser {
         };
 
         let is_static = self.match_token(&[TokenKind::Static]);
-        let is_abstract = self.match_token(&[TokenKind::Abstract]);
+        let mut is_abstract = false;
+        let mut is_final = false;
+
+        // Allow abstract and final in any order
+        loop {
+            if self.match_token(&[TokenKind::Abstract]) {
+                is_abstract = true;
+            } else if self.match_token(&[TokenKind::Final]) {
+                is_final = true;
+            } else {
+                break;
+            }
+        }
+        let is_override = self.match_token(&[TokenKind::Override]);
         let is_readonly = self.match_token(&[TokenKind::Readonly]);
 
         // Check for getter/setter
@@ -1020,6 +1142,8 @@ impl Parser {
                 access,
                 is_static,
                 is_abstract,
+                is_override,
+                is_final,
                 name,
                 type_parameters,
                 parameters,
@@ -1035,7 +1159,10 @@ impl Parser {
         }
     }
 
-    fn parse_constructor(&mut self, decorators: Vec<Decorator>) -> Result<ClassMember, ParserError> {
+    fn parse_constructor(
+        &mut self,
+        decorators: Vec<Decorator>,
+    ) -> Result<ClassMember, ParserError> {
         let start_span = self.current_span();
         self.consume(TokenKind::Constructor, "Expected 'constructor'")?;
         self.consume(TokenKind::LeftParen, "Expected '('")?;
@@ -1063,7 +1190,12 @@ impl Parser {
         }))
     }
 
-    fn parse_getter(&mut self, decorators: Vec<Decorator>, access: Option<AccessModifier>, is_static: bool) -> Result<ClassMember, ParserError> {
+    fn parse_getter(
+        &mut self,
+        decorators: Vec<Decorator>,
+        access: Option<AccessModifier>,
+        is_static: bool,
+    ) -> Result<ClassMember, ParserError> {
         let start_span = self.current_span();
         self.consume(TokenKind::Get, "Expected 'get'")?;
         let name = self.parse_identifier()?;
@@ -1096,7 +1228,12 @@ impl Parser {
         }))
     }
 
-    fn parse_setter(&mut self, decorators: Vec<Decorator>, access: Option<AccessModifier>, is_static: bool) -> Result<ClassMember, ParserError> {
+    fn parse_setter(
+        &mut self,
+        decorators: Vec<Decorator>,
+        access: Option<AccessModifier>,
+        is_static: bool,
+    ) -> Result<ClassMember, ParserError> {
         let start_span = self.current_span();
         self.consume(TokenKind::Set, "Expected 'set'")?;
         let name = self.parse_identifier()?;
@@ -1201,7 +1338,10 @@ impl Parser {
                     }
 
                     let end_span = self.current_span();
-                    self.consume(TokenKind::RightParen, "Expected ')' after decorator arguments")?;
+                    self.consume(
+                        TokenKind::RightParen,
+                        "Expected ')' after decorator arguments",
+                    )?;
 
                     let span = start_span.combine(&end_span);
                     expr = DecoratorExpression::Call {
@@ -1244,7 +1384,10 @@ impl Parser {
                     Some(s) => s.to_string(),
                     None => {
                         return Err(ParserError {
-                            message: format!("Internal error: keyword {:?} missing string representation", kind),
+                            message: format!(
+                                "Internal error: keyword {:?} missing string representation",
+                                kind
+                            ),
                             span,
                         });
                     }
@@ -1252,7 +1395,10 @@ impl Parser {
             }
             _ => {
                 return Err(ParserError {
-                    message: format!("Expected identifier or keyword, got {:?}", self.current().kind),
+                    message: format!(
+                        "Expected identifier or keyword, got {:?}",
+                        self.current().kind
+                    ),
                     span,
                 });
             }
@@ -1346,6 +1492,72 @@ impl Parser {
 
         Ok(params)
     }
+
+    /// Parse primary constructor parameters with access modifiers and readonly
+    /// Example: (public x: number, private readonly y: number = 0)
+    fn parse_primary_constructor_parameters(
+        &mut self,
+    ) -> Result<Vec<ConstructorParameter>, ParserError> {
+        use crate::ast::statement::ConstructorParameter;
+
+        let mut params = Vec::new();
+
+        if self.check(&TokenKind::RightParen) {
+            return Ok(params);
+        }
+
+        loop {
+            let param_start = self.current_span();
+
+            // Parse access modifier (public, private, protected)
+            let access = if self.match_token(&[TokenKind::Public]) {
+                Some(AccessModifier::Public)
+            } else if self.match_token(&[TokenKind::Private]) {
+                Some(AccessModifier::Private)
+            } else if self.match_token(&[TokenKind::Protected]) {
+                Some(AccessModifier::Protected)
+            } else {
+                None
+            };
+
+            // Parse readonly modifier
+            let is_readonly = self.match_token(&[TokenKind::Readonly]);
+
+            // Parse parameter name
+            let name = self.parse_identifier()?;
+
+            // Parse type annotation (required for primary constructor parameters)
+            self.consume(
+                TokenKind::Colon,
+                "Expected ':' after parameter name in primary constructor",
+            )?;
+            let type_annotation = self.parse_type()?;
+
+            // Parse optional default value
+            let default = if self.match_token(&[TokenKind::Equal]) {
+                Some(self.parse_expression()?)
+            } else {
+                None
+            };
+
+            let param_end = self.current_span();
+
+            params.push(ConstructorParameter {
+                access,
+                is_readonly,
+                name,
+                type_annotation,
+                default,
+                span: param_start.combine(&param_end),
+            });
+
+            if !self.match_token(&[TokenKind::Comma]) {
+                break;
+            }
+        }
+
+        Ok(params)
+    }
 }
 
 // Trait for getting span from Statement
@@ -1366,7 +1578,7 @@ impl Spannable for Statement {
             Statement::Export(e) => e.span,
             Statement::If(i) => i.span,
             Statement::While(w) => w.span,
-            Statement::For(f) => match f {
+            Statement::For(f) => match f.as_ref() {
                 ForStatement::Numeric(n) => n.span,
                 ForStatement::Generic(g) => g.span,
             },

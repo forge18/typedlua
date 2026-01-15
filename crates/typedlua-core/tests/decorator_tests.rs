@@ -1,25 +1,32 @@
+use std::sync::Arc;
+use typedlua_core::codegen::CodeGenerator;
 use typedlua_core::config::CompilerOptions;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::lexer::Lexer;
 use typedlua_core::parser::Parser;
 use typedlua_core::typechecker::TypeChecker;
-use typedlua_core::codegen::CodeGenerator;
-use std::sync::Arc;
 
 fn compile_and_check(source: &str) -> Result<String, String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
 
     // Lex
     let mut lexer = Lexer::new(source, handler.clone());
-    let tokens = lexer.tokenize().map_err(|e| format!("Lexing failed: {:?}", e))?;
+    let tokens = lexer
+        .tokenize()
+        .map_err(|e| format!("Lexing failed: {:?}", e))?;
 
     // Parse
     let mut parser = Parser::new(tokens, handler.clone());
-    let program = parser.parse().map_err(|e| format!("Parsing failed: {:?}", e))?;
+    let program = parser
+        .parse()
+        .map_err(|e| format!("Parsing failed: {:?}", e))?;
 
     // Type check
-    let mut type_checker = TypeChecker::new(handler.clone()).with_options(CompilerOptions::default());
-    type_checker.check_program(&program).map_err(|e| e.message)?;
+    let mut type_checker =
+        TypeChecker::new(handler.clone()).with_options(CompilerOptions::default());
+    type_checker
+        .check_program(&program)
+        .map_err(|e| e.message)?;
 
     // Generate code
     let mut codegen = CodeGenerator::new();
@@ -45,11 +52,19 @@ fn test_simple_class_decorator() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Simple class decorator should compile: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Simple class decorator should compile: {:?}",
+        result.err()
+    );
     let output = result.unwrap();
 
     // Should apply decorator: MyClass = sealed(MyClass)
-    assert!(output.contains("MyClass = sealed(MyClass)"), "Output should contain decorator application but got:\n{}", output);
+    assert!(
+        output.contains("MyClass = sealed(MyClass)"),
+        "Output should contain decorator application but got:\n{}",
+        output
+    );
 }
 
 #[test]
@@ -67,12 +82,19 @@ fn test_class_decorator_with_arguments() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Class decorator with arguments should compile: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Class decorator with arguments should compile: {:?}",
+        result.err()
+    );
     let output = result.unwrap();
 
     // Should apply decorator: MyComponent = component("my-component")(MyComponent)
-    assert!(output.contains("MyComponent = component(\"my-component\")(MyComponent)"),
-            "Output should contain decorator with arguments but got:\n{}", output);
+    assert!(
+        output.contains("MyComponent = component(\"my-component\")(MyComponent)"),
+        "Output should contain decorator with arguments but got:\n{}",
+        output
+    );
 }
 
 #[test]
@@ -88,12 +110,22 @@ fn test_multiple_class_decorators() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Multiple class decorators should compile: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Multiple class decorators should compile: {:?}",
+        result.err()
+    );
     let output = result.unwrap();
 
     // Should apply both decorators
-    assert!(output.contains("MyClass = sealed(MyClass)"), "Output should contain first decorator");
-    assert!(output.contains("MyClass = logged(MyClass)"), "Output should contain second decorator");
+    assert!(
+        output.contains("MyClass = sealed(MyClass)"),
+        "Output should contain first decorator"
+    );
+    assert!(
+        output.contains("MyClass = logged(MyClass)"),
+        "Output should contain second decorator"
+    );
 }
 
 #[test]
@@ -111,12 +143,19 @@ fn test_namespaced_decorator() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Namespaced decorator should compile: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Namespaced decorator should compile: {:?}",
+        result.err()
+    );
     let output = result.unwrap();
 
     // Should apply decorator: User = validators.validate(User)
-    assert!(output.contains("User = validators.validate(User)"),
-            "Output should contain namespaced decorator but got:\n{}", output);
+    assert!(
+        output.contains("User = validators.validate(User)"),
+        "Output should contain namespaced decorator but got:\n{}",
+        output
+    );
 }
 
 // ============================================================================
@@ -139,12 +178,19 @@ fn test_method_decorator() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Method decorator should compile: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Method decorator should compile: {:?}",
+        result.err()
+    );
     let output = result.unwrap();
 
     // Should apply decorator: MyClass.myMethod = log(MyClass.myMethod)
-    assert!(output.contains("MyClass.myMethod = log(MyClass.myMethod)"),
-            "Output should contain method decorator but got:\n{}", output);
+    assert!(
+        output.contains("MyClass.myMethod = log(MyClass.myMethod)"),
+        "Output should contain method decorator but got:\n{}",
+        output
+    );
 }
 
 #[test]
@@ -163,12 +209,19 @@ fn test_static_method_decorator() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Static method decorator should compile: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Static method decorator should compile: {:?}",
+        result.err()
+    );
     let output = result.unwrap();
 
     // Should apply decorator to static method
-    assert!(output.contains("Utils.calculate = cache(Utils.calculate)"),
-            "Output should contain static method decorator but got:\n{}", output);
+    assert!(
+        output.contains("Utils.calculate = cache(Utils.calculate)"),
+        "Output should contain static method decorator but got:\n{}",
+        output
+    );
 }
 
 #[test]
@@ -189,12 +242,19 @@ fn test_method_decorator_with_arguments() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Method decorator with arguments should compile: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Method decorator with arguments should compile: {:?}",
+        result.err()
+    );
     let output = result.unwrap();
 
     // Should apply decorator: MyClass.handleClick = throttle(1000)(MyClass.handleClick)
-    assert!(output.contains("MyClass.handleClick = throttle(1000)(MyClass.handleClick)"),
-            "Output should contain method decorator with arguments but got:\n{}", output);
+    assert!(
+        output.contains("MyClass.handleClick = throttle(1000)(MyClass.handleClick)"),
+        "Output should contain method decorator with arguments but got:\n{}",
+        output
+    );
 }
 
 // ============================================================================
@@ -223,10 +283,18 @@ fn test_decorator_disabled() {
 
     assert!(result.is_err(), "Decorators should fail when disabled");
     let error = result.unwrap_err();
-    assert!(error.message.contains("Decorators require decorator features"),
-            "Error should mention decorator features but got: {}", error.message);
-    assert!(error.message.contains("enableDecorators"),
-            "Error should mention enableDecorators but got: {}", error.message);
+    assert!(
+        error
+            .message
+            .contains("Decorators require decorator features"),
+        "Error should mention decorator features but got: {}",
+        error.message
+    );
+    assert!(
+        error.message.contains("enableDecorators"),
+        "Error should mention enableDecorators but got: {}",
+        error.message
+    );
 }
 
 #[test]
@@ -242,10 +310,17 @@ fn test_decorator_enabled_by_default() {
     "#;
 
     let options = CompilerOptions::default();
-    assert!(options.enable_decorators, "Decorators should be enabled by default");
+    assert!(
+        options.enable_decorators,
+        "Decorators should be enabled by default"
+    );
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Decorators should work when enabled: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Decorators should work when enabled: {:?}",
+        result.err()
+    );
 }
 
 // ============================================================================
@@ -268,7 +343,11 @@ fn test_decorator_with_class_inheritance() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Decorator with inheritance should compile: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Decorator with inheritance should compile: {:?}",
+        result.err()
+    );
     let output = result.unwrap();
 
     assert!(output.contains("Derived = logged(Derived)"));
@@ -294,7 +373,11 @@ fn test_decorator_with_class_interface() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Decorator with interface should compile: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Decorator with interface should compile: {:?}",
+        result.err()
+    );
     let output = result.unwrap();
 
     assert!(output.contains("Data = serializable(Data)"));
@@ -320,7 +403,11 @@ fn test_decorator_preserves_class_structure() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Decorator should preserve class structure: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Decorator should preserve class structure: {:?}",
+        result.err()
+    );
     let output = result.unwrap();
 
     // Class should still have its structure
@@ -341,12 +428,22 @@ fn test_no_decorators_when_not_used() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Class without decorators should compile: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Class without decorators should compile: {:?}",
+        result.err()
+    );
     let output = result.unwrap();
 
     // Should not have any decorator applications
-    assert!(!output.contains(" = log("), "Output should not contain decorator applications");
-    assert!(!output.contains(" = sealed("), "Output should not contain decorator applications");
+    assert!(
+        !output.contains(" = log("),
+        "Output should not contain decorator applications"
+    );
+    assert!(
+        !output.contains(" = sealed("),
+        "Output should not contain decorator applications"
+    );
 }
 
 #[test]
@@ -369,7 +466,11 @@ fn test_mixed_decorated_and_plain_methods() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Mixed decorated and plain methods should compile: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Mixed decorated and plain methods should compile: {:?}",
+        result.err()
+    );
     let output = result.unwrap();
 
     // Should have decorator on first method

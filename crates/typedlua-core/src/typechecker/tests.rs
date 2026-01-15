@@ -36,7 +36,10 @@ fn test_generic_function_with_constraint() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Generic function with constraint should type check");
+    assert!(
+        result.is_ok(),
+        "Generic function with constraint should type check"
+    );
 }
 
 #[test]
@@ -48,7 +51,10 @@ fn test_generic_function_multiple_params() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Generic function with multiple type params should type check");
+    assert!(
+        result.is_ok(),
+        "Generic function with multiple type params should type check"
+    );
 }
 
 #[test]
@@ -120,7 +126,10 @@ fn test_generic_function_usage_in_body() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Type parameter should be usable in function body");
+    assert!(
+        result.is_ok(),
+        "Type parameter should be usable in function body"
+    );
 }
 
 #[test]
@@ -334,7 +343,11 @@ fn test_mapped_type_basic() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Basic mapped type should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Basic mapped type should type check: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -344,7 +357,11 @@ fn test_mapped_type_with_readonly() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Mapped type with readonly should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Mapped type with readonly should type check: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -354,7 +371,11 @@ fn test_mapped_type_with_optional() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Mapped type with optional should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Mapped type with optional should type check: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -364,7 +385,11 @@ fn test_mapped_type_with_both_modifiers() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Mapped type with both modifiers should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Mapped type with both modifiers should type check: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -374,7 +399,11 @@ fn test_mapped_type_single_key() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Mapped type with single key should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Mapped type with single key should type check: {:?}",
+        result.err()
+    );
 }
 
 // keyof Operator Tests
@@ -391,7 +420,11 @@ fn test_keyof_basic_interface() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "keyof with basic interface should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "keyof with basic interface should type check: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -407,7 +440,11 @@ fn test_keyof_with_methods() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "keyof with methods should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "keyof with methods should type check: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -420,7 +457,11 @@ fn test_keyof_empty_interface() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "keyof with empty interface should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "keyof with empty interface should type check: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -430,7 +471,11 @@ fn test_keyof_inline_object() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "keyof with inline object type should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "keyof with inline object type should type check: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -445,7 +490,11 @@ fn test_keyof_with_mapped_type() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "keyof with mapped type should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "keyof with mapped type should type check: {:?}",
+        result.err()
+    );
 }
 
 // Mapped Types with Type References Tests
@@ -462,7 +511,11 @@ fn test_mapped_type_with_keyof() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Mapped type with keyof should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Mapped type with keyof should type check: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -478,7 +531,11 @@ fn test_mapped_type_keyof_complex() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Mapped type with keyof and index access should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Mapped type with keyof and index access should type check: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -493,7 +550,11 @@ fn test_mapped_type_readonly_and_optional() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Mapped type with readonly and optional should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Mapped type with readonly and optional should type check: {:?}",
+        result.err()
+    );
 }
 
 // Conditional Types Tests
@@ -505,7 +566,11 @@ fn test_conditional_type_basic() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Basic conditional type should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Basic conditional type should type check: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -515,7 +580,11 @@ fn test_conditional_type_true_branch() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Conditional type true branch should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Conditional type true branch should type check: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -525,7 +594,11 @@ fn test_conditional_type_false_branch() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Conditional type false branch should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Conditional type false branch should type check: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -538,7 +611,11 @@ fn test_conditional_type_with_primitives() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Nested conditional types should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Nested conditional types should type check: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -549,7 +626,11 @@ fn test_conditional_type_distributive() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Distributive conditional type should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Distributive conditional type should type check: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -560,7 +641,11 @@ fn test_conditional_type_exclude_like() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Exclude-like conditional type should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Exclude-like conditional type should type check: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -571,7 +656,11 @@ fn test_conditional_type_extract_like() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Extract-like conditional type should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Extract-like conditional type should type check: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -586,7 +675,11 @@ fn test_conditional_type_with_interface() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Conditional type with interface should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Conditional type with interface should type check: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -597,7 +690,11 @@ fn test_conditional_type_never() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Conditional type with never should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Conditional type with never should type check: {:?}",
+        result.err()
+    );
 }
 
 // Infer Keyword Tests
@@ -610,7 +707,11 @@ fn test_infer_array_element() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Infer with array element should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Infer with array element should type check: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -621,7 +722,11 @@ fn test_infer_function_return() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Infer with function return should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Infer with function return should type check: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -632,7 +737,11 @@ fn test_infer_function_params() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Infer with function parameter should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Infer with function parameter should type check: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -643,7 +752,11 @@ fn test_infer_tuple_element() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Infer with tuple element should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Infer with tuple element should type check: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -654,7 +767,11 @@ fn test_infer_multiple_positions() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Infer with multiple positions should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Infer with multiple positions should type check: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -665,7 +782,11 @@ fn test_infer_no_match() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Infer no match should return false branch: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Infer no match should return false branch: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -676,7 +797,11 @@ fn test_infer_nested_array() {
     "#;
 
     let result = parse_and_check(source);
-    assert!(result.is_ok(), "Infer with nested recursion should type check: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Infer with nested recursion should type check: {:?}",
+        result.err()
+    );
 }
 
 // Template Literal Types Tests

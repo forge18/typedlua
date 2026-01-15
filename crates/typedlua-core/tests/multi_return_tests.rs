@@ -1,9 +1,9 @@
+use std::sync::Arc;
 use typedlua_core::config::CompilerOptions;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::lexer::Lexer;
 use typedlua_core::parser::Parser;
 use typedlua_core::typechecker::TypeChecker;
-use std::sync::Arc;
 
 fn type_check(source: &str) -> Result<(), String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
@@ -18,9 +18,7 @@ fn type_check(source: &str) -> Result<(), String> {
         ..Default::default()
     });
 
-    checker
-        .check_program(&program)
-        .map_err(|e| e.message)?;
+    checker.check_program(&program).map_err(|e| e.message)?;
 
     Ok(())
 }
@@ -33,7 +31,10 @@ fn test_single_return_value() {
         }
     "#;
 
-    assert!(type_check(source).is_ok(), "Single return value should type-check");
+    assert!(
+        type_check(source).is_ok(),
+        "Single return value should type-check"
+    );
 }
 
 #[test]
@@ -56,7 +57,10 @@ fn test_multi_return_all_checked() {
         }
     "#;
 
-    assert!(type_check(source).is_ok(), "All return values should be checked");
+    assert!(
+        type_check(source).is_ok(),
+        "All return values should be checked"
+    );
 }
 
 #[test]
@@ -68,7 +72,10 @@ fn test_multi_return_type_mismatch_first() {
         }
     "#;
 
-    assert!(type_check(source).is_err(), "Type error in first return value should be caught");
+    assert!(
+        type_check(source).is_err(),
+        "Type error in first return value should be caught"
+    );
 }
 
 #[test]
@@ -80,7 +87,10 @@ fn test_multi_return_type_mismatch_second() {
         }
     "#;
 
-    assert!(type_check(source).is_err(), "Type error in second return value should be caught");
+    assert!(
+        type_check(source).is_err(),
+        "Type error in second return value should be caught"
+    );
 }
 
 #[test]
@@ -92,7 +102,10 @@ fn test_multi_return_type_mismatch_third() {
         }
     "#;
 
-    assert!(type_check(source).is_err(), "Type error in third return value should be caught");
+    assert!(
+        type_check(source).is_err(),
+        "Type error in third return value should be caught"
+    );
 }
 
 #[test]
@@ -104,7 +117,10 @@ fn test_multi_return_wrong_count() {
         }
     "#;
 
-    assert!(type_check(source).is_err(), "Wrong number of return values should be an error");
+    assert!(
+        type_check(source).is_err(),
+        "Wrong number of return values should be an error"
+    );
 }
 
 #[test]
@@ -116,7 +132,10 @@ fn test_multi_return_too_few() {
         }
     "#;
 
-    assert!(type_check(source).is_err(), "Too few return values should be an error");
+    assert!(
+        type_check(source).is_err(),
+        "Too few return values should be an error"
+    );
 }
 
 #[test]
@@ -127,7 +146,10 @@ fn test_triple_return_correct() {
         }
     "#;
 
-    assert!(type_check(source).is_ok(), "Triple return with correct types should pass");
+    assert!(
+        type_check(source).is_ok(),
+        "Triple return with correct types should pass"
+    );
 }
 
 #[test]
@@ -138,5 +160,8 @@ fn test_mixed_types_return() {
         }
     "#;
 
-    assert!(type_check(source).is_ok(), "Mixed type tuple return should work");
+    assert!(
+        type_check(source).is_ok(),
+        "Mixed type tuple return should work"
+    );
 }

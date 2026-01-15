@@ -1,5 +1,5 @@
 use clap::Parser;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::{debug, info};
 use tracing_subscriber::EnvFilter;
 
@@ -61,8 +61,7 @@ fn main() -> anyhow::Result<()> {
     // Initialize tracing subscriber
     // Set RUST_LOG=debug for detailed logs, RUST_LOG=info for normal output
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env()
-            .add_directive(tracing::Level::INFO.into()))
+        .with_env_filter(EnvFilter::from_default_env().add_directive(tracing::Level::INFO.into()))
         .init();
 
     let cli = Cli::parse();
@@ -90,7 +89,10 @@ fn main() -> anyhow::Result<()> {
         typedlua_core::config::LuaVersion::Lua54 => typedlua_core::codegen::LuaTarget::Lua54,
     };
 
-    info!("TypedLua CLI - Compiling with target Lua {:?}", config.compiler_options.target);
+    info!(
+        "TypedLua CLI - Compiling with target Lua {:?}",
+        config.compiler_options.target
+    );
     info!("Input files: {} file(s)", files.len());
     if let Some(ref out_dir) = config.compiler_options.out_dir {
         info!("Output directory: {}", out_dir);
@@ -101,8 +103,8 @@ fn main() -> anyhow::Result<()> {
     // Create a modified CLI with resolved files and config options
     let mut resolved_cli = cli.clone();
     resolved_cli.files = files;
-    resolved_cli.out_dir = config.compiler_options.out_dir.as_ref().map(|s| PathBuf::from(s));
-    resolved_cli.out_file = config.compiler_options.out_file.as_ref().map(|s| PathBuf::from(s));
+    resolved_cli.out_dir = config.compiler_options.out_dir.as_ref().map(PathBuf::from);
+    resolved_cli.out_file = config.compiler_options.out_file.as_ref().map(PathBuf::from);
     resolved_cli.source_map = config.compiler_options.source_map;
     resolved_cli.no_emit = config.compiler_options.no_emit;
     resolved_cli.pretty = config.compiler_options.pretty;
@@ -191,8 +193,10 @@ fn parse_lua_target(target: &str) -> anyhow::Result<typedlua_core::codegen::LuaT
 }
 
 /// Load configuration from file (if specified) and resolve input files
-fn load_config_and_files(cli: &Cli) -> anyhow::Result<(typedlua_core::config::CompilerConfig, Vec<PathBuf>)> {
-    use typedlua_core::config::{CompilerConfig, CliOverrides, LuaVersion};
+fn load_config_and_files(
+    cli: &Cli,
+) -> anyhow::Result<(typedlua_core::config::CompilerConfig, Vec<PathBuf>)> {
+    use typedlua_core::config::{CliOverrides, CompilerConfig, LuaVersion};
 
     // Start with default config
     let mut config = if let Some(ref project_path) = cli.project {
@@ -275,15 +279,16 @@ struct CompilationError {
 fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Result<()> {
     use rayon::prelude::*;
     use std::sync::Arc;
+    use typedlua_core::codegen::CodeGenerator;
     use typedlua_core::diagnostics::{CollectingDiagnosticHandler, DiagnosticHandler};
     use typedlua_core::lexer::Lexer;
     use typedlua_core::parser::Parser;
-    use typedlua_core::codegen::CodeGenerator;
 
     info!("Compiling {} file(s)...", cli.files.len());
 
     // Compile files in parallel
-    let results: Vec<CompilationResult> = cli.files
+    let results: Vec<CompilationResult> = cli
+        .files
         .par_iter()
         .map(|file_path| {
             debug!("Compiling {:?}...", file_path);
@@ -351,7 +356,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
 
             let mut type_checker = TypeChecker::new(handler.clone());
 
-            if let Err(_) = type_checker.check_program(&program) {
+            if type_checker.check_program(&program).is_err() {
                 return CompilationResult {
                     file_path: file_path.clone(),
                     result: Err(CompilationError {
@@ -384,8 +389,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
                 };
             }
 
-            let mut generator = CodeGenerator::new()
-                .with_target(target);
+            let mut generator = CodeGenerator::new().with_target(target);
 
             if cli.source_map || cli.inline_source_map {
                 generator = generator.with_source_map(file_path.to_string_lossy().to_string());
@@ -452,7 +456,12 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
                     eprintln!("Error compiling {:?}: {}", result.file_path, error.source);
                 } else {
                     // Print diagnostics
-                    print_diagnostics_from_vec(&error.diagnostics, &error.source, &result.file_path, cli.pretty);
+                    print_diagnostics_from_vec(
+                        &error.diagnostics,
+                        &error.source,
+                        &result.file_path,
+                        cli.pretty,
+                    );
                 }
             }
         }
@@ -471,7 +480,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
 fn print_diagnostics_from_vec(
     diagnostics: &[typedlua_core::diagnostics::Diagnostic],
     source: &str,
-    file_path: &PathBuf,
+    file_path: &Path,
     pretty: bool,
 ) {
     use typedlua_core::diagnostics::DiagnosticLevel;
@@ -506,9 +515,8 @@ fn print_diagnostics_from_vec(
                 let line = lines[diagnostic.span.line as usize - 1];
                 eprintln!("    {}", line);
                 eprintln!(
-                    "    {}{}",
-                    " ".repeat(diagnostic.span.column.saturating_sub(1) as usize),
-                    "\x1b[31m^\x1b[0m"
+                    "    {}\x1b[31m^\x1b[0m",
+                    " ".repeat(diagnostic.span.column.saturating_sub(1) as usize)
                 );
             }
         } else {
@@ -533,21 +541,12 @@ fn print_diagnostics_from_vec(
     eprintln!();
 }
 
-/// Print diagnostics (errors and warnings) to the console
-fn print_diagnostics(
-    handler: &typedlua_core::diagnostics::CollectingDiagnosticHandler,
-    source: &str,
-    file_path: &PathBuf,
-    pretty: bool,
-) {
-    use typedlua_core::diagnostics::DiagnosticHandler;
-    let diagnostics = handler.get_diagnostics();
-    print_diagnostics_from_vec(&diagnostics, source, file_path, pretty);
-}
-
 /// Watch mode - recompile on file changes
 fn watch_mode(cli: Cli) -> anyhow::Result<()> {
-    use notify::{Watcher, RecursiveMode, Event, event::{EventKind, ModifyKind}};
+    use notify::{
+        event::{EventKind, ModifyKind},
+        Event, RecursiveMode, Watcher,
+    };
     use std::sync::mpsc::channel;
     use std::time::Duration;
 
@@ -594,9 +593,9 @@ fn watch_mode(cli: Cli) -> anyhow::Result<()> {
                 if should_recompile {
                     // Check if any of the changed paths match our input files
                     let changed_our_files = event.paths.iter().any(|path| {
-                        cli.files.iter().any(|file| {
-                            path.file_name() == file.file_name()
-                        })
+                        cli.files
+                            .iter()
+                            .any(|file| path.file_name() == file.file_name())
                     });
 
                     if changed_our_files {

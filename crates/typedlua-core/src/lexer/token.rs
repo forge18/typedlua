@@ -45,6 +45,8 @@ pub enum TokenKind {
     Static,
     Abstract,
     Readonly,
+    Override,
+    Final,
     Super,
     Keyof,
     Infer,
@@ -55,6 +57,7 @@ pub enum TokenKind {
     Constructor,
     Get,
     Set,
+    New,
 
     // Identifiers and Literals
     Identifier(String),
@@ -63,50 +66,50 @@ pub enum TokenKind {
     TemplateString(Vec<TemplatePart>),
 
     // Operators
-    Plus,         // +
-    Minus,        // -
-    Star,         // *
-    Slash,        // /
-    Percent,      // %
-    Caret,        // ^
-    Hash,         // #
-    Ampersand,    // &
-    Pipe,         // |
-    Tilde,        // ~
-    LessThan,     // <
-    LessEqual,    // <=
-    GreaterThan,  // >
-    GreaterEqual, // >=
-    Equal,        // =
-    EqualEqual,   // ==
-    BangEqual,    // !=
-    TildeEqual,   // ~=
-    PlusEqual,    // +=
-    MinusEqual,   // -=
-    StarEqual,    // *=
-    SlashEqual,   // /=
-    PercentEqual, // %=
-    CaretEqual,   // ^=
-    DotDotEqual,  // ..=
-    AmpersandEqual, // &=
-    PipeEqual,    // |=
-    SlashSlashEqual, // //=
-    LessLessEqual,   // <<=
+    Plus,                // +
+    Minus,               // -
+    Star,                // *
+    Slash,               // /
+    Percent,             // %
+    Caret,               // ^
+    Hash,                // #
+    Ampersand,           // &
+    Pipe,                // |
+    Tilde,               // ~
+    LessThan,            // <
+    LessEqual,           // <=
+    GreaterThan,         // >
+    GreaterEqual,        // >=
+    Equal,               // =
+    EqualEqual,          // ==
+    BangEqual,           // !=
+    TildeEqual,          // ~=
+    PlusEqual,           // +=
+    MinusEqual,          // -=
+    StarEqual,           // *=
+    SlashEqual,          // /=
+    PercentEqual,        // %=
+    CaretEqual,          // ^=
+    DotDotEqual,         // ..=
+    AmpersandEqual,      // &=
+    PipeEqual,           // |=
+    SlashSlashEqual,     // //=
+    LessLessEqual,       // <<=
     GreaterGreaterEqual, // >>=
-    Dot,          // .
-    DotDot,       // ..
-    DotDotDot,    // ...
-    SlashSlash,   // //
-    LessLess,     // <<
-    GreaterGreater, // >>
-    Arrow,        // ->
-    FatArrow,     // =>
-    PipeOp,       // |>
-    Question,     // ?
-    Colon,        // :
-    ColonColon,   // ::
-    Bang,         // !
-    At,           // @
+    Dot,                 // .
+    DotDot,              // ..
+    DotDotDot,           // ...
+    SlashSlash,          // //
+    LessLess,            // <<
+    GreaterGreater,      // >>
+    Arrow,               // ->
+    FatArrow,            // =>
+    PipeOp,              // |>
+    Question,            // ?
+    Colon,               // :
+    ColonColon,          // ::
+    Bang,                // !
+    At,                  // @
 
     // Delimiters
     LeftParen,    // (
@@ -196,6 +199,8 @@ impl TokenKind {
                 | TokenKind::Static
                 | TokenKind::Abstract
                 | TokenKind::Readonly
+                | TokenKind::Override
+                | TokenKind::Final
                 | TokenKind::Super
                 | TokenKind::Keyof
                 | TokenKind::Infer
@@ -253,6 +258,8 @@ impl TokenKind {
             TokenKind::Static => Some("static"),
             TokenKind::Abstract => Some("abstract"),
             TokenKind::Readonly => Some("readonly"),
+            TokenKind::Override => Some("override"),
+            TokenKind::Final => Some("final"),
             TokenKind::Super => Some("super"),
             TokenKind::Keyof => Some("keyof"),
             TokenKind::Infer => Some("infer"),
@@ -289,6 +296,7 @@ impl TokenKind {
                 "nil" => Some(TokenKind::Nil),
                 "get" => Some(TokenKind::Get),
                 "set" => Some(TokenKind::Set),
+                "new" => Some(TokenKind::New),
                 _ => None,
             },
             4 => match s {
@@ -313,6 +321,7 @@ impl TokenKind {
                 "super" => Some(TokenKind::Super),
                 "keyof" => Some(TokenKind::Keyof),
                 "infer" => Some(TokenKind::Infer),
+                "final" => Some(TokenKind::Final),
                 _ => None,
             },
             6 => match s {
@@ -336,6 +345,7 @@ impl TokenKind {
                 "continue" => Some(TokenKind::Continue),
                 "abstract" => Some(TokenKind::Abstract),
                 "readonly" => Some(TokenKind::Readonly),
+                "override" => Some(TokenKind::Override),
                 _ => None,
             },
             9 => match s {

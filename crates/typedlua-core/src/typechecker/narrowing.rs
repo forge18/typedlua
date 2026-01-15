@@ -9,6 +9,12 @@ pub struct NarrowingContext {
     narrowed_types: FxHashMap<String, Type>,
 }
 
+impl Default for NarrowingContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NarrowingContext {
     pub fn new() -> Self {
         Self {
@@ -40,7 +46,9 @@ impl NarrowingContext {
         for (name, then_type) in &then_ctx.narrowed_types {
             if let Some(else_type) = else_ctx.narrowed_types.get(name) {
                 if types_equal(then_type, else_type) {
-                    merged.narrowed_types.insert(name.clone(), then_type.clone());
+                    merged
+                        .narrowed_types
+                        .insert(name.clone(), then_type.clone());
                 }
             }
         }
@@ -136,17 +144,20 @@ pub fn narrow_type_from_condition(
 
         // not condition (flip the branches)
         ExpressionKind::Unary(UnaryOp::Not, operand) => {
-            let (inner_then, inner_else) = narrow_type_from_condition(operand, base_ctx, original_types);
+            let (inner_then, inner_else) =
+                narrow_type_from_condition(operand, base_ctx, original_types);
             return (inner_else, inner_then); // Flip!
         }
 
         // condition1 and condition2
         ExpressionKind::Binary(BinaryOp::And, left, right) => {
             // First narrow with left condition
-            let (left_then, _left_else) = narrow_type_from_condition(left, base_ctx, original_types);
+            let (left_then, _left_else) =
+                narrow_type_from_condition(left, base_ctx, original_types);
 
             // Then narrow the 'then' branch with right condition
-            let (final_then, _final_else) = narrow_type_from_condition(right, &left_then, original_types);
+            let (final_then, _final_else) =
+                narrow_type_from_condition(right, &left_then, original_types);
 
             return (final_then, else_ctx);
         }
@@ -155,7 +166,8 @@ pub fn narrow_type_from_condition(
         ExpressionKind::Binary(BinaryOp::Or, left, right) => {
             // For 'or', we narrow in the else branch with the right condition
             let (left_then, left_else) = narrow_type_from_condition(left, base_ctx, original_types);
-            let (right_then, right_else) = narrow_type_from_condition(right, &left_else, original_types);
+            let (right_then, right_else) =
+                narrow_type_from_condition(right, &left_else, original_types);
 
             // Then branch: either left or right was true
             let merged_then = NarrowingContext::merge(&left_then, &right_then);
@@ -165,7 +177,9 @@ pub fn narrow_type_from_condition(
 
         // Type guard function call: isString(x)
         ExpressionKind::Call(function, arguments) => {
-            if let Some((var_name, narrowed_type)) = extract_type_guard_call(function, arguments, original_types) {
+            if let Some((var_name, narrowed_type)) =
+                extract_type_guard_call(function, arguments, original_types)
+            {
                 // In then branch: narrow to the guarded type
                 then_ctx.set_narrowed_type(var_name.clone(), narrowed_type.clone());
 
@@ -294,10 +308,10 @@ fn extract_type_guard_call(
 
         // Fallback to heuristic for backwards compatibility:
         // Functions named "is*" are assumed to be type guards
-        if func_name.starts_with("is") {
+        if let Some(stripped) = func_name.strip_prefix("is") {
             // Extract the type name from the function name (e.g., "isString" -> "string")
-            let type_name = &func_name[2..].to_lowercase();
-            if let Some(narrowed_type) = typeof_string_to_type(type_name) {
+            let type_name = stripped.to_lowercase();
+            if let Some(narrowed_type) = typeof_string_to_type(&type_name) {
                 return Some((var_name, narrowed_type));
             }
         }
@@ -349,16 +363,20 @@ fn exclude_type(typ: &Type, to_exclude: &Type) -> Option<Type> {
                 .collect();
 
             if remaining.is_empty() {
-                Some(Type::new(TypeKind::Primitive(PrimitiveType::Never), typ.span))
+                Some(Type::new(
+                    TypeKind::Primitive(PrimitiveType::Never),
+                    typ.span,
+                ))
             } else if remaining.len() == 1 {
                 Some(remaining.into_iter().next().unwrap())
             } else {
                 Some(Type::new(TypeKind::Union(remaining), typ.span))
             }
         }
-        _ if types_equal(typ, to_exclude) => {
-            Some(Type::new(TypeKind::Primitive(PrimitiveType::Never), typ.span))
-        }
+        _ if types_equal(typ, to_exclude) => Some(Type::new(
+            TypeKind::Primitive(PrimitiveType::Never),
+            typ.span,
+        )),
         _ => Some(typ.clone()),
     }
 }
@@ -367,23 +385,23 @@ fn exclude_type(typ: &Type, to_exclude: &Type) -> Option<Type> {
 fn remove_nil_from_type(typ: &Type) -> Option<Type> {
     match &typ.kind {
         TypeKind::Union(types) => {
-            let remaining: Vec<Type> = types
-                .iter()
-                .filter(|t| !is_nil_type(t))
-                .cloned()
-                .collect();
+            let remaining: Vec<Type> = types.iter().filter(|t| !is_nil_type(t)).cloned().collect();
 
             if remaining.is_empty() {
-                Some(Type::new(TypeKind::Primitive(PrimitiveType::Never), typ.span))
+                Some(Type::new(
+                    TypeKind::Primitive(PrimitiveType::Never),
+                    typ.span,
+                ))
             } else if remaining.len() == 1 {
                 Some(remaining.into_iter().next().unwrap())
             } else {
                 Some(Type::new(TypeKind::Union(remaining), typ.span))
             }
         }
-        _ if is_nil_type(typ) => {
-            Some(Type::new(TypeKind::Primitive(PrimitiveType::Never), typ.span))
-        }
+        _ if is_nil_type(typ) => Some(Type::new(
+            TypeKind::Primitive(PrimitiveType::Never),
+            typ.span,
+        )),
         _ => Some(typ.clone()),
     }
 }
@@ -407,16 +425,20 @@ fn make_truthy_type(typ: &Type) -> Option<Type> {
                 .collect();
 
             if truthy.is_empty() {
-                Some(Type::new(TypeKind::Primitive(PrimitiveType::Never), typ.span))
+                Some(Type::new(
+                    TypeKind::Primitive(PrimitiveType::Never),
+                    typ.span,
+                ))
             } else if truthy.len() == 1 {
                 Some(truthy.into_iter().next().unwrap())
             } else {
                 Some(Type::new(TypeKind::Union(truthy), typ.span))
             }
         }
-        _ if is_falsy_type(typ) => {
-            Some(Type::new(TypeKind::Primitive(PrimitiveType::Never), typ.span))
-        }
+        _ if is_falsy_type(typ) => Some(Type::new(
+            TypeKind::Primitive(PrimitiveType::Never),
+            typ.span,
+        )),
         _ => Some(typ.clone()),
     }
 }
@@ -425,14 +447,13 @@ fn make_truthy_type(typ: &Type) -> Option<Type> {
 fn make_falsy_type(typ: &Type) -> Option<Type> {
     match &typ.kind {
         TypeKind::Union(types) => {
-            let falsy: Vec<Type> = types
-                .iter()
-                .filter(|t| is_falsy_type(t))
-                .cloned()
-                .collect();
+            let falsy: Vec<Type> = types.iter().filter(|t| is_falsy_type(t)).cloned().collect();
 
             if falsy.is_empty() {
-                Some(Type::new(TypeKind::Primitive(PrimitiveType::Never), typ.span))
+                Some(Type::new(
+                    TypeKind::Primitive(PrimitiveType::Never),
+                    typ.span,
+                ))
             } else if falsy.len() == 1 {
                 Some(falsy.into_iter().next().unwrap())
             } else {
@@ -440,7 +461,10 @@ fn make_falsy_type(typ: &Type) -> Option<Type> {
             }
         }
         _ if is_falsy_type(typ) => Some(typ.clone()),
-        _ => Some(Type::new(TypeKind::Primitive(PrimitiveType::Never), typ.span)),
+        _ => Some(Type::new(
+            TypeKind::Primitive(PrimitiveType::Never),
+            typ.span,
+        )),
     }
 }
 
@@ -449,8 +473,8 @@ fn is_falsy_type(typ: &Type) -> bool {
     matches!(
         typ.kind,
         TypeKind::Primitive(PrimitiveType::Nil)
-        | TypeKind::Literal(Literal::Nil)
-        | TypeKind::Literal(Literal::Boolean(false))
+            | TypeKind::Literal(Literal::Nil)
+            | TypeKind::Literal(Literal::Boolean(false))
     )
 }
 
@@ -519,7 +543,10 @@ mod tests {
 
         let non_nil = remove_nil_from_type(&union_type).unwrap();
 
-        assert!(matches!(non_nil.kind, TypeKind::Primitive(PrimitiveType::String)));
+        assert!(matches!(
+            non_nil.kind,
+            TypeKind::Primitive(PrimitiveType::String)
+        ));
     }
 
     #[test]

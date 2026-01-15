@@ -1,6 +1,6 @@
 use crate::document::Document;
+use lsp_types::*;
 use std::sync::Arc;
-use lsp_types::{*, Uri};
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::typechecker::TypeChecker;
 use typedlua_core::{Lexer, Parser};
@@ -43,7 +43,11 @@ impl SignatureHelpProvider {
     }
 
     /// Analyze the call context to determine function name and active parameter
-    fn analyze_call_context(&self, document: &Document, position: Position) -> Option<(String, u32)> {
+    fn analyze_call_context(
+        &self,
+        document: &Document,
+        position: Position,
+    ) -> Option<(String, u32)> {
         let lines: Vec<&str> = document.text.lines().collect();
         if position.line as usize >= lines.len() {
             return None;
@@ -126,9 +130,13 @@ impl SignatureHelpProvider {
     }
 
     /// Format a signature from a symbol
-    fn format_signature(&self, name: &str, symbol: &typedlua_core::typechecker::Symbol) -> Option<SignatureInformation> {
-        use typedlua_core::ast::types::TypeKind;
+    fn format_signature(
+        &self,
+        name: &str,
+        symbol: &typedlua_core::typechecker::Symbol,
+    ) -> Option<SignatureInformation> {
         use typedlua_core::ast::pattern::Pattern;
+        use typedlua_core::ast::types::TypeKind;
 
         // Check if the type is a function
         if let TypeKind::Function(func_type) = &symbol.typ.kind {
@@ -170,7 +178,7 @@ impl SignatureHelpProvider {
 
     /// Simple type formatting
     fn format_type_simple(&self, typ: &typedlua_core::ast::types::Type) -> String {
-        use typedlua_core::ast::types::{TypeKind, PrimitiveType};
+        use typedlua_core::ast::types::{PrimitiveType, TypeKind};
 
         match &typ.kind {
             TypeKind::Primitive(PrimitiveType::Nil) => "nil".to_string(),
@@ -197,36 +205,42 @@ mod tests {
         let provider = SignatureHelpProvider::new();
 
         // Test simple function call
-        let doc = Document {
-            text: "foo(".to_string(),
-            version: 1,
-            ast: None,
-        };
-        let result = provider.analyze_call_context(&doc, Position { line: 0, character: 4 });
+        let doc = Document::new_test("foo(".to_string(), 1);
+        let result = provider.analyze_call_context(
+            &doc,
+            Position {
+                line: 0,
+                character: 4,
+            },
+        );
         assert!(result.is_some());
         let (func_name, param) = result.unwrap();
         assert_eq!(func_name, "foo");
         assert_eq!(param, 0);
 
         // Test multiple parameters with cursor after first comma
-        let doc = Document {
-            text: "foo(a, ".to_string(),
-            version: 1,
-            ast: None,
-        };
-        let result = provider.analyze_call_context(&doc, Position { line: 0, character: 7 });
+        let doc = Document::new_test("foo(a, ".to_string(), 1);
+        let result = provider.analyze_call_context(
+            &doc,
+            Position {
+                line: 0,
+                character: 7,
+            },
+        );
         assert!(result.is_some());
         let (func_name, param) = result.unwrap();
         assert_eq!(func_name, "foo");
         assert_eq!(param, 1);
 
         // Test method calls
-        let doc = Document {
-            text: "obj:method(".to_string(),
-            version: 1,
-            ast: None,
-        };
-        let result = provider.analyze_call_context(&doc, Position { line: 0, character: 11 });
+        let doc = Document::new_test("obj:method(".to_string(), 1);
+        let result = provider.analyze_call_context(
+            &doc,
+            Position {
+                line: 0,
+                character: 11,
+            },
+        );
         assert!(result.is_some());
         let (func_name, param) = result.unwrap();
         // May extract full "obj:method" or just "method" depending on implementation

@@ -1,10 +1,10 @@
 use crate::document::Document;
+use lsp_types::*;
 use std::sync::Arc;
-use lsp_types::{*, Uri};
+use typedlua_core::ast::expression::{Expression, ExpressionKind};
+use typedlua_core::ast::statement::Statement;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::typechecker::TypeChecker;
-use typedlua_core::ast::statement::Statement;
-use typedlua_core::ast::expression::{Expression, ExpressionKind};
 use typedlua_core::{Lexer, Parser, Span};
 
 /// Provides inlay hints (inline type annotations and parameter names)
@@ -89,7 +89,12 @@ impl InlayHintsProvider {
                 }
 
                 // Check expressions in initializer for parameter hints
-                self.collect_hints_from_expression(&var_decl.initializer, type_checker, range, hints);
+                self.collect_hints_from_expression(
+                    &var_decl.initializer,
+                    type_checker,
+                    range,
+                    hints,
+                );
             }
             Statement::Function(func_decl) => {
                 for stmt in &func_decl.body.statements {
@@ -102,7 +107,12 @@ impl InlayHintsProvider {
                     self.collect_hints_from_statement(stmt, type_checker, range, hints);
                 }
                 for else_if in &if_stmt.else_ifs {
-                    self.collect_hints_from_expression(&else_if.condition, type_checker, range, hints);
+                    self.collect_hints_from_expression(
+                        &else_if.condition,
+                        type_checker,
+                        range,
+                        hints,
+                    );
                     for stmt in &else_if.block.statements {
                         self.collect_hints_from_statement(stmt, type_checker, range, hints);
                     }
@@ -114,7 +124,12 @@ impl InlayHintsProvider {
                 }
             }
             Statement::While(while_stmt) => {
-                self.collect_hints_from_expression(&while_stmt.condition, type_checker, range, hints);
+                self.collect_hints_from_expression(
+                    &while_stmt.condition,
+                    type_checker,
+                    range,
+                    hints,
+                );
                 for stmt in &while_stmt.body.statements {
                     self.collect_hints_from_statement(stmt, type_checker, range, hints);
                 }
@@ -156,13 +171,18 @@ impl InlayHintsProvider {
                             for (i, arg) in args.iter().enumerate() {
                                 if i < func_type.parameters.len() {
                                     let param = &func_type.parameters[i];
-                                    if let typedlua_core::ast::pattern::Pattern::Identifier(ident) = &param.pattern {
+                                    if let typedlua_core::ast::pattern::Pattern::Identifier(ident) =
+                                        &param.pattern
+                                    {
                                         if self.span_in_range(&arg.span, range) {
                                             let position = span_to_position_start(&arg.span);
 
                                             hints.push(InlayHint {
                                                 position,
-                                                label: InlayHintLabel::String(format!("{}: ", ident.node)),
+                                                label: InlayHintLabel::String(format!(
+                                                    "{}: ",
+                                                    ident.node
+                                                )),
                                                 kind: Some(InlayHintKind::PARAMETER),
                                                 text_edits: None,
                                                 tooltip: None,
@@ -175,7 +195,12 @@ impl InlayHintsProvider {
                                 }
 
                                 // Recursively check nested expressions
-                                self.collect_hints_from_expression(&arg.value, type_checker, range, hints);
+                                self.collect_hints_from_expression(
+                                    &arg.value,
+                                    type_checker,
+                                    range,
+                                    hints,
+                                );
                             }
                         }
                     }
@@ -222,7 +247,7 @@ impl InlayHintsProvider {
 
     /// Format a type for display
     fn format_type_simple(&self, typ: &typedlua_core::ast::types::Type) -> String {
-        use typedlua_core::ast::types::{TypeKind, PrimitiveType};
+        use typedlua_core::ast::types::{PrimitiveType, TypeKind};
 
         match &typ.kind {
             TypeKind::Primitive(PrimitiveType::Nil) => "nil".to_string(),
@@ -266,32 +291,28 @@ mod tests {
         let provider = InlayHintsProvider::new();
 
         // Test variable without type annotation - should show hint
-        let doc = Document {
-            text: "local x = 10".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("local x = 10".to_string(), 1);
 
         let range = Range {
-            start: Position { line: 0, character: 0 },
-            end: Position { line: 0, character: 12 },
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 0,
+                character: 12,
+            },
         };
 
-        let hints = provider.provide(&doc, range);
+        let _hints = provider.provide(&doc, range);
         // May or may not have hints depending on type checker availability
         // Just verify the function runs without errors
-        assert!(hints.len() >= 0);
 
         // Test variable WITH type annotation - should NOT show hint
-        let doc = Document {
-            text: "local x: number = 10".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("local x: number = 10".to_string(), 1);
 
-        let hints = provider.provide(&doc, range);
+        let _hints = provider.provide(&doc, range);
         // Should not add duplicate type hints
-        assert!(hints.len() >= 0);
     }
 
     #[test]
@@ -299,45 +320,43 @@ mod tests {
         let provider = InlayHintsProvider::new();
 
         // Test simple function call
-        let doc = Document {
-            text: "foo(10, 20)".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("foo(10, 20)".to_string(), 1);
 
         let range = Range {
-            start: Position { line: 0, character: 0 },
-            end: Position { line: 0, character: 11 },
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 0,
+                character: 11,
+            },
         };
 
-        let hints = provider.provide(&doc, range);
+        let _hints = provider.provide(&doc, range);
         // May need type information to provide parameter hints
-        assert!(hints.len() >= 0);
 
         // Test that we can process method calls without errors
-        let doc = Document {
-            text: "obj.method(true)".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("obj.method(true)".to_string(), 1);
 
-        let hints = provider.provide(&doc, range);
-        assert!(hints.len() >= 0);
+        let _hints = provider.provide(&doc, range);
     }
 
     #[test]
     fn test_hint_positions() {
         let provider = InlayHintsProvider::new();
 
-        let doc = Document {
-            text: "local x = 10".to_string(),
-            version: 1,
-            ast: None,
-        };
+        let doc = Document::new_test("local x = 10".to_string(), 1);
 
         let range = Range {
-            start: Position { line: 0, character: 0 },
-            end: Position { line: 0, character: 12 },
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 0,
+                character: 12,
+            },
         };
 
         let hints = provider.provide(&doc, range);
