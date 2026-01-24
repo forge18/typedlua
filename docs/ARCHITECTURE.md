@@ -33,7 +33,7 @@ TypedLua is a typed superset of Lua implemented in Rust, providing static type c
 | **Parser**         | ✅ Complete      | Trait-based, 22 statement types, 22 expression kinds, error recovery          |
 | **Type Checker**   | ✅ Core Complete | 3,544 lines, generics, narrowing, 12 utility types; language features pending |
 | **Code Generator** | ✅ Complete      | Lua 5.1-5.4 targets, bundling mode, source maps                               |
-| **Optimizer**      | ⚠️ Partial       | 15 passes registered; O1 transforms work, O2/O3 analysis-only                 |
+| **Optimizer**      | ✅ O1 Complete   | 15 passes registered; All 5 O1 passes now implement transformations           |
 | **CLI**            | ✅ Complete      | Watch mode, config files, parallel compilation via rayon                      |
 | **LSP**            | ⚠️ Partial       | Core features working; member completion stubbed                              |
 
@@ -339,6 +339,185 @@ Transforms typed AST into executable Lua code.
 - Bundle mode for single-file output
 - Decorator runtime embedding when needed
 - Readable output (preserves structure where possible)
+
+### Optimizer
+
+**Location:** `crates/typedlua-core/src/optimizer/`
+
+The optimizer performs AST transformations to improve generated Lua code performance. It uses a configurable multi-level optimization system with 15 registered passes.
+
+#### Structure
+
+```
+crates/typedlua-core/src/optimizer/
+├── mod.rs                    # Optimizer orchestrator and pass registration
+└── passes.rs                 # Individual optimization pass implementations
+```
+
+#### The `OptimizationPass` Trait
+
+All optimization passes implement a common trait that defines the optimization interface:
+
+```rust
+pub trait OptimizationPass {
+    fn name(&self) -> &'static str;
+    fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError>;
+    fn min_level(&self) -> OptimizationLevel;
+}
+```
+
+- `name()`: Returns a static identifier for debugging and logging
+- `run()`: Performs the actual transformation; returns `true` if changes were made
+- `min_level()`: Specifies the minimum optimization level required to run this pass
+
+#### Optimization Levels
+
+The optimizer supports four levels, controlled by the `OptimizationLevel` enum:
+
+| Level | Description | Passes Run |
+|-------|-------------|------------|
+| **O0** | No optimizations | None |
+| **O1** | Basic | 5 passes - constant folding, dead code elimination, algebraic simplification, table pre-allocation, global localization |
+| **O2** | Standard | 5 additional passes - function inlining, loop optimization, string concatenation, dead store elimination, tail call optimization |
+| **O3** | Aggressive | 5 additional passes - aggressive inlining, operator inlining, interface method inlining, devirtualization, generic specialization |
+
+#### Pass Registration
+
+The optimizer uses a fixed-point iteration strategy with a maximum of 10 iterations:
+
+```rust
+pub struct Optimizer {
+    level: OptimizationLevel,
+    handler: Arc<dyn DiagnosticHandler>,
+    interner: Option<Arc<StringInterner>>,
+    passes: Vec<Box<dyn OptimizationPass>>,
+}
+
+impl Optimizer {
+    pub fn optimize(&mut self, program: &mut Program) -> Result<(), CompilationError> {
+        if self.level == OptimizationLevel::O0 {
+            return Ok(());
+        }
+
+        let mut iteration = 0;
+        let max_iterations = 10;
+
+        loop {
+            let mut changed = false;
+            iteration += 1;
+
+            if iteration > max_iterations {
+                break; // Safety limit
+            }
+
+            for pass in &mut self.passes {
+                if pass.min_level() <= self.level {
+                    let pass_changed = pass.run(program)?;
+                    changed |= pass_changed;
+                }
+            }
+
+            if !changed {
+                break; // Fixed point reached
+            }
+        }
+
+        Ok(())
+    }
+}
+```
+
+#### Implemented O1 Passes
+
+**1. ConstantFoldingPass**
+- Evaluates constant expressions at compile time
+- Handles numeric literals, boolean expressions, simple arithmetic
+- Example: `const x = 1 + 2 * 3` → `const x = 7`
+
+**2. DeadCodeEliminationPass**
+- Removes code after return/break/continue statements
+- Truncates unreachable else blocks after early returns
+- Eliminates empty branches in conditionals
+
+**3. AlgebraicSimplificationPass**
+- Simplifies expressions using algebraic identities
+- Examples: `x + 0 → x`, `x * 1 → x`, `x * 0 → 0`, `true and x → x`
+
+**4. TablePreallocationPass**
+- Analyzes table constructors for size hints
+- Generates `table.create(array_size, object_size)` for Lua 5.2+
+- Helps Lua's memory allocator pre-size tables
+
+**5. GlobalLocalizationPass** *(Recently Implemented)*
+- Identifies frequently-used globals (>2 accesses)
+- Creates local references to reduce repeated table lookups
+- Example:
+  ```lua
+  -- Input
+  local x = math.sin(1) + math.cos(2) + math.tan(3)
+
+  -- After optimization
+  local _math = math
+  local x = _math.sin(1) + _math.cos(2) + _math.tan(3)
+  ```
+- Uses string interner to track global identifiers
+- Respects local variable scope (doesn't localize already-declared locals)
+
+#### O2/O3 Passes (Analysis-Only Placeholders)
+
+The higher-level passes are scaffolded but currently perform analysis only:
+
+- **FunctionInliningPass**: Would inline functions with ≤5 statements
+- **LoopOptimizationPass**: Would convert `ipairs` to numeric loops
+- **StringConcatOptimizationPass**: Would use `table.concat` for 3+ parts
+- **DeadStoreEliminationPass**: Would remove redundant assignments
+- **TailCallOptimizationPass**: Would detect and optimize tail calls
+- **OperatorInliningPass**: Would inline simple operator overloads
+- **InterfaceMethodInliningPass**: Would inline default interface methods
+- **DevirtualizationPass**: Would resolve virtual method calls statically
+- **GenericSpecializationPass**: Would specialize generic instantiations
+
+#### Global Localization Implementation Details
+
+The newly implemented global localization pass works as follows:
+
+1. **Analysis Phase**: Traverse the AST, counting identifier usages
+   - Track declared locals to avoid localizing variables already in scope
+   - Build a usage map: `StringId → usage_count`
+
+2. **Selection Phase**: Filter globals used more than 2 times
+   - Threshold chosen empirically (local assignment overhead vs. lookup savings)
+   - Results in a list of `(global_name, count)` pairs
+
+3. **Transformation Phase**:
+   - Create `local _name = name` declarations at block start
+   - Replace remaining usages with the local reference
+   - Handle all AST node types (expressions, statements, function bodies, control flow)
+
+4. **Scope Awareness**: Properly handles:
+   - Nested blocks and their local scopes
+   - Loop variables (for numeric and generic loops)
+   - Function parameters
+   - Destructuring patterns
+
+#### Integration with Code Generator
+
+The optimizer runs between type checking and code generation:
+
+```
+Lexer → Parser → Type Checker → Optimizer → Code Generator → Lua Output
+```
+
+The optimizer receives a `Program` (typed AST) and returns a transformed `Program` that the code generator then emits as Lua.
+
+#### Future Enhancements
+
+| Enhancement | Description |
+|-------------|-------------|
+| **Profile-Guided Optimization** | Use runtime profiling data to guide optimization decisions |
+| **Cross-Module Inlining** | Inline functions across module boundaries |
+| **Escape Analysis** | Determine when allocations can be stack-allocated |
+| **Constant Propagation** | Propagate known values through the program |
 
 ### Diagnostic System
 
@@ -668,7 +847,7 @@ These features have lexer tokens but no AST, parser, type checker, or codegen su
 
 | Level | Status | Details                                                           |
 |-------|--------|-------------------------------------------------------------------|
-| O1    | ⚠️      | 3 passes work (constant folding, DCE, algebraic); 2 analysis-only |
+| O1    | ✅      | All 5 passes working: constant folding, DCE, algebraic, table pre-allocation, global localization |
 | O2    | ⚠️      | All 5 passes are analysis-only placeholders                       |
 | O3    | ⚠️      | All 5 passes are analysis-only placeholders                       |
 

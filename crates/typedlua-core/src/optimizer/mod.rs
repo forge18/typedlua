@@ -2,6 +2,7 @@ use crate::ast::Program;
 use crate::config::OptimizationLevel;
 use crate::diagnostics::DiagnosticHandler;
 use crate::errors::CompilationError;
+use crate::string_interner::StringInterner;
 use std::sync::Arc;
 
 mod passes;
@@ -25,15 +26,21 @@ pub struct Optimizer {
     level: OptimizationLevel,
     #[allow(dead_code)]
     handler: Arc<dyn DiagnosticHandler>,
+    interner: Arc<StringInterner>,
     passes: Vec<Box<dyn OptimizationPass>>,
 }
 
 impl Optimizer {
     /// Create a new optimizer with the given optimization level
-    pub fn new(level: OptimizationLevel, handler: Arc<dyn DiagnosticHandler>) -> Self {
+    pub fn new(
+        level: OptimizationLevel,
+        handler: Arc<dyn DiagnosticHandler>,
+        interner: Arc<StringInterner>,
+    ) -> Self {
         let mut optimizer = Self {
             level,
             handler,
+            interner,
             passes: Vec::new(),
         };
 
@@ -44,12 +51,15 @@ impl Optimizer {
 
     /// Register optimization passes based on the optimization level
     fn register_passes(&mut self) {
+        let interner = self.interner.clone();
+
         // O1 passes - Basic optimizations (5 passes)
         self.passes.push(Box::new(ConstantFoldingPass));
         self.passes.push(Box::new(DeadCodeEliminationPass));
         self.passes.push(Box::new(AlgebraicSimplificationPass));
         self.passes.push(Box::new(TablePreallocationPass));
-        self.passes.push(Box::new(GlobalLocalizationPass));
+        self.passes
+            .push(Box::new(GlobalLocalizationPass::new(interner.clone())));
 
         // O2 passes - Standard optimizations (5 passes)
         self.passes.push(Box::new(FunctionInliningPass::default()));
@@ -59,7 +69,8 @@ impl Optimizer {
         self.passes.push(Box::new(TailCallOptimizationPass));
 
         // O3 passes - Aggressive optimizations (5 passes)
-        self.passes.push(Box::new(AggressiveInliningPass::default()));
+        self.passes
+            .push(Box::new(AggressiveInliningPass::default()));
         self.passes.push(Box::new(OperatorInliningPass));
         self.passes.push(Box::new(InterfaceMethodInliningPass));
         self.passes.push(Box::new(DevirtualizationPass));
@@ -79,7 +90,10 @@ impl Optimizer {
     /// Optimize the program AST
     /// Runs all registered optimization passes until no more changes are made
     pub fn optimize(&mut self, program: &mut Program) -> Result<(), CompilationError> {
-        if self.level == OptimizationLevel::O0 {
+        // Resolve Auto to actual optimization level based on build profile
+        let effective_level = self.level.effective();
+
+        if effective_level == OptimizationLevel::O0 {
             // No optimizations at O0
             return Ok(());
         }
@@ -100,7 +114,7 @@ impl Optimizer {
             // Run all passes that are eligible for the current optimization level
             for pass in &mut self.passes {
                 // Only run passes that are at or below the current optimization level
-                if pass.min_level() <= self.level {
+                if pass.min_level() <= effective_level {
                     let pass_changed = pass.run(program)?;
                     changed |= pass_changed;
                 }

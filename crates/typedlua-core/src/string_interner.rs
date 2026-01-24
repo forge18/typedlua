@@ -4,7 +4,7 @@ use std::cell::RefCell;
 
 /// A string interner that deduplicates strings and assigns them unique IDs
 /// This reduces memory usage when the same strings are used repeatedly (like identifiers)
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StringInterner {
     /// Map from string to its ID (interior mutability for interning)
     string_to_id: RefCell<FxHashMap<String, StringId>>,
@@ -145,6 +145,29 @@ impl StringInterner {
     /// Check if the interner is empty
     pub fn is_empty(&self) -> bool {
         self.id_to_string.borrow().is_empty()
+    }
+
+    /// Get or intern a string, returning its ID
+    /// Uses interior mutability for concurrent access
+    pub fn get_or_intern(&self, s: &str) -> StringId {
+        // Fast path: check if already interned (read-only)
+        if let Some(&id) = self.string_to_id.borrow().get(s) {
+            return id;
+        }
+
+        // Slow path: need to insert (write)
+        let mut id_to_string = self.id_to_string.borrow_mut();
+        let mut string_to_id = self.string_to_id.borrow_mut();
+
+        // Double-check after acquiring write lock
+        if let Some(&id) = string_to_id.get(s) {
+            return id;
+        }
+
+        let id = StringId(id_to_string.len() as u32);
+        id_to_string.push(s.to_string());
+        string_to_id.insert(s.to_string(), id);
+        id
     }
 }
 

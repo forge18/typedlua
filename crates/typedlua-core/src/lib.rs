@@ -9,6 +9,7 @@ pub mod errors;
 pub mod fs;
 pub mod lexer;
 pub mod module_resolver;
+pub mod optimizer;
 pub mod parser;
 pub mod span;
 pub mod stdlib;

@@ -76,6 +76,7 @@
 **Test file:** safe_navigation_tests.rs
 
 **O2 Optimizations Deferred:**
+
 - [ ] Codegen: O2 optimization - skip nil check for guaranteed non-nil expressions (literals, objects, arrays, new expressions)
 
 ---
@@ -248,6 +249,7 @@ Lexer keywords `Throw`, `Try`, `Catch`, `Finally`, `Rethrow`, `Throws`, `BangBan
 **Test file:** rich_enum_tests.rs
 
 **Known Issues:**
+
 - [ ] O2 optimization - precompute instances as literal tables (deferred)
 - [ ] O3 optimization - add inline hints (deferred)
 
@@ -344,7 +346,8 @@ Lexer keyword `Namespace` exists (only `DeclareNamespaceStatement` for .d.tl fil
 **Test file:** template_dedent_tests.rs
 
 **Examples:**
-- `const sql = `\n    SELECT *\n    FROM users\n`` → `"SELECT *\nFROM users"`
+
+- `const sql =`\n    SELECT *\n    FROM users\n`` → `"SELECT *\nFROM users"`
 - Relative indentation preserved for nested content
 - Empty/whitespace-only templates become empty strings
 
@@ -398,7 +401,7 @@ Pure Lua reflection via compile-time metadata generation. No native code or FFI 
 
 ### 3.1-3.4 Compiler Optimizations
 
-**Status:** O1 passes implemented and tested, O2/O3 passes scaffolded (analysis-only) | **Model:** Opus
+**Status:** O1 passes implemented and tested, O2/O3 passes scaffolded (analysis-only), Auto level support added | **Model:** Opus
 
 All 15 optimization passes are registered. O1 passes (constant folding, dead code elimination, algebraic simplification) are fully functional. O2/O3 passes are analysis-only placeholders awaiting full implementation.
 
@@ -407,41 +410,112 @@ All 15 optimization passes are registered. O1 passes (constant folding, dead cod
 - [x] Create `crates/typedlua-core/src/optimizer/mod.rs` module
 - [x] Create `Optimizer` struct with optimization passes
 - [x] Implement `OptimizationPass` trait
-- [x] Add `OptimizationLevel` enum to config.rs (O0, O1, O2, O3)
+- [x] Add `OptimizationLevel` enum to config.rs (O0, O1, O2, O3, Auto)
 - [x] Add `optimization_level: OptimizationLevel` to `CompilerOptions`
 - [x] Add `with_optimization_level()` method to `CodeGenerator`
 - [x] Integrate optimizer into compilation pipeline
 - [x] Fixed-point iteration (runs passes until no changes)
 - [x] Level-based pass filtering (only runs passes <= current level)
+- [x] Auto optimization level support (O1 in debug, O2 in release)
 
 **3.2 O1 Optimizations - Basic (COMPLETE):**
 
 - [x] Constant folding (numeric + boolean expressions)
 - [x] Dead code elimination (after return/break/continue)
 - [x] Algebraic simplification (x+0=x, x*1=x, x*0=0, etc.)
-- [ ] Table pre-allocation (scaffolded)
-- [ ] Global localization (scaffolded)
+- [x] Table pre-allocation (adds table.create() hints for Lua 5.2+)
+- [x] Global localization - caches frequently-used globals in local variables
 
 **3.3 O2 Optimizations - Standard (SCAFFOLDED - analysis only):**
 
-- [ ] Function inlining (threshold: 5 statements)
-- [ ] Loop optimization - analysis only
-- [ ] Null coalescing optimization (inline vs IIFE) - needs null coalescing feature
-- [ ] Safe navigation optimization - needs safe navigation feature
-- [ ] Exception handling optimization - needs exception handling feature
+### 3.3 O2 Optimizations - Standard (SCAFFOLDED - analysis only)
+
+- [ ] Function inlining
+  - [ ] Define inlining policy (size thresholds: 5, 10 statements; recursion safety rules)
+  - [ ] Implement candidate discovery pass (scan call graph, record call‑site info)
+  - [ ] Create transformation that clones function body into caller (handling locals, return)
+  - [ ] Handle inlining of functions with upvalues / closures (skip or special case)
+  - [ ] Register new `FunctionInliningPass` in optimizer infrastructure
+  - [ ] Write unit tests: simple pure function, function with parameters, recursive guard, closure edge case
+- [ ] Loop optimization
+  - [ ] Detect loop‑invariant expressions (constant folding inside loops)
+  - [ ] Add pass to hoist invariant statements before loop header
+  - [ ] Implement optional loop unrolling for `for` loops with known small iteration count
+  - [ ] Add pass to simplify loop conditions (e.g., `while true do break end` -> remove loop)
+  - [ ] Write tests covering invariant hoisting, unrolling, and condition simplification
+- [ ] Null coalescing optimization
+  - [ ] Survey AST patterns for `NullCoalesce` usage (binary op vs IIFE)
+  - [ ] Add analysis to detect simple left‑hand side (identifier, literal, member access)
+  - [ ] Emit direct `and`/`or` pattern for simple cases
+  - [ ] Preserve IIFE generation for complex expressions (side‑effects)
+  - [ ] Add tests for simple and complex null‑coalesce cases
+- [ ] Safe navigation optimization
+  - [ ] Identify optional access chains in AST (`OptionalMember`, `OptionalIndex`, `OptionalCall`, `OptionalMethodCall`)
+  - [ ] Determine chain length and side‑effect complexity
+  - [ ] Emit chained `and` checks for short chains (1‑2 levels)
+  - [ ] Generate IIFE for longer or side‑effecting chains
+  - [ ] Add tests for various optional navigation patterns
+- [ ] Exception handling optimization
+  - [ ] Benchmark typical `try/catch` patterns using `pcall` vs `xpcall`
+  - [ ] Add analysis to select `pcall` when catch block is a single simple handler
+  - [ ] Keep `xpcall` for multi‑catch or rethrow scenarios
+  - [ ] Update codegen to emit chosen wrapper
+  - [ ] Write tests for simple try/catch (pcall) and complex (xpcall) cases
 - [ ] String concatenation optimization
+  - [ ] Detect consecutive `..` operations inside loops or large literals
+  - [ ] Introduce temporary table accumulation and `table.concat` emission
+  - [ ] Add optional preallocation hint based on estimated length
+  - [ ] Write micro‑benchmarks comparing naive vs optimized concatenation
 - [ ] Dead store elimination
+  - [ ] Perform liveness analysis on local variables within basic blocks
+  - [ ] Flag assignments whose values are never read before being overwritten or out of scope
+  - [ ] Remove flagged store instructions in a dedicated pass
+  - [ ] Verify correctness with tests ensuring no observable side‑effects removed
 - [ ] Method to function call conversion
-- [ ] Tail call optimization (Lua handles TCO automatically)
-- [ ] Rich enum optimization - needs rich enum feature
+  - [ ] Scan method call sites where receiver type is known and method is static
+  - [ ] Transform call to direct function invocation (removing `self` argument handling)
+  - [ ] Adjust generated Lua to call the function without method table lookup
+  - [ ] Add tests for class method calls that become plain functions
+- [ ] Tail call optimization
+  - [ ] Review Lua runtime tail‑call behavior for generated functions
+  - [ ] Ensure optimizer does not insert statements that break tail‑position
+  - [ ] Add a pass that verifies tail‑call positions remain unchanged after other optimizations
+  - [ ] Write tests for tail‑recursive functions and non‑tail calls
+- [ ] Rich enum optimization
+  - [ ] Precompute enum instance tables during codegen (static lookup tables)
+  - [ ] Inline simple enum method bodies where they consist of a single return
+  - [ ] Ensure enum method inlining respects overriding rules
+  - [ ] Add tests for enum instance creation and method call inlining
 
 **3.4 O3 Optimizations - Aggressive (SCAFFOLDED):**
 
+### 3.4 O3 Optimizations - Aggressive (SCAFFOLDED)
+
 - [ ] Devirtualization
+  - [ ] Identify virtual method call sites (method tables)
+  - [ ] Analyze concrete type information at call sites
+  - [ ] Replace virtual dispatch with direct function call where type is known
+  - [ ] Add tests for class hierarchy method calls
 - [ ] Generic specialization
+  - [ ] Detect generic function instantiations with concrete type arguments
+  - [ ] Generate specialized monomorphic versions of generic functions
+  - [ ] Inline specialized versions where beneficial
+  - [ ] Write tests for generic function performance and correctness
 - [ ] Operator inlining
+  - [ ] Identify frequently used operator overloads
+  - [ ] Inline operator body at call sites when small
+  - [ ] Ensure correct handling of metamethod lookups
+  - [ ] Add tests for operator inlining correctness
 - [ ] Interface method inlining
+  - [ ] Analyze interface method calls with known implementing class
+  - [ ] Inline method body when implementation is known and small
+  - [ ] Preserve semantics for dynamic dispatch fallback
+  - [ ] Add tests for interface method inlining scenarios
 - [ ] Aggressive inlining (threshold: 15 statements)
+  - [ ] Extend inlining criteria to larger functions up to 15 statements
+  - [ ] Implement heuristics to avoid code bloat
+  - [ ] Add benchmarks to evaluate impact
+  - [ ] Write tests for large function inlining and recursion safety
 
 **Test files:** optimizer_integration_tests.rs, o1_combined_tests.rs, o3_combined_tests.rs
 

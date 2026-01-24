@@ -36,6 +36,49 @@ pub enum ModuleMode {
     Bundle,
 }
 
+/// Optimization level for code generation
+/// Auto mode defaults to O1 in dev mode, O2 in release mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OptimizationLevel {
+    /// No optimizations - fastest compilation
+    O0,
+    /// Basic optimizations - safe transformations (constant folding, DCE, etc.)
+    O1,
+    /// Standard optimizations - includes function inlining
+    O2,
+    /// Aggressive optimizations - may increase compile time
+    O3,
+    /// Auto-detect based on build profile (default)
+    /// O1 for debug/dev builds, O2 for release builds
+    #[default]
+    Auto,
+}
+
+impl OptimizationLevel {
+    /// Resolve Auto to an actual optimization level based on build profile
+    #[cfg(debug_assertions)]
+    pub fn resolved(self) -> Self {
+        match self {
+            OptimizationLevel::Auto => OptimizationLevel::O1,
+            other => other,
+        }
+    }
+
+    #[cfg(not(debug_assertions))]
+    pub fn resolved(self) -> Self {
+        match self {
+            OptimizationLevel::Auto => OptimizationLevel::O2,
+            other => other,
+        }
+    }
+
+    /// Get the effective optimization level for this configuration
+    pub fn effective(&self) -> OptimizationLevel {
+        self.resolved()
+    }
+}
+
 /// Compiler options that control type checking and code generation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
