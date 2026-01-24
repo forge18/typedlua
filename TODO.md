@@ -352,51 +352,43 @@ Lexer keyword `Namespace` exists (only `DeclareNamespaceStatement` for .d.tl fil
 
 ### 2.6 Reflection System
 
-**Status:** Not implemented | **Model:** Opus (multi-crate, FFI, complex)
+**Status:** Not implemented | **Model:** Sonnet (pure Lua, codegen-focused)
 
-#### 2.6.1 Reflection Native Crate Setup
+Pure Lua reflection via compile-time metadata generation. No native code or FFI required.
 
-- [ ] Create `crates/typedlua-reflect-native/` cargo project with mlua dependency
-- [ ] Implement type registry with compile-time metadata
-- [ ] Implement field/method lookup with HashMap (O(1))
-- [ ] Compact binary metadata with bitflags
+#### 2.6.1 Reflection Metadata Codegen
 
-#### 2.6.2 Reflection Runtime Functions
+- [ ] Assign unique `__typeId` (integer) to each class/interface/enum
+- [ ] Generate `__typeName` string on metatable
+- [ ] Generate `__ancestors` as hash set for O(1) lookup: `{ [ParentId] = true }`
+- [ ] Generate lazy `__buildFields()` - builds field table on first access, caches result
+- [ ] Generate lazy `__buildMethods()` - builds method table on first access, caches result
+- [ ] Field format: `{ name, type, modifiers }` (modifiers: `"readonly"`, `"optional"`, etc.)
+- [ ] Method format: `{ name, params, returnType }`
 
-- [ ] Implement `is_instance()` with O(1) ancestor bitmask checks
-- [ ] Implement `typeof()` returning type info
-- [ ] Implement `get_fields()` with lazy building
-- [ ] Implement `get_methods()` with lazy building
-- [ ] String interning for type/field/method names
+#### 2.6.2 Reflection Runtime Module
 
-#### 2.6.3 Reflection LuaRocks Distribution
+- [ ] Create `lua/reflection_runtime.lua` in typedlua-runtime crate
+- [ ] `Reflect.isInstance(obj, Type)` - O(1) lookup: `obj.__ancestors[Type.__typeId]`
+- [ ] `Reflect.typeof(obj)` - returns `{ id, name, kind }` from metatable
+- [ ] `Reflect.getFields(obj)` - lazy: calls `__buildFields()` once, caches in `__fields`
+- [ ] `Reflect.getMethods(obj)` - lazy: calls `__buildMethods()` once, caches in `__methods`
+- [ ] `Reflect.forName(name)` - O(1) lookup in `__TypeRegistry`
 
-- [ ] Create `.rockspec` file
-- [ ] Set up cargo build command
-- [ ] Pre-compile binaries for Linux (x64, ARM), macOS (x64, ARM), Windows (x64)
-- [ ] Publish to LuaRocks
-- [ ] Publish to GitHub releases
+#### 2.6.3 Reflection Integration
 
-#### 2.6.4 Reflection Runtime Integration
+- [ ] Track `uses_reflection` flag in codegen context
+- [ ] Only emit metadata when reflection is used
+- [ ] Generate `__TypeRegistry` table: `{ ["MyClass"] = MyClass, ["Math.Vector"] = Math.Vector }`
+- [ ] Add `--strip-reflection` CLI flag to omit metadata in production builds
 
-- [ ] Create Lua runtime wrapper for native module
-- [ ] Implement `Runtime.isInstance()`
-- [ ] Implement `Runtime.typeof()`
-- [ ] Implement `Runtime.getFields()`
-
-#### 2.6.5 Reflection Codegen
-
-- [ ] Assign unique `__typeId` to each class
-- [ ] Generate `__ancestorMask` bitset for inheritance
-- [ ] Generate lazy `_buildFields()` function
-- [ ] Generate lazy `_buildMethods()` function
-- [ ] Generate lazy `_resolveType()` functions
-- [ ] Use bitflags for field modifiers (readonly, optional)
-- [ ] Use string interning for names
-
-#### 2.6.6 Reflection Tests
+#### 2.6.5 Reflection Tests
 
 - [ ] Fix reflection_tests.rs compilation
+- [ ] Test `isInstance()` with class hierarchies
+- [ ] Test `typeof()` returns correct metadata
+- [ ] Test `getFields()` and `getMethods()` accuracy
+- [ ] Test `forName()` lookup
 
 **Test file:** reflection_tests.rs
 
