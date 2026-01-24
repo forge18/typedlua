@@ -19,7 +19,7 @@
 - [x] Codegen: Simple form `(a ~= nil and a or b)` for identifiers and simple member access
 - [x] Codegen: IIFE form for complex expressions (avoid double evaluation)
 - [x] Codegen: Handle member access correctly in simple form
-- [ ] Codegen: O2 optimization - skip nil check for guaranteed non-nil expressions (literals, objects, arrays, new expressions) - Deferred to O2 implementation
+- [x] Codegen: O2 optimization - skip nil check for guaranteed non-nil expressions (literals, objects, arrays, new expressions)
 - [x] Remove `#[ignore]` from tests in null_coalescing_tests.rs
 - [x] Remove `#[ignore]` from tests in null_coalescing_iife_tests.rs (removed cfg flag, O2 tests marked with #[ignore])
 - [x] Fix and enable all tests
@@ -456,19 +456,20 @@ All 15 optimization passes are registered. O1 passes (constant folding, dead cod
   - [x] Handle repeat...until loops (previously missing in optimizer)
   - [x] Write tests covering invariant detection, dead loop removal, and repeat support
 
-- [ ] Null coalescing optimization
-  - [ ] Survey AST patterns for `NullCoalesce` usage (binary op vs IIFE)
-  - [ ] Add analysis to detect simple left‑hand side (identifier, literal, member access)
-  - [ ] Emit direct `and`/`or` pattern for simple cases
-  - [ ] Preserve IIFE generation for complex expressions (side‑effects)
-  - [ ] Add tests for simple and complex null‑coalesce cases
+- [x] Null coalescing optimization (IMPLEMENTED)
+  - [x] Add `is_guaranteed_non_nil()` helper in codegen
+  - [x] O2 optimization: skip nil check for literals (number, string, boolean)
+  - [x] O2 optimization: skip nil check for object/array literals
+  - [x] O2 optimization: skip nil check for new expressions and function expressions
+  - [x] Enable all 6 O2 tests in null_coalescing_iife_tests.rs
 
-- [ ] Safe navigation optimization
-  - [ ] Identify optional access chains in AST (`OptionalMember`, `OptionalIndex`, `OptionalCall`, `OptionalMethodCall`)
-  - [ ] Determine chain length and side‑effect complexity
-  - [ ] Emit chained `and` checks for short chains (1‑2 levels)
-  - [ ] Generate IIFE for longer or side‑effecting chains
-  - [ ] Add tests for various optional navigation patterns
+- [x] Safe navigation optimization
+  - [x] Identify optional access chains in AST (`OptionalMember`, `OptionalIndex`, `OptionalCall`, `OptionalMethodCall`)
+  - [x] Determine chain length and side‑effect complexity
+  - [x] Emit chained `and` checks for short chains (1‑2 levels)
+  - [x] Generate IIFE for longer or side‑effecting chains
+  - [x] Add tests for various optional navigation patterns
+  - [x] O2 optimization - skip nil check for guaranteed non-nil expressions (literals, objects, arrays, new expressions)
 
 - [ ] Exception handling optimization
   - [ ] Benchmark typical `try/catch` patterns using `pcall` vs `xpcall`

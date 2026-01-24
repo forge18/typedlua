@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use typedlua_core::codegen::CodeGenerator;
-use typedlua_core::config::CompilerOptions;
+use typedlua_core::config::{CompilerOptions, OptimizationLevel};
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::lexer::Lexer;
 use typedlua_core::parser::Parser;
@@ -8,31 +8,33 @@ use typedlua_core::string_interner::StringInterner;
 use typedlua_core::typechecker::TypeChecker;
 
 fn compile_and_check(source: &str) -> Result<String, String> {
+    compile_with_optimization(source, OptimizationLevel::O0)
+}
+
+fn compile_with_optimization(source: &str, level: OptimizationLevel) -> Result<String, String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
     let interner = Arc::new(interner);
 
-    // Lex
     let mut lexer = Lexer::new(source, handler.clone(), &interner);
     let tokens = lexer
         .tokenize()
         .map_err(|e| format!("Lexing failed: {:?}", e))?;
 
-    // Parse
     let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
     let mut program = parser
         .parse()
         .map_err(|e| format!("Parsing failed: {:?}", e))?;
 
-    // Type check
-    let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids)
-        .with_options(CompilerOptions::default());
+    let mut options = CompilerOptions::default();
+
+    let mut type_checker =
+        TypeChecker::new(handler.clone(), &interner, &common_ids).with_options(options.clone());
     type_checker
         .check_program(&program)
         .map_err(|e| e.message)?;
 
-    // Generate code
-    let mut codegen = CodeGenerator::new(interner.clone());
+    let mut codegen = CodeGenerator::new(interner.clone()).with_optimization_level(level);
     let output = codegen.generate(&mut program);
 
     Ok(output)
@@ -497,13 +499,13 @@ fn test_optimization_chained_optional() {
 }
 
 #[test]
-#[ignore] // O2 optimization - skip nil check for guaranteed non-nil object literals
+// O2 optimization - skip nil check for guaranteed non-nil object literals
 fn test_o2_optimization_object_literal() {
     let source = r#"
         const result = {x: 1, y: 2}?.x
     "#;
 
-    let result = compile_and_check(source);
+    let result = compile_with_optimization(source, OptimizationLevel::O2);
     assert!(result.is_ok(), "Should compile successfully");
     let output = result.unwrap();
 
@@ -517,13 +519,13 @@ fn test_o2_optimization_object_literal() {
 }
 
 #[test]
-#[ignore] // O2 optimization - skip nil check for guaranteed non-nil array literals
+// O2 optimization - skip nil check for guaranteed non-nil array literals
 fn test_o2_optimization_array_literal() {
     let source = r#"
         const result = [1, 2, 3]?.[0]
     "#;
 
-    let result = compile_and_check(source);
+    let result = compile_with_optimization(source, OptimizationLevel::O2);
     assert!(result.is_ok(), "Should compile successfully");
     let output = result.unwrap();
 
@@ -541,7 +543,7 @@ fn test_o2_optimization_function_literal() {
         const result = ((): number => 42)?.()
     "#;
 
-    let result = compile_and_check(source);
+    let result = compile_with_optimization(source, OptimizationLevel::O2);
     assert!(result.is_ok(), "Should compile successfully");
     let output = result.unwrap();
 
@@ -561,7 +563,7 @@ fn test_o2_optimization_new_expression() {
         const result = (new Point())?.x
     "#;
 
-    let result = compile_and_check(source);
+    let result = compile_with_optimization(source, OptimizationLevel::O2);
     assert!(result.is_ok(), "Should compile successfully");
     let output = result.unwrap();
 
@@ -581,7 +583,7 @@ fn test_o2_vs_regular_optional_chaining() {
         const result = obj?.value
     "#;
 
-    let result1 = compile_and_check(optimized_source);
+    let result1 = compile_with_optimization(optimized_source, OptimizationLevel::O2);
     assert!(result1.is_ok(), "Optimized case should compile");
     let _output1 = result1.unwrap();
 
@@ -591,7 +593,7 @@ fn test_o2_vs_regular_optional_chaining() {
         const result = obj?.value
     "#;
 
-    let result2 = compile_and_check(unoptimized_source);
+    let result2 = compile_with_optimization(unoptimized_source, OptimizationLevel::O2);
     // May have type checking issues with explicit nil type
     if result2.is_ok() {
         let output2 = result2.unwrap();

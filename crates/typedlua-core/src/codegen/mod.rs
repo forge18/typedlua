@@ -4,6 +4,7 @@ use crate::ast::expression::*;
 use crate::ast::pattern::{ArrayPattern, ArrayPatternElement, ObjectPattern, Pattern};
 use crate::ast::statement::*;
 use crate::ast::Program;
+use crate::config::OptimizationLevel;
 use crate::optimizer::Optimizer;
 use crate::span::Span;
 use crate::string_interner::StringId;
@@ -2550,9 +2551,17 @@ impl CodeGenerator {
             }
             ExpressionKind::OptionalMember(object, member) => {
                 // Optional member access: obj?.member
-                // For simple expressions: (obj and obj.member or nil)
-                // For complex expressions: use IIFE to avoid double evaluation
-                if self.is_simple_expression(object) {
+                // O2 optimization: Skip nil check for guaranteed non-nil expressions
+                // O1: Simple expressions use (obj and obj.member or nil)
+                // O1: Complex expressions use IIFE to avoid double evaluation
+                if self.optimization_level.effective() >= OptimizationLevel::O2
+                    && self.is_guaranteed_non_nil(object)
+                {
+                    self.generate_expression(object);
+                    self.write(".");
+                    let member_str = self.resolve(member.node);
+                    self.write(&member_str);
+                } else if self.is_simple_expression(object) {
                     self.write("(");
                     self.generate_expression(object);
                     self.write(" and ");
@@ -2574,7 +2583,15 @@ impl CodeGenerator {
             }
             ExpressionKind::OptionalIndex(object, index) => {
                 // Optional index access: obj?.[index]
-                if self.is_simple_expression(object) {
+                // O2 optimization: Skip nil check for guaranteed non-nil expressions
+                if self.optimization_level.effective() >= OptimizationLevel::O2
+                    && self.is_guaranteed_non_nil(object)
+                {
+                    self.generate_expression(object);
+                    self.write("[");
+                    self.generate_expression(index);
+                    self.write("]");
+                } else if self.is_simple_expression(object) {
                     self.write("(");
                     self.generate_expression(object);
                     self.write(" and ");
@@ -2593,7 +2610,13 @@ impl CodeGenerator {
             }
             ExpressionKind::OptionalCall(callee, _args) => {
                 // Optional call: func?.()
-                if self.is_simple_expression(callee) {
+                // O2 optimization: Skip nil check for guaranteed non-nil expressions
+                if self.optimization_level.effective() >= OptimizationLevel::O2
+                    && self.is_guaranteed_non_nil(callee)
+                {
+                    self.generate_expression(callee);
+                    self.write("()");
+                } else if self.is_simple_expression(callee) {
                     self.write("(");
                     self.generate_expression(callee);
                     self.write(" and ");
@@ -2607,7 +2630,23 @@ impl CodeGenerator {
             }
             ExpressionKind::OptionalMethodCall(object, method, args) => {
                 // Optional method call: obj?.method()
-                if self.is_simple_expression(object) {
+                // O2 optimization: Skip nil check for guaranteed non-nil expressions
+                if self.optimization_level.effective() >= OptimizationLevel::O2
+                    && self.is_guaranteed_non_nil(object)
+                {
+                    self.generate_expression(object);
+                    self.write(":");
+                    let method_str = self.resolve(method.node);
+                    self.write(&method_str);
+                    self.write("(");
+                    for (i, arg) in args.iter().enumerate() {
+                        if i > 0 {
+                            self.write(", ");
+                        }
+                        self.generate_argument(arg);
+                    }
+                    self.write(")");
+                } else if self.is_simple_expression(object) {
                     self.write("(");
                     self.generate_expression(object);
                     self.write(" and ");
@@ -2792,10 +2831,18 @@ impl CodeGenerator {
     }
 
     /// Generate null coalescing operator (??)
+    /// O2 optimization: Skip nil check for guaranteed non-nil expressions
     /// Simple form: (a ~= nil and a or b) for simple expressions
     /// IIFE form: (function() local __left = expr; return __left ~= nil and __left or b end)()
     /// for complex expressions that might have side effects or need to be evaluated once
     fn generate_null_coalesce(&mut self, left: &Expression, right: &Expression) {
+        if self.optimization_level.effective() >= OptimizationLevel::O2
+            && self.is_guaranteed_non_nil(left)
+        {
+            self.generate_expression(left);
+            return;
+        }
+
         if self.is_simple_expression(left) {
             self.write("(");
             self.generate_expression(left);
@@ -2814,6 +2861,23 @@ impl CodeGenerator {
             self.writeln("");
             self.write_indent();
             self.write("end)()");
+        }
+    }
+
+    /// Check if an expression is guaranteed to never be nil
+    /// Used for O2 null coalescing optimization to skip unnecessary nil checks
+    fn is_guaranteed_non_nil(&self, expr: &Expression) -> bool {
+        match &expr.kind {
+            ExpressionKind::Literal(Literal::Boolean(_)) => true,
+            ExpressionKind::Literal(Literal::Number(_)) => true,
+            ExpressionKind::Literal(Literal::Integer(_)) => true,
+            ExpressionKind::Literal(Literal::String(_)) => true,
+            ExpressionKind::Object(_) => true,
+            ExpressionKind::Array(_) => true,
+            ExpressionKind::New(_, _) => true,
+            ExpressionKind::Function(_) => true,
+            ExpressionKind::Parenthesized(inner) => self.is_guaranteed_non_nil(inner),
+            _ => false,
         }
     }
 
