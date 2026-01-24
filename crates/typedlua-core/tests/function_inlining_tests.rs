@@ -252,9 +252,21 @@ fn test_multiple_calls_same_function_inlined() {
     let b_ok = output.contains("local b = (3 * 3)") || output.contains("local b = 9");
     let c_ok = output.contains("local c = (4 * 4)") || output.contains("local c = 16");
 
-    assert!(a_ok, "Expected 'local a = (2 * 2)' or 'local a = 4', got:\n{}", output);
-    assert!(b_ok, "Expected 'local b = (3 * 3)' or 'local b = 9', got:\n{}", output);
-    assert!(c_ok, "Expected 'local c = (4 * 4)' or 'local c = 16', got:\n{}", output);
+    assert!(
+        a_ok,
+        "Expected 'local a = (2 * 2)' or 'local a = 4', got:\n{}",
+        output
+    );
+    assert!(
+        b_ok,
+        "Expected 'local b = (3 * 3)' or 'local b = 9', got:\n{}",
+        output
+    );
+    assert!(
+        c_ok,
+        "Expected 'local c = (4 * 4)' or 'local c = 16', got:\n{}",
+        output
+    );
     // Note: Dead code elimination of unused functions is a separate optimization pass
     // The function definition may still be present after inlining
 }

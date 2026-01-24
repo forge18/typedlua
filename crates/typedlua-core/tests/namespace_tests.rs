@@ -8,7 +8,9 @@ use typedlua_core::parser::Parser;
 use typedlua_core::string_interner::StringInterner;
 use typedlua_core::typechecker::TypeChecker;
 
-fn parse_source(source: &str) -> Result<(typedlua_core::ast::Program, Arc<StringInterner>), String> {
+fn parse_source(
+    source: &str,
+) -> Result<(typedlua_core::ast::Program, Arc<StringInterner>), String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
     let interner = Arc::new(interner);

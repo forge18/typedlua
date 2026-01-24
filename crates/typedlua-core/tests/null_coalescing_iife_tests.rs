@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use typedlua_core::codegen::CodeGenerator;
-use typedlua_core::config::CompilerOptions;
+use typedlua_core::config::{CompilerOptions, OptimizationLevel};
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::lexer::Lexer;
 use typedlua_core::parser::Parser;
@@ -34,7 +34,8 @@ fn compile_with_optimization(source: &str) -> Result<String, String> {
         .check_program(&program)
         .map_err(|e| e.message)?;
 
-    let mut codegen = CodeGenerator::new(interner.clone());
+    let mut codegen =
+        CodeGenerator::new(interner.clone()).with_optimization_level(OptimizationLevel::O2);
     let output = codegen.generate(&mut program);
 
     Ok(output)
@@ -180,7 +181,6 @@ fn test_simple_form_for_member_access() {
 // ============================================================================
 
 #[test]
-#[ignore]
 fn test_o2_skip_check_for_object_literal() {
     let source = r#"
         const result = { value: 42 } ?? { value: 0 }
@@ -200,7 +200,6 @@ fn test_o2_skip_check_for_object_literal() {
 }
 
 #[test]
-#[ignore]
 fn test_o2_skip_check_for_array_literal() {
     let source = r#"
         const result = [1, 2, 3] ?? []
@@ -216,7 +215,6 @@ fn test_o2_skip_check_for_array_literal() {
 }
 
 #[test]
-#[ignore]
 fn test_o2_skip_check_for_new_expression() {
     let source = r#"
         class MyClass {}
@@ -233,7 +231,6 @@ fn test_o2_skip_check_for_new_expression() {
 }
 
 #[test]
-#[ignore]
 fn test_o2_skip_check_for_string_literal() {
     let source = r#"
         const result = "hello" ?? "world"
@@ -253,7 +250,6 @@ fn test_o2_skip_check_for_string_literal() {
 }
 
 #[test]
-#[ignore]
 fn test_o2_skip_check_for_number_literal() {
     let source = r#"
         const result = 42 ?? 0
@@ -326,7 +322,6 @@ fn test_chained_null_coalesce_with_mixed_complexity() {
 }
 
 #[test]
-#[ignore]
 fn test_o2_chained_with_guaranteed_non_nil() {
     let source = r#"
         const value: number | nil = nil
