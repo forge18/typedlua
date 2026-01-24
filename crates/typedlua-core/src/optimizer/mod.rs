@@ -8,6 +8,9 @@ use std::sync::Arc;
 mod passes;
 use passes::*;
 
+mod rich_enum_optimization;
+use rich_enum_optimization::*;
+
 /// Trait for optimization passes that transform the AST
 pub trait OptimizationPass {
     /// Get the name of this optimization pass
@@ -61,7 +64,7 @@ impl Optimizer {
         self.passes
             .push(Box::new(GlobalLocalizationPass::new(interner.clone())));
 
-        // O2 passes - Standard optimizations (5 passes)
+        // O2 passes - Standard optimizations (6 passes)
         let mut inlining_pass = FunctionInliningPass::default();
         inlining_pass.set_interner(interner.clone());
         self.passes.push(Box::new(inlining_pass));
@@ -71,6 +74,7 @@ impl Optimizer {
         self.passes.push(Box::new(concat_pass));
         self.passes.push(Box::new(DeadStoreEliminationPass));
         self.passes.push(Box::new(TailCallOptimizationPass));
+        self.passes.push(Box::new(RichEnumOptimizationPass));
 
         // O3 passes - Aggressive optimizations (5 passes)
         self.passes

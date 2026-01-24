@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use typedlua_core::codegen::CodeGenerator;
-use typedlua_core::config::CompilerOptions;
+use typedlua_core::config::{CompilerOptions, OptimizationLevel};
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::lexer::Lexer;
 use typedlua_core::parser::Parser;
@@ -264,7 +264,6 @@ fn test_simple_enum_still_works() {
 // Optimization Level Tests
 // ============================================================================
 
-#[ignore]
 #[test]
 fn test_o2_optimization_precomputes_instances() {
     let source = r#"
@@ -297,19 +296,24 @@ fn test_o2_optimization_precomputes_instances() {
         .with_options(CompilerOptions::default());
     type_checker.check_program(&program).unwrap();
 
-    // Generate code
-    let mut codegen = CodeGenerator::new(interner.clone());
+    // Generate code with O2 optimization
+    let mut codegen =
+        CodeGenerator::new(interner.clone()).with_optimization_level(OptimizationLevel::O2);
     let output = codegen.generate(&mut program);
 
     println!("O2 Generated code:\n{}", output);
 
     // Verify O2 optimization: instances created as literal tables
     assert!(
-        output.contains("Planet.Mercury = setmetatable({ __name = \"Mercury\""),
+        output.contains("Planet.Mercury = setmetatable({"),
         "O2: Should create instances as literal tables"
     );
     assert!(
-        output.contains("mass = ") && output.contains(", radius = "),
+        output.contains(r#"__name = "Mercury""#),
+        "O2: Should have __name field"
+    );
+    assert!(
+        output.contains("mass =") && output.contains("radius ="),
         "O2: Should inline field values"
     );
 
@@ -320,7 +324,6 @@ fn test_o2_optimization_precomputes_instances() {
     );
 }
 
-#[ignore]
 #[test]
 fn test_o3_optimization_adds_inline_hints() {
     let source = r#"
@@ -352,14 +355,19 @@ fn test_o3_optimization_adds_inline_hints() {
         .with_options(CompilerOptions::default());
     type_checker.check_program(&program).unwrap();
 
-    // Generate code
-    let mut codegen = CodeGenerator::new(interner.clone());
+    // Generate code with O3 optimization
+    let mut codegen =
+        CodeGenerator::new(interner.clone()).with_optimization_level(OptimizationLevel::O3);
     let output = codegen.generate(&mut program);
 
     println!("Generated code:\n{}", output);
     assert!(
-        output.contains("Planet.Mercury = setmetatable({ __name = \"Mercury\""),
+        output.contains("Planet.Mercury = setmetatable({"),
         "O3: Should also include O2 optimizations"
+    );
+    assert!(
+        output.contains(r#"__name = "Mercury""#),
+        "O3: Should have __name field"
     );
 }
 

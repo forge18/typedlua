@@ -3494,6 +3494,8 @@ impl CodeGenerator {
         }
         self.writeln("}");
 
+        let is_o2_or_higher = self.optimization_level.effective() >= OptimizationLevel::O2;
+
         for (i, member) in enum_decl.members.iter().enumerate() {
             self.writeln("");
             self.write_indent();
@@ -3501,18 +3503,47 @@ impl CodeGenerator {
             self.write(".");
             let member_name = self.resolve(member.name.node);
             self.write(&member_name);
-            self.write(" = ");
-            self.write(enum_name);
-            self.write("__new(\"");
-            self.write(&member_name);
-            self.write("\", ");
-            self.write(&i.to_string());
 
-            for arg in &member.arguments {
-                self.write(", ");
-                self.generate_expression(arg);
+            if is_o2_or_higher {
+                self.writeln(" = setmetatable({");
+                self.indent();
+                self.write_indent();
+                self.writeln(&format!("__name = \"{}\",", member_name));
+                self.write_indent();
+                self.writeln(&format!("__ordinal = {},", i));
+
+                for (j, field) in enum_decl.fields.iter().enumerate() {
+                    let field_name = self.resolve(field.name.node);
+                    if j < member.arguments.len() {
+                        self.write_indent();
+                        self.write(&format!("{} = ", field_name));
+                        self.generate_expression(&member.arguments[j]);
+                        self.writeln(",");
+                    } else {
+                        self.write_indent();
+                        self.writeln(&format!("{} = nil,", field_name));
+                    }
+                }
+
+                self.dedent();
+                self.write_indent();
+                self.write("}, ");
+                self.write(enum_name);
+                self.writeln(")");
+            } else {
+                self.write(" = ");
+                self.write(enum_name);
+                self.write("__new(\"");
+                self.write(&member_name);
+                self.write("\", ");
+                self.write(&i.to_string());
+
+                for arg in &member.arguments {
+                    self.write(", ");
+                    self.generate_expression(arg);
+                }
+                self.writeln(")");
             }
-            self.writeln(")");
 
             self.write_indent();
             self.write("table.insert(");
