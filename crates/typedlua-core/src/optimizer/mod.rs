@@ -62,7 +62,9 @@ impl Optimizer {
             .push(Box::new(GlobalLocalizationPass::new(interner.clone())));
 
         // O2 passes - Standard optimizations (5 passes)
-        self.passes.push(Box::new(FunctionInliningPass::default()));
+        let mut inlining_pass = FunctionInliningPass::default();
+        inlining_pass.set_interner(interner.clone());
+        self.passes.push(Box::new(inlining_pass));
         self.passes.push(Box::new(LoopOptimizationPass));
         self.passes.push(Box::new(StringConcatOptimizationPass));
         self.passes.push(Box::new(DeadStoreEliminationPass));

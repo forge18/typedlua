@@ -23,6 +23,7 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 fn compile_source(source: &str) -> Result<String, String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let interner = Arc::new(interner);
 
     // Lex
     let mut lexer = Lexer::new(source, handler.clone(), &interner);
@@ -32,7 +33,7 @@ fn compile_source(source: &str) -> Result<String, String> {
 
     // Parse
     let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-    let program = parser
+    let mut program = parser
         .parse()
         .map_err(|e| format!("Parsing failed: {:?}", e))?;
 
@@ -43,8 +44,8 @@ fn compile_source(source: &str) -> Result<String, String> {
         .map_err(|e| e.message)?;
 
     // Generate code
-    let mut codegen = CodeGenerator::new(&interner);
-    let output = codegen.generate(&program);
+    let mut codegen = CodeGenerator::new(interner.clone());
+    let output = codegen.generate(&mut program);
 
     Ok(output)
 }

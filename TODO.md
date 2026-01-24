@@ -430,57 +430,76 @@ All 15 optimization passes are registered. O1 passes (constant folding, dead cod
 
 ### 3.3 O2 Optimizations - Standard (SCAFFOLDED - analysis only)
 
-- [ ] Function inlining
-  - [ ] Define inlining policy (size thresholds: 5, 10 statements; recursion safety rules)
-  - [ ] Implement candidate discovery pass (scan call graph, record call‑site info)
-  - [ ] Create transformation that clones function body into caller (handling locals, return)
-  - [ ] Handle inlining of functions with upvalues / closures (skip or special case)
-  - [ ] Register new `FunctionInliningPass` in optimizer infrastructure
-  - [ ] Write unit tests: simple pure function, function with parameters, recursive guard, closure edge case
+- [x] Function inlining
+  - [x] Define inlining policy (size thresholds: 5, 10 statements; recursion safety rules)
+  - [x] Implement candidate discovery pass (scan call graph, record call‑site info)
+  - [x] Create transformation that clones function body into caller (handling locals, return)
+  - [x] Handle inlining of functions with upvalues / closures (skip or special case)
+  - [x] Register new `FunctionInliningPass` in optimizer infrastructure
+  - [x] **BLOCKING:** Fix StringInterner sharing between CodeGenerator and Optimizer (IN PROGRESS)
+    - [x] Add `use std::sync::Arc` and `use crate::string_interner::StringId` imports to codegen/mod.rs
+    - [x] Remove lifetime `'a` from `impl<'a> CodeGenerator<'a>` → `impl CodeGenerator`
+    - [x] Change `CodeGenerator::new()` to accept `Arc<StringInterner>` instead of `&StringInterner`
+    - [x] Add `optimization_level: OptimizationLevel` field and `with_optimization_level()` method
+    - [x] Integrate `Optimizer::new()` in `generate()` using `self.interner.clone()`
+    - [x] Update `crates/typedlua-core/src/codegen/mod.rs` - internal test helpers
+    - [x] Update `crates/typedlua-cli/src/main.rs` - CLI entry point
+    - [x] Update remaining test files
+  - [x] Fix borrow checker error in `generate_bundle()` - Program parameter comes as `&Program` but `generate()` now requires `&mut Program`
+  - [x] Write unit tests: simple pure function, function with parameters, recursive guard, closure edge case
+
 - [ ] Loop optimization
   - [ ] Detect loop‑invariant expressions (constant folding inside loops)
   - [ ] Add pass to hoist invariant statements before loop header
   - [ ] Implement optional loop unrolling for `for` loops with known small iteration count
   - [ ] Add pass to simplify loop conditions (e.g., `while true do break end` -> remove loop)
   - [ ] Write tests covering invariant hoisting, unrolling, and condition simplification
+
 - [ ] Null coalescing optimization
   - [ ] Survey AST patterns for `NullCoalesce` usage (binary op vs IIFE)
   - [ ] Add analysis to detect simple left‑hand side (identifier, literal, member access)
   - [ ] Emit direct `and`/`or` pattern for simple cases
   - [ ] Preserve IIFE generation for complex expressions (side‑effects)
   - [ ] Add tests for simple and complex null‑coalesce cases
+
 - [ ] Safe navigation optimization
   - [ ] Identify optional access chains in AST (`OptionalMember`, `OptionalIndex`, `OptionalCall`, `OptionalMethodCall`)
   - [ ] Determine chain length and side‑effect complexity
   - [ ] Emit chained `and` checks for short chains (1‑2 levels)
   - [ ] Generate IIFE for longer or side‑effecting chains
   - [ ] Add tests for various optional navigation patterns
+
 - [ ] Exception handling optimization
   - [ ] Benchmark typical `try/catch` patterns using `pcall` vs `xpcall`
   - [ ] Add analysis to select `pcall` when catch block is a single simple handler
   - [ ] Keep `xpcall` for multi‑catch or rethrow scenarios
   - [ ] Update codegen to emit chosen wrapper
   - [ ] Write tests for simple try/catch (pcall) and complex (xpcall) cases
+
 - [ ] String concatenation optimization
   - [ ] Detect consecutive `..` operations inside loops or large literals
   - [ ] Introduce temporary table accumulation and `table.concat` emission
   - [ ] Add optional preallocation hint based on estimated length
   - [ ] Write micro‑benchmarks comparing naive vs optimized concatenation
+
 - [ ] Dead store elimination
   - [ ] Perform liveness analysis on local variables within basic blocks
   - [ ] Flag assignments whose values are never read before being overwritten or out of scope
   - [ ] Remove flagged store instructions in a dedicated pass
   - [ ] Verify correctness with tests ensuring no observable side‑effects removed
+
 - [ ] Method to function call conversion
   - [ ] Scan method call sites where receiver type is known and method is static
   - [ ] Transform call to direct function invocation (removing `self` argument handling)
   - [ ] Adjust generated Lua to call the function without method table lookup
   - [ ] Add tests for class method calls that become plain functions
+
 - [ ] Tail call optimization
   - [ ] Review Lua runtime tail‑call behavior for generated functions
   - [ ] Ensure optimizer does not insert statements that break tail‑position
   - [ ] Add a pass that verifies tail‑call positions remain unchanged after other optimizations
   - [ ] Write tests for tail‑recursive functions and non‑tail calls
+  
 - [ ] Rich enum optimization
   - [ ] Precompute enum instance tables during codegen (static lookup tables)
   - [ ] Inline simple enum method bodies where they consist of a single return
@@ -884,3 +903,171 @@ See `BENCHMARKS.md` for details.
 ### Dependencies Added ✓
 
 indoc, criterion, dhat, proptest, cargo-fuzz, insta — all in Cargo.toml
+
+---
+
+## Implementation Details
+
+### Function Inlining (Section 3.3) - IN PROGRESS
+
+**Status:** Core implementation complete, blocked by StringInterner sharing issue
+
+**Root Cause:**
+The optimizer's FunctionInliningPass creates new StringIds via `interner.get_or_intern()` for temp variables (`_inline_result_0`, etc.). CodeGenerator must resolve these IDs during code generation. Currently, CodeGenerator and Optimizer use separate interner instances, so IDs created by the optimizer are not resolvable by codegen.
+
+**Solution:** Share a single `Arc<StringInterner>` between CodeGenerator and Optimizer.
+
+---
+
+#### Phase 1: Fix CodeGenerator to use `Arc<StringInterner>`
+
+**File:** `crates/typedlua-core/src/codegen/mod.rs`
+
+The struct field was already changed to `Arc<StringInterner>`, but the impl block is inconsistent:
+
+- [ ] Add missing imports at top of file:
+
+```rust
+use std::sync::Arc;
+use crate::string_interner::StringId;
+```
+
+- [ ] Remove lifetime from impl block (line ~152):
+
+```rust
+// Before: impl<'a> CodeGenerator<'a>
+// After:  impl CodeGenerator
+```
+
+- [ ] Update `new()` signature to accept Arc:
+
+```rust
+pub fn new(interner: Arc<StringInterner>) -> Self
+```
+
+- [ ] Add `optimization_level` field to struct:
+
+```rust
+optimization_level: OptimizationLevel,
+```
+
+- [ ] Add `with_optimization_level()` builder method:
+
+```rust
+pub fn with_optimization_level(mut self, level: OptimizationLevel) -> Self {
+    self.optimization_level = level;
+    self
+}
+```
+
+- [ ] Integrate optimizer into `generate()` method:
+
+```rust
+pub fn generate(&mut self, program: &mut Program) -> String {
+    // Run optimizer before code generation
+    if self.optimization_level != OptimizationLevel::O0 {
+        let handler = Arc::new(crate::diagnostics::CollectingDiagnosticHandler::new());
+        let mut optimizer = Optimizer::new(
+            self.optimization_level,
+            handler,
+            self.interner.clone(),  // Same Arc!
+        );
+        let _ = optimizer.optimize(program);
+    }
+    // ... existing codegen logic
+}
+```
+
+- [ ] Update all other impl blocks that use lifetime `'a`
+
+---
+
+#### Phase 2: Update Call Sites (~40 files)
+
+**Pattern change:**
+
+```rust
+// Before:
+let interner = StringInterner::new();
+let mut codegen = CodeGenerator::new(&interner);
+
+// After:
+let interner = Arc::new(StringInterner::new());
+let mut codegen = CodeGenerator::new(interner.clone());
+// Note: Lexer/Parser/TypeChecker still use &interner (Arc<T> derefs to &T)
+```
+
+**Files to update:**
+
+- [ ] `crates/typedlua-cli/src/main.rs` - CLI entry point
+- [ ] `crates/typedlua-core/src/codegen/mod.rs` - internal tests (~line 3698, 3752)
+- [ ] Test files (use `&interner` for lexer/parser, `interner.clone()` for codegen):
+  - [ ] `tests/bang_operator_tests.rs`
+  - [ ] `tests/builtin_decorator_tests.rs`
+  - [ ] `tests/decorator_tests.rs`
+  - [ ] `tests/destructuring_tests.rs`
+  - [ ] `tests/error_classes_tests.rs`
+  - [ ] `tests/error_path_tests.rs`
+  - [ ] `tests/exception_handling_tests.rs`
+  - [ ] `tests/exception_optimization_tests.rs`
+  - [ ] `tests/function_inlining_tests.rs` (already correct)
+  - [ ] `tests/interface_default_methods_tests.rs`
+  - [ ] `tests/namespace_tests.rs`
+  - [ ] `tests/null_coalescing_iife_tests.rs`
+  - [ ] `tests/null_coalescing_tests.rs`
+  - [ ] `tests/o1_combined_tests.rs`
+  - [ ] `tests/o3_combined_tests.rs`
+  - [ ] `tests/oop_tests.rs`
+  - [ ] `tests/operator_overload_tests.rs`
+  - [ ] `tests/optimizer_integration_tests.rs`
+  - [ ] `tests/pattern_matching_tests.rs`
+  - [ ] `tests/pipe_tests.rs`
+  - [ ] `tests/primary_constructor_tests.rs`
+  - [ ] `tests/reflection_tests.rs`
+  - [ ] `tests/rest_params_tests.rs`
+  - [ ] `tests/rich_enum_tests.rs`
+  - [ ] `tests/safe_navigation_tests.rs`
+  - [ ] `tests/spread_tests.rs`
+  - [ ] `tests/table_preallocation_tests.rs`
+  - [ ] `tests/template_dedent_tests.rs`
+- [ ] Benchmark files:
+  - [ ] `benches/reflection_bench.rs`
+- [ ] Example files:
+  - [ ] `examples/profile_allocations.rs`
+
+---
+
+#### Phase 3: Verify and Test
+
+- [ ] Run `cargo check --lib -p typedlua-core` - should compile without errors
+- [ ] Run `cargo test -p typedlua-core` - all existing tests should pass
+- [ ] Run function inlining tests specifically:
+
+```bash
+cargo test -p typedlua-core function_inlining
+```
+
+- [ ] Verify inlined code generates correctly (temp variables resolve properly)
+
+---
+
+#### Implementation Notes
+
+**Why `Arc<StringInterner>`?**
+
+- `Arc` allows shared ownership between CodeGenerator and Optimizer
+- `&Arc<T>` automatically derefs to `&T`, so Lexer/Parser/TypeChecker don't need changes
+- Thread-safe (though currently single-threaded, future-proofs for parallel compilation)
+
+**What stays the same:**
+
+- Lexer, Parser, TypeChecker signatures (`&StringInterner`)
+- Optimizer already uses `Arc<StringInterner>`
+- FunctionInliningPass already uses `get_or_intern()` correctly
+
+**Completed work:**
+
+- [x] FunctionInliningPass implementation (~900 lines in passes.rs)
+- [x] Inlining policy (5 statement threshold, recursion/closure guards)
+- [x] AST transformation (inline_statement, inline_expression)
+- [x] Optimizer integration (pass registered, set_interner() called)

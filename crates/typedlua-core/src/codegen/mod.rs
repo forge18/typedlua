@@ -4,9 +4,12 @@ use crate::ast::expression::*;
 use crate::ast::pattern::{ArrayPattern, ArrayPatternElement, ObjectPattern, Pattern};
 use crate::ast::statement::*;
 use crate::ast::Program;
+use crate::optimizer::Optimizer;
 use crate::span::Span;
+use crate::string_interner::StringId;
 use crate::string_interner::StringInterner;
 pub use sourcemap::{SourceMap, SourceMapBuilder};
+use std::sync::Arc;
 
 /// Target Lua version for code generation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -117,13 +120,13 @@ pub enum CodeGenMode {
 }
 
 /// Code generator for TypedLua to Lua
-pub struct CodeGenerator<'a> {
+pub struct CodeGenerator {
     output: String,
     indent_level: usize,
     indent_str: String,
     source_map: Option<SourceMapBuilder>,
     target: LuaTarget,
-    current_class_parent: Option<crate::string_interner::StringId>,
+    current_class_parent: Option<StringId>,
     uses_built_in_decorators: bool,
     /// Module generation mode
     mode: CodeGenMode,
@@ -135,8 +138,10 @@ pub struct CodeGenerator<'a> {
     import_map: std::collections::HashMap<String, String>,
     /// Current source index for multi-source source maps (bundle mode)
     current_source_index: usize,
-    /// String interner for resolving identifiers
-    interner: &'a StringInterner,
+    /// String interner for resolving identifiers (shared with optimizer)
+    interner: Arc<StringInterner>,
+    /// Optimization level for code generation
+    optimization_level: crate::config::OptimizationLevel,
     /// Track interface default methods: (interface_name, method_name) -> default_function_name
     interface_default_methods: std::collections::HashMap<(String, String), String>,
     /// Current namespace path for the file (if any)
@@ -149,8 +154,8 @@ pub struct CodeGenerator<'a> {
     registered_types: std::collections::HashMap<String, u32>,
 }
 
-impl<'a> CodeGenerator<'a> {
-    pub fn new(interner: &'a StringInterner) -> Self {
+impl CodeGenerator {
+    pub fn new(interner: Arc<StringInterner>) -> Self {
         Self {
             output: String::new(),
             indent_level: 0,
@@ -165,6 +170,7 @@ impl<'a> CodeGenerator<'a> {
             import_map: std::collections::HashMap::new(),
             current_source_index: 0,
             interner,
+            optimization_level: crate::config::OptimizationLevel::O0,
             interface_default_methods: std::collections::HashMap::new(),
             current_namespace: None,
             namespace_exports: Vec::new(),
@@ -193,7 +199,20 @@ impl<'a> CodeGenerator<'a> {
         self
     }
 
-    pub fn generate(&mut self, program: &Program) -> String {
+    pub fn with_optimization_level(mut self, level: crate::config::OptimizationLevel) -> Self {
+        self.optimization_level = level;
+        self
+    }
+
+    pub fn generate(&mut self, program: &mut Program) -> String {
+        // Run optimizer before code generation if optimization level > O0
+        if self.optimization_level != crate::config::OptimizationLevel::O0 {
+            let handler = Arc::new(crate::diagnostics::CollectingDiagnosticHandler::new());
+            let mut optimizer =
+                Optimizer::new(self.optimization_level, handler, self.interner.clone());
+            let _ = optimizer.optimize(program);
+        }
+
         // First pass: check if any decorators are used
         self.detect_decorators(program);
 
@@ -414,7 +433,12 @@ impl<'a> CodeGenerator<'a> {
         advance("\n", &mut source_map_builder);
 
         // Generate each module as a function
-        for (source_index, (module_id, program, import_map)) in modules.iter().enumerate() {
+        for (source_index, (module_id_ref, program_ref, import_map_ref)) in
+            modules.iter().enumerate()
+        {
+            let mut program: Program = (*program_ref).clone();
+            let import_map = import_map_ref.clone();
+            let module_id = module_id_ref.clone();
             advance(
                 &format!("-- Module: {}\n", module_id),
                 &mut source_map_builder,
@@ -435,16 +459,15 @@ impl<'a> CodeGenerator<'a> {
 
             // Generate module code with source map support
             // Create a new interner for this module (bundles can have multiple independent modules)
-            let interner = StringInterner::new();
-            let mut generator =
-                CodeGenerator::new(&interner)
-                    .with_target(target)
-                    .with_mode(CodeGenMode::Bundle {
-                        module_id: (*module_id).clone(),
-                    });
+            let interner = Arc::new(StringInterner::new());
+            let mut generator = CodeGenerator::new(interner.clone())
+                .with_target(target)
+                .with_mode(CodeGenMode::Bundle {
+                    module_id: module_id.clone(),
+                });
 
             // Set the import map so imports can be resolved to module IDs
-            generator.import_map = import_map.clone();
+            generator.import_map = import_map;
 
             // Set source index for this module
             generator.current_source_index = source_index;
@@ -455,13 +478,15 @@ impl<'a> CodeGenerator<'a> {
                 generator.source_map = Some(SourceMapBuilder::new(module_id.clone()));
             }
 
-            let module_code = generator.generate(program);
-
-            // Get the source map mappings from the module generator
-            let _module_mappings = if with_source_map {
-                generator.take_source_map()
-            } else {
-                None
+            let (module_code, _module_source_map) = {
+                let mut gen = generator;
+                let code = gen.generate(&mut program);
+                let source_map = if with_source_map {
+                    gen.take_source_map()
+                } else {
+                    None
+                };
+                (code, source_map)
             };
 
             // Indent the module code and add mappings
@@ -3688,14 +3713,15 @@ mod tests {
 
     fn generate_code(source: &str) -> String {
         let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let (mut interner, common) = StringInterner::new_with_common_identifiers();
-        let mut lexer = Lexer::new(source, handler.clone(), &mut interner);
+        let (interner, common) = StringInterner::new_with_common_identifiers();
+        let interner = Arc::new(interner);
+        let mut lexer = Lexer::new(source, handler.clone(), &interner);
         let tokens = lexer.tokenize().expect("Lexing failed");
-        let mut parser = Parser::new(tokens, handler, &mut interner, &common);
-        let program = parser.parse().expect("Parsing failed");
+        let mut parser = Parser::new(tokens, handler, &interner, &common);
+        let mut program = parser.parse().expect("Parsing failed");
 
-        let mut generator = CodeGenerator::new(&interner);
-        generator.generate(&program)
+        let mut generator = CodeGenerator::new(interner.clone());
+        generator.generate(&mut program)
     }
 
     #[test]
@@ -3742,14 +3768,15 @@ mod tests {
 
     fn generate_code_with_target(source: &str, target: LuaTarget) -> String {
         let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let (mut interner, common) = StringInterner::new_with_common_identifiers();
-        let mut lexer = Lexer::new(source, handler.clone(), &mut interner);
+        let (interner, common) = StringInterner::new_with_common_identifiers();
+        let interner = Arc::new(interner);
+        let mut lexer = Lexer::new(source, handler.clone(), &interner);
         let tokens = lexer.tokenize().expect("Lexing failed");
-        let mut parser = Parser::new(tokens, handler, &mut interner, &common);
-        let program = parser.parse().expect("Parsing failed");
+        let mut parser = Parser::new(tokens, handler, &interner, &common);
+        let mut program = parser.parse().expect("Parsing failed");
 
-        let mut generator = CodeGenerator::new(&interner).with_target(target);
-        generator.generate(&program)
+        let mut generator = CodeGenerator::new(interner.clone()).with_target(target);
+        generator.generate(&mut program)
     }
 
     #[test]

@@ -10,6 +10,7 @@ use typedlua_core::typechecker::TypeChecker;
 fn compile_and_check(source: &str) -> Result<String, String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let interner = Arc::new(interner);
 
     // Lex
     let mut lexer = Lexer::new(source, handler.clone(), &interner);
@@ -20,7 +21,7 @@ fn compile_and_check(source: &str) -> Result<String, String> {
 
     // Parse
     let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-    let program = match parser.parse() {
+    let mut program = match parser.parse() {
         Ok(p) => p,
         Err(e) => return Err(format!("Parsing failed: {:?}", e)),
     };
@@ -44,8 +45,8 @@ fn compile_and_check(source: &str) -> Result<String, String> {
     }
 
     // Generate code
-    let mut codegen = CodeGenerator::new(&interner);
-    let output = codegen.generate(&program);
+    let mut codegen = CodeGenerator::new(interner.clone());
+    let output = codegen.generate(&mut program);
 
     Ok(output)
 }

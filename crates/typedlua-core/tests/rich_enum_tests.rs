@@ -10,6 +10,7 @@ use typedlua_core::typechecker::TypeChecker;
 fn compile_and_check(source: &str) -> Result<String, String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let interner = Arc::new(interner);
 
     // Lex
     let mut lexer = Lexer::new(source, handler.clone(), &interner);
@@ -19,7 +20,7 @@ fn compile_and_check(source: &str) -> Result<String, String> {
 
     // Parse
     let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-    let program = parser
+    let mut program = parser
         .parse()
         .map_err(|e| format!("Parsing failed: {:?}", e))?;
 
@@ -31,8 +32,8 @@ fn compile_and_check(source: &str) -> Result<String, String> {
         .map_err(|e| e.message)?;
 
     // Generate code
-    let mut codegen = CodeGenerator::new(&interner);
-    let output = codegen.generate(&program);
+    let mut codegen = CodeGenerator::new(interner.clone());
+    let output = codegen.generate(&mut program);
 
     Ok(output)
 }
@@ -281,6 +282,7 @@ fn test_o2_optimization_precomputes_instances() {
 
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let interner = Arc::new(interner);
 
     // Lex
     let mut lexer = Lexer::new(source, handler.clone(), &interner);
@@ -288,7 +290,7 @@ fn test_o2_optimization_precomputes_instances() {
 
     // Parse
     let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-    let program = parser.parse().unwrap();
+    let mut program = parser.parse().unwrap();
 
     // Type check
     let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids)
@@ -296,8 +298,8 @@ fn test_o2_optimization_precomputes_instances() {
     type_checker.check_program(&program).unwrap();
 
     // Generate code
-    let mut codegen = CodeGenerator::new(&interner);
-    let output = codegen.generate(&program);
+    let mut codegen = CodeGenerator::new(interner.clone());
+    let output = codegen.generate(&mut program);
 
     println!("O2 Generated code:\n{}", output);
 
@@ -335,6 +337,7 @@ fn test_o3_optimization_adds_inline_hints() {
 
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let interner = Arc::new(interner);
 
     // Lex
     let mut lexer = Lexer::new(source, handler.clone(), &interner);
@@ -342,7 +345,7 @@ fn test_o3_optimization_adds_inline_hints() {
 
     // Parse
     let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-    let program = parser.parse().unwrap();
+    let mut program = parser.parse().unwrap();
 
     // Type check
     let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids)
@@ -350,8 +353,8 @@ fn test_o3_optimization_adds_inline_hints() {
     type_checker.check_program(&program).unwrap();
 
     // Generate code
-    let mut codegen = CodeGenerator::new(&interner);
-    let output = codegen.generate(&program);
+    let mut codegen = CodeGenerator::new(interner.clone());
+    let output = codegen.generate(&mut program);
 
     println!("Generated code:\n{}", output);
     assert!(
@@ -376,6 +379,7 @@ fn test_o1_uses_constructor_calls() {
 
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let interner = Arc::new(interner);
 
     // Lex
     let mut lexer = Lexer::new(source, handler.clone(), &interner);
@@ -383,7 +387,7 @@ fn test_o1_uses_constructor_calls() {
 
     // Parse
     let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-    let program = parser.parse().unwrap();
+    let mut program = parser.parse().unwrap();
 
     // Type check
     let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids)
@@ -391,8 +395,8 @@ fn test_o1_uses_constructor_calls() {
     type_checker.check_program(&program).unwrap();
 
     // Generate code
-    let mut codegen = CodeGenerator::new(&interner);
-    let output = codegen.generate(&program);
+    let mut codegen = CodeGenerator::new(interner.clone());
+    let output = codegen.generate(&mut program);
 
     println!("Generated code:\n{}", output);
 

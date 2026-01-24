@@ -313,6 +313,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
             // Create string interner with common identifiers
             let (interner, common_ids) =
                 typedlua_core::string_interner::StringInterner::new_with_common_identifiers();
+            let interner = Arc::new(interner);
 
             // Lex the source
             let mut lexer = Lexer::new(&source, handler.clone(), &interner);
@@ -331,7 +332,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
 
             // Parse the tokens
             let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-            let program = match parser.parse() {
+            let mut program = match parser.parse() {
                 Ok(program) => program,
                 Err(_) => {
                     return CompilationResult {
@@ -393,13 +394,13 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
                 };
             }
 
-            let mut generator = CodeGenerator::new(&interner).with_target(target);
+            let mut generator = CodeGenerator::new(interner.clone()).with_target(target);
 
             if cli.source_map || cli.inline_source_map {
                 generator = generator.with_source_map(file_path.to_string_lossy().to_string());
             }
 
-            let lua_code = generator.generate(&program);
+            let lua_code = generator.generate(&mut program);
 
             // Determine output file path
             let output_path = if let Some(out_file) = &cli.out_file {

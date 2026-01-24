@@ -9,6 +9,7 @@ use typedlua_core::typechecker::TypeChecker;
 fn parse(source: &str) -> Result<(), String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let interner = Arc::new(interner);
     let mut lexer = Lexer::new(source, handler.clone(), &interner);
     let tokens = lexer.tokenize().map_err(|e| format!("{:?}", e))?;
 
@@ -33,11 +34,12 @@ fn parse(source: &str) -> Result<(), String> {
 fn type_check(source: &str) -> Result<(), String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let interner = Arc::new(interner);
     let mut lexer = Lexer::new(source, handler.clone(), &interner);
     let tokens = lexer.tokenize().map_err(|e| format!("{:?}", e))?;
 
     let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-    let program = parser.parse().map_err(|e| e.message)?;
+    let mut program = parser.parse().map_err(|e| e.message)?;
 
     let mut checker = TypeChecker::new(handler.clone(), &interner, &common_ids);
     let result = checker.check_program(&program);
@@ -60,17 +62,18 @@ fn type_check(source: &str) -> Result<(), String> {
 fn compile_to_lua(source: &str) -> Result<String, String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let interner = Arc::new(interner);
     let mut lexer = Lexer::new(source, handler.clone(), &interner);
     let tokens = lexer.tokenize().map_err(|e| format!("{:?}", e))?;
 
     let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-    let program = parser.parse().map_err(|e| e.message)?;
+    let mut program = parser.parse().map_err(|e| e.message)?;
 
     let mut checker = TypeChecker::new(handler.clone(), &interner, &common_ids);
     checker.check_program(&program).map_err(|e| e.message)?;
 
-    let mut codegen = CodeGenerator::new(&interner);
-    let lua_code = codegen.generate(&program);
+    let mut codegen = CodeGenerator::new(interner.clone());
+    let lua_code = codegen.generate(&mut program);
 
     Ok(lua_code)
 }

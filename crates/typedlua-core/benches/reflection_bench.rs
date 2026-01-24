@@ -11,12 +11,13 @@ use typedlua_core::typechecker::TypeChecker;
 fn compile_and_generate(source: &str) -> String {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let interner = Arc::new(interner);
 
     let mut lexer = Lexer::new(source, handler.clone(), &interner);
     let tokens = lexer.tokenize().expect("Lexing failed");
 
     let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-    let program = parser.parse().expect("Parsing failed");
+    let mut program = parser.parse().expect("Parsing failed");
 
     let mut type_checker =
         TypeChecker::new(handler, &interner, &common_ids).with_options(CompilerOptions::default());
@@ -24,8 +25,8 @@ fn compile_and_generate(source: &str) -> String {
         .check_program(&program)
         .expect("Type checking failed");
 
-    let mut codegen = CodeGenerator::new(&interner);
-    codegen.generate(&program)
+    let mut codegen = CodeGenerator::new(interner.clone());
+    codegen.generate(&mut program)
 }
 
 fn reflection_codegen_benchmark(c: &mut Criterion) {

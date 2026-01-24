@@ -14,6 +14,7 @@ fn compile_and_check(source: &str) -> Result<String, String> {
 fn compile_with_optimization(source: &str) -> Result<String, String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let interner = Arc::new(interner);
 
     let mut lexer = Lexer::new(source, handler.clone(), &interner);
     let tokens = lexer
@@ -33,8 +34,8 @@ fn compile_with_optimization(source: &str) -> Result<String, String> {
         .check_program(&program)
         .map_err(|e| e.message)?;
 
-    let mut codegen = CodeGenerator::new(&interner);
-    let output = codegen.generate(&program);
+    let mut codegen = CodeGenerator::new(interner.clone());
+    let output = codegen.generate(&mut program);
 
     Ok(output)
 }
