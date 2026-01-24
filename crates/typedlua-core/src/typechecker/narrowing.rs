@@ -179,7 +179,7 @@ pub fn narrow_type_from_condition(
         // Type guard function call: isString(x)
         ExpressionKind::Call(function, arguments) => {
             if let Some((var_name, narrowed_type)) =
-                extract_type_guard_call(function, arguments, original_types)
+                extract_type_guard_call(function, arguments, original_types, interner)
             {
                 // In then branch: narrow to the guarded type
                 then_ctx.set_narrowed_type(var_name, narrowed_type.clone());
@@ -283,6 +283,7 @@ fn extract_type_guard_call(
     function: &Expression,
     arguments: &[crate::ast::expression::Argument],
     original_types: &FxHashMap<StringId, Type>,
+    interner: &crate::string_interner::StringInterner,
 ) -> Option<(StringId, Type)> {
     // Check if this is a function call with one argument
     if arguments.len() != 1 {
@@ -313,7 +314,7 @@ fn extract_type_guard_call(
 
         // Fallback to heuristic for backwards compatibility:
         // Functions named "is*" are assumed to be type guards
-        let func_name_str = "__typeof"; // Placeholder - this won't work correctly without interner access
+        let func_name_str = interner.resolve(*func_name);
         if let Some(stripped) = func_name_str.strip_prefix("is") {
             // Extract the type name from the function name (e.g., "isString" -> "string")
             let type_name = stripped.to_lowercase();
