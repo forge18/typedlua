@@ -358,7 +358,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
             // Type check the program
             use typedlua_core::typechecker::TypeChecker;
 
-            let mut type_checker = TypeChecker::new(handler.clone(), &interner, common_ids);
+            let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids);
 
             if type_checker.check_program(&program).is_err() {
                 return CompilationResult {
