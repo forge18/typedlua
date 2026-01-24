@@ -4,6 +4,7 @@ use crate::ast::expression::*;
 use crate::ast::pattern::{ArrayPattern, ArrayPatternElement, ObjectPattern, Pattern};
 use crate::ast::statement::*;
 use crate::ast::Program;
+use crate::span::Span;
 use crate::string_interner::StringInterner;
 pub use sourcemap::{SourceMap, SourceMapBuilder};
 
@@ -402,6 +403,9 @@ impl<'a> CodeGenerator<'a> {
             | Statement::DeclareConst(_) => {
                 // Declaration file statements are erased during code generation
             }
+            Statement::Throw(throw_stmt) => self.generate_throw_statement(throw_stmt),
+            Statement::Try(try_stmt) => self.generate_try_statement(try_stmt),
+            Statement::Rethrow(span) => self.generate_rethrow_statement(*span),
         }
     }
 
@@ -2071,6 +2075,30 @@ impl<'a> CodeGenerator<'a> {
                     self.writeln(") else return nil end end)()");
                 }
             }
+            ExpressionKind::Try(try_expr) => {
+                // try expr catch var fallback
+                // Generates: (function() local __ok, __result = pcall(function() return expr end); if __ok then return __result else return fallback end)()
+                self.write("(function() local __ok, __result = pcall(function() return ");
+                self.generate_expression(&try_expr.expression);
+                self.writeln(" end); ");
+                self.write("if __ok then return __result else ");
+                let var_name = self.resolve(try_expr.catch_variable.node);
+                self.write("local ");
+                self.write(&var_name);
+                self.write(" = __result; return ");
+                self.generate_expression(&try_expr.catch_expression);
+                self.writeln(" end end)()");
+            }
+            ExpressionKind::ErrorChain(left, right) => {
+                // left !! right - error chaining operator
+                // Generates: (function() local __ok, __result = pcall(function() return left end); if __ok then return __result else return right end)()
+                self.write("(function() local __ok, __result = pcall(function() return ");
+                self.generate_expression(left);
+                self.writeln(" end); ");
+                self.write("if __ok then return __result else return ");
+                self.generate_expression(right);
+                self.writeln(" end end)()");
+            }
         }
     }
 
@@ -2693,6 +2721,145 @@ impl<'a> CodeGenerator<'a> {
             Statement::Enum(decl) => Some(decl.name.node),
             _ => None,
         }
+    }
+
+    fn generate_throw_statement(&mut self, stmt: &ThrowStatement) {
+        self.write_indent();
+        self.write("error(");
+        self.generate_expression(&stmt.expression);
+        self.writeln(")");
+    }
+
+    fn generate_rethrow_statement(&mut self, _span: Span) {
+        self.write_indent();
+        self.writeln("error(__error)");
+    }
+
+    fn generate_try_statement(&mut self, stmt: &TryStatement) {
+        self.write_indent();
+        self.writeln("-- try block");
+
+        let has_typed_catches = stmt.catch_clauses.iter().any(|clause| {
+            matches!(
+                clause.pattern,
+                CatchPattern::Typed { .. } | CatchPattern::MultiTyped { .. }
+            )
+        });
+
+        if has_typed_catches {
+            self.generate_try_xpcall(stmt);
+        } else {
+            self.generate_try_pcall(stmt);
+        }
+    }
+
+    fn generate_try_pcall(&mut self, stmt: &TryStatement) {
+        self.write_indent();
+        self.writeln("local __ok, __result = pcall(function()");
+
+        self.indent();
+        self.generate_block(&stmt.try_block);
+        self.dedent();
+
+        self.write_indent();
+        self.writeln("end)");
+
+        self.write_indent();
+        self.writeln("if not __ok then");
+
+        self.indent();
+        self.write_indent();
+        self.write("local __error = __result");
+
+        for (i, catch_clause) in stmt.catch_clauses.iter().enumerate() {
+            self.generate_catch_clause_pcall(catch_clause, i == stmt.catch_clauses.len() - 1);
+        }
+        self.dedent();
+
+        self.write_indent();
+        self.writeln("end");
+
+        if let Some(finally_block) = &stmt.finally_block {
+            self.generate_finally_block(finally_block);
+        }
+    }
+
+    fn generate_try_xpcall(&mut self, stmt: &TryStatement) {
+        self.write_indent();
+        self.writeln("local __error");
+        self.write_indent();
+        self.writeln("xpcall(function()");
+
+        self.indent();
+        self.generate_block(&stmt.try_block);
+        self.dedent();
+
+        self.write_indent();
+        self.writeln("end, function(__err)");
+
+        self.indent();
+        self.write_indent();
+        self.writeln("__error = __err");
+
+        for catch_clause in &stmt.catch_clauses {
+            self.generate_catch_clause_xpcall(catch_clause);
+        }
+
+        self.dedent();
+        self.write_indent();
+        self.writeln("end)");
+
+        for catch_clause in &stmt.catch_clauses {
+            self.generate_block(&catch_clause.body);
+        }
+
+        if let Some(finally_block) = &stmt.finally_block {
+            self.generate_finally_block(finally_block);
+        }
+    }
+
+    fn generate_catch_clause_pcall(&mut self, clause: &CatchClause, is_last: bool) {
+        let var_name = match &clause.pattern {
+            CatchPattern::Untyped { variable, .. }
+            | CatchPattern::Typed { variable, .. }
+            | CatchPattern::MultiTyped { variable, .. } => self.resolve(variable.node),
+        };
+
+        self.write_indent();
+        if is_last {
+            self.writeln("else");
+        } else {
+            self.writeln("elseif false then");
+        }
+
+        self.indent();
+        self.write_indent();
+        self.writeln(&format!("local {} = __error", var_name));
+        self.generate_block(&clause.body);
+        self.dedent();
+    }
+
+    fn generate_catch_clause_xpcall(&mut self, clause: &CatchClause) {
+        let var_name = match &clause.pattern {
+            CatchPattern::Untyped { variable, .. }
+            | CatchPattern::Typed { variable, .. }
+            | CatchPattern::MultiTyped { variable, .. } => self.resolve(variable.node),
+        };
+
+        self.write_indent();
+        self.writeln(&format!("if {} == nil then", var_name));
+        self.indent();
+        self.write_indent();
+        self.writeln("return false");
+        self.dedent();
+        self.write_indent();
+        self.writeln("end");
+    }
+
+    fn generate_finally_block(&mut self, block: &Block) {
+        self.write_indent();
+        self.writeln("-- finally block");
+        self.generate_block(block);
     }
 }
 

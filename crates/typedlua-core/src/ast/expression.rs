@@ -45,6 +45,8 @@ pub enum ExpressionKind {
     OptionalIndex(Box<Expression>, Box<Expression>),
     OptionalCall(Box<Expression>, Vec<Argument>),
     OptionalMethodCall(Box<Expression>, Ident, Vec<Argument>),
+    Try(TryExpression),
+    ErrorChain(Box<Expression>, Box<Expression>),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -193,4 +195,12 @@ pub struct TemplateLiteral {
 pub enum TemplatePart {
     String(String),
     Expression(Expression),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TryExpression {
+    pub expression: Box<Expression>,
+    pub catch_variable: Ident,
+    pub catch_expression: Box<Expression>,
+    pub span: Span,
 }

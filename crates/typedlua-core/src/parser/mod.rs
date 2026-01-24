@@ -456,6 +456,9 @@ impl Spannable for crate::ast::statement::Statement {
             DeclareType(t) => t.span,
             DeclareInterface(i) => i.span,
             DeclareConst(c) => c.span,
+            Throw(t) => t.span,
+            Try(t) => t.span,
+            Rethrow(s) => *s,
         }
     }
 }

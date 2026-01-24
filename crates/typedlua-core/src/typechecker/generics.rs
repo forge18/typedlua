@@ -145,6 +145,7 @@ fn substitute_type(typ: &Type, substitutions: &FxHashMap<StringId, Type>) -> Res
                     type_parameters: None, // Type parameters are gone after substitution
                     parameters: substituted_params?,
                     return_type: Box::new(substituted_return),
+                    throws: func_type.throws.clone(),
                     span: func_type.span,
                 }),
                 typ.span,

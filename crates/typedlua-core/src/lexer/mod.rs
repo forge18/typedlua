@@ -254,6 +254,9 @@ impl<'a> Lexer<'a> {
                 if self.current() == '=' {
                     self.advance();
                     TokenKind::BangEqual
+                } else if self.current() == '!' {
+                    self.advance();
+                    TokenKind::BangBang
                 } else {
                     TokenKind::Bang
                 }

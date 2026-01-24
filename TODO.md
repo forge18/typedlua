@@ -82,7 +82,7 @@
 
 ### 1.6 Operator Overloading
 
-**Status:** PARTIALLY IMPLEMENTED | **Model:** Sonnet
+**Status:** IMPLEMENTED | **Model:** Sonnet
 
 Lexer keyword `Operator` exists. AST and parser complete, type checker and codegen in progress.
 
@@ -142,45 +142,65 @@ Lexer keyword `Operator` exists. AST and parser complete, type checker and codeg
 
 **Testing:**
 
-- [ ] Fix remaining test failures:
-  - [ ] test_operator_unary_minus - unary minus parsing
-  - [ ] test_multiple_operators - syntax error in test
+- [x] Fix remaining test failures:
+  - [x] test_operator_unary_minus - Fixed type checker to recognize UnaryMinus in zero-parameter cases
+  - [x] test_multiple_operators - Fixed parser's unary minus detection to use lookahead instead of consuming tokens prematurely
 
-**Test file:** operator_overload_tests.rs
+**Test file:** operator_overload_tests.rs (all 13 tests pass)
 
 ---
 
 ### 2.1 Exception Handling
 
-**Status:** Lexer keywords exist, implementation missing | **Model:** Opus (complex feature)
+**Status:** IMPLEMENTED | **Model:** Opus (complex feature)
 
-Lexer keywords `Throw`, `Try`, `Catch`, `Finally`, `Rethrow`, `Throws`, `BangBang` exist but no AST/parser/type checker/codegen.
+Lexer keywords `Throw`, `Try`, `Catch`, `Finally`, `Rethrow`, `Throws`, `BangBang` exist and are now fully implemented.
 
-- [ ] Create `TryStatement` struct
-- [ ] Create `CatchClause` struct
-- [ ] Create `CatchPattern` enum (Untyped, Typed, MultiTyped, Destructured)
-- [ ] Create `ThrowStatement` struct
-- [ ] Create `TryExpression` struct
-- [ ] Create `ErrorChainExpression` struct for `!!`
-- [ ] Add `throws: Option<Vec<Type>>` to `FunctionDeclaration`
-- [ ] Parser: Parse `throw` statement
-- [ ] Parser: Parse `try`/`catch`/`finally` blocks
-- [ ] Parser: Parse catch patterns (simple, typed, multi-typed, destructured)
-- [ ] Parser: Parse `rethrow` statement
-- [ ] Parser: Parse `try ... catch ...` as expression
-- [ ] Parser: Parse `!!` operator
-- [ ] Parser: Parse `throws` clause on functions
-- [ ] Type checker: Type `throw` expression (any type)
-- [ ] Type checker: Type catch blocks with declared types
-- [ ] Type checker: Type try expression as union of try and catch results
-- [ ] Type checker: Validate `rethrow` only in catch blocks
-- [ ] Codegen: Automatic pcall vs xpcall selection based on complexity
-- [ ] Codegen: Simple catch → pcall (30% faster)
-- [ ] Codegen: Typed/multi-catch → xpcall (full-featured)
-- [ ] Codegen: Finally blocks with guaranteed execution
-- [ ] Codegen: Try expressions → inline pcall
-- [ ] Codegen: Error chaining `!!` operator
-- [ ] Fix test compilation: exception_handling_tests.rs, exception_optimization_tests.rs, error_classes_tests.rs, bang_operator_tests.rs
+#### 2.1.1 Exception AST Structures
+
+- [x] Create `ThrowStatement` struct
+- [x] Create `TryStatement` struct
+- [x] Create `CatchClause` struct
+- [x] Create `CatchPattern` enum (Untyped, Typed, MultiTyped, Destructured)
+- [x] Create `TryExpression` struct
+- [x] Create `ErrorChainExpression` struct for `!!`
+- [x] Add `throws: Option<Vec<Type>>` to `FunctionDeclaration`
+- [x] Add `throws: Option<Vec<Type>>` to `FunctionType`
+- [x] Add `throws: Option<Vec<Type>>` to `DeclareFunctionStatement`
+
+#### 2.1.2 Exception Parser
+
+- [x] Parse `throw` statement
+- [x] Parse `try`/`catch`/`finally` blocks
+- [x] Parse catch patterns (simple, typed, multi-typed, destructured)
+- [x] Parse `rethrow` statement
+- [x] Parse `try ... catch ...` as expression
+- [x] Parse `!!` operator
+- [x] Parse `throws` clause on functions (with or without parens)
+
+#### 2.1.3 Exception Type Checker
+
+- [x] Type `throw` expression (any type)
+- [x] Type catch blocks with declared types
+- [x] Type try expression as union of try and catch results
+- [x] Validate `rethrow` only in catch blocks
+- [x] Track catch block nesting for rethrow validation
+
+#### 2.1.4 Exception Codegen
+
+- [x] Automatic pcall vs xpcall selection based on catch complexity
+- [x] Simple catch → pcall (faster)
+- [x] Typed/multi-catch → xpcall (full-featured)
+- [x] Finally blocks with guaranteed execution
+- [x] Try expressions → inline pcall
+- [x] Error chaining `!!` operator
+
+#### 2.1.5 Exception Tests
+
+- [x] Fix exception_handling_tests.rs compilation (15 tests pass)
+- [x] Fix exception_optimization_tests.rs compilation (8 tests pass)
+- [x] Fix error_classes_tests.rs compilation (9 tests pass - all previously ignored tests now work)
+- [x] Fix bang_operator_tests.rs compilation (7 tests pass)
 
 **Test files:** exception_handling_tests.rs, exception_optimization_tests.rs, error_classes_tests.rs, bang_operator_tests.rs
 
@@ -190,25 +210,39 @@ Lexer keywords `Throw`, `Try`, `Catch`, `Finally`, `Rethrow`, `Throws`, `BangBan
 
 **Status:** Not implemented | **Model:** Sonnet
 
+#### 2.2.1 Rich Enum AST Extensions
+
+- [ ] Create `EnumField` struct
 - [ ] Extend `EnumDeclaration` with fields, constructor, methods
 - [ ] Update `EnumMember` to include constructor arguments
-- [ ] Create `EnumField` struct
-- [ ] Parser: Parse enum members with constructor arguments syntax
-- [ ] Parser: Parse field declarations inside enum
-- [ ] Parser: Parse constructor inside enum
-- [ ] Parser: Parse methods inside enum
-- [ ] Type checker: Validate constructor parameters match field declarations
-- [ ] Type checker: Validate enum member arguments match constructor signature
-- [ ] Type checker: Type check methods with `self` bound to enum type
-- [ ] Type checker: Auto-generate signatures for `name()`, `ordinal()`, `values()`, `valueOf()`
-- [ ] Codegen: Generate enum constructor function
-- [ ] Codegen: Generate enum instances as constants
-- [ ] Codegen: Generate `name()` and `ordinal()` methods
-- [ ] Codegen: Generate `values()` static method
-- [ ] Codegen: Generate `valueOf()` with O(1) hash lookup
-- [ ] Codegen: Generate static `__byName` lookup table
-- [ ] Codegen: Prevent instantiation via metatable
-- [ ] Fix test compilation: rich_enum_tests.rs
+
+#### 2.2.2 Rich Enum Parser
+
+- [ ] Parse enum members with constructor arguments syntax
+- [ ] Parse field declarations inside enum
+- [ ] Parse constructor inside enum
+- [ ] Parse methods inside enum
+
+#### 2.2.3 Rich Enum Type Checker
+
+- [ ] Validate constructor parameters match field declarations
+- [ ] Validate enum member arguments match constructor signature
+- [ ] Type check methods with `self` bound to enum type
+- [ ] Auto-generate signatures for `name()`, `ordinal()`, `values()`, `valueOf()`
+
+#### 2.2.4 Rich Enum Codegen
+
+- [ ] Generate enum constructor function
+- [ ] Generate enum instances as constants
+- [ ] Generate `name()` and `ordinal()` methods
+- [ ] Generate `values()` static method
+- [ ] Generate `valueOf()` with O(1) hash lookup
+- [ ] Generate static `__byName` lookup table
+- [ ] Prevent instantiation via metatable
+
+#### 2.2.5 Rich Enum Tests
+
+- [ ] Fix rich_enum_tests.rs compilation
 
 **Test file:** rich_enum_tests.rs
 
@@ -218,16 +252,30 @@ Lexer keywords `Throw`, `Try`, `Catch`, `Finally`, `Rethrow`, `Throws`, `BangBan
 
 **Status:** Not implemented | **Model:** Sonnet
 
+#### 2.3.1 Interface Default Method AST
+
 - [ ] Add `DefaultMethod(MethodDeclaration)` to `InterfaceMember` enum
-- [ ] Parser: Parse interface methods with `{` after signature as default methods
-- [ ] Parser: Parse interface methods without `{` as abstract methods
-- [ ] Type checker: Track which methods are abstract vs default
-- [ ] Type checker: Error if abstract method not implemented
-- [ ] Type checker: Allow default methods to be optional (use default if not overridden)
-- [ ] Type checker: Type `self` in default methods as implementing class
-- [ ] Codegen: Generate interface table with default methods
-- [ ] Codegen: Copy default implementations to implementing class: `User.print = User.print or Printable.print`
-- [ ] Fix test compilation: interface_default_methods_tests.rs
+
+#### 2.3.2 Interface Default Method Parser
+
+- [ ] Parse interface methods with `{` after signature as default methods
+- [ ] Parse interface methods without `{` as abstract methods
+
+#### 2.3.3 Interface Default Method Type Checker
+
+- [ ] Track which methods are abstract vs default
+- [ ] Error if abstract method not implemented
+- [ ] Allow default methods to be optional (use default if not overridden)
+- [ ] Type `self` in default methods as implementing class
+
+#### 2.3.4 Interface Default Method Codegen
+
+- [ ] Generate interface table with default methods
+- [ ] Copy default implementations to implementing class: `User.print = User.print or Printable.print`
+
+#### 2.3.5 Interface Default Method Tests
+
+- [ ] Fix interface_default_methods_tests.rs compilation
 
 **Test file:** interface_default_methods_tests.rs
 
@@ -239,19 +287,30 @@ Lexer keywords `Throw`, `Try`, `Catch`, `Finally`, `Rethrow`, `Throws`, `BangBan
 
 Lexer keyword `Namespace` exists (only `DeclareNamespaceStatement` for .d.tl files). File-scoped namespaces not implemented.
 
+#### 2.4.1 Namespace AST & Parser
+
 - [ ] Add `NamespaceDeclaration` to `Statement` enum with path: `Vec<String>`
-- [ ] Parser: Parse `namespace Math.Vector;` at file start
-- [ ] Parser: Error if namespace appears after other statements
-- [ ] Parser: Only allow semicolon syntax (no block `{}` syntax)
-- [ ] Parser: Store namespace path in module metadata
-- [ ] Type checker: Track namespace for each module
-- [ ] Type checker: Include namespace prefix when resolving imports
-- [ ] Type checker: If `enforceNamespacePath: true`, verify namespace matches file path
-- [ ] Type checker: Make namespace types accessible via dot notation
-- [ ] Codegen: Generate nested table structure for namespace
-- [ ] Codegen: Export namespace root table
-- [ ] Config: Add `enforceNamespacePath` boolean option (default: false)
-- [ ] Fix test compilation: namespace_tests.rs
+- [ ] Parse `namespace Math.Vector;` at file start
+- [ ] Error if namespace appears after other statements
+- [ ] Only allow semicolon syntax (no block `{}` syntax)
+- [ ] Store namespace path in module metadata
+
+#### 2.4.2 Namespace Type Checker
+
+- [ ] Track namespace for each module
+- [ ] Include namespace prefix when resolving imports
+- [ ] If `enforceNamespacePath: true`, verify namespace matches file path
+- [ ] Make namespace types accessible via dot notation
+
+#### 2.4.3 Namespace Codegen
+
+- [ ] Generate nested table structure for namespace
+- [ ] Export namespace root table
+
+#### 2.4.4 Namespace Config & Tests
+
+- [ ] Add `enforceNamespacePath` boolean option (default: false)
+- [ ] Fix namespace_tests.rs compilation
 
 **Test file:** namespace_tests.rs
 
@@ -261,17 +320,25 @@ Lexer keyword `Namespace` exists (only `DeclareNamespaceStatement` for .d.tl fil
 
 **Status:** Not implemented | **Model:** Haiku (algorithmic task)
 
-- [ ] Lexer: Track indentation of each line when parsing template literals
-- [ ] Lexer: Store raw string with indentation metadata
-- [ ] Codegen: Implement dedenting algorithm
-- [ ] Codegen: Find first/last non-empty lines
-- [ ] Codegen: Find minimum indentation
-- [ ] Codegen: Remove common indentation
-- [ ] Codegen: Trim first/last blank lines
-- [ ] Codegen: Join with `\n`
-- [ ] Codegen: Apply dedenting during codegen
-- [ ] Codegen: Handle edge cases: tabs vs spaces, first-line content, explicit `\n`
-- [ ] Fix test compilation: template_dedent_tests.rs
+#### Template Lexer Changes
+
+- [ ] Track indentation of each line when parsing template literals
+- [ ] Store raw string with indentation metadata
+
+#### Template Dedenting Algorithm
+
+- [ ] Implement dedenting algorithm
+- [ ] Find first/last non-empty lines
+- [ ] Find minimum indentation
+- [ ] Remove common indentation
+- [ ] Trim first/last blank lines
+- [ ] Join with `\n`
+- [ ] Apply dedenting during codegen
+- [ ] Handle edge cases: tabs vs spaces, first-line content, explicit `\n`
+
+#### Template Tests
+
+- [ ] Fix template_dedent_tests.rs compilation
 
 **Test file:** template_dedent_tests.rs
 
@@ -281,19 +348,22 @@ Lexer keyword `Namespace` exists (only `DeclareNamespaceStatement` for .d.tl fil
 
 **Status:** Not implemented | **Model:** Opus (multi-crate, FFI, complex)
 
-**Rust Native Module:**
+#### 2.6.1 Reflection Native Crate Setup
 
 - [ ] Create `crates/typedlua-reflect-native/` cargo project with mlua dependency
 - [ ] Implement type registry with compile-time metadata
+- [ ] Implement field/method lookup with HashMap (O(1))
+- [ ] Compact binary metadata with bitflags
+
+#### 2.6.2 Reflection Runtime Functions
+
 - [ ] Implement `is_instance()` with O(1) ancestor bitmask checks
 - [ ] Implement `typeof()` returning type info
 - [ ] Implement `get_fields()` with lazy building
 - [ ] Implement `get_methods()` with lazy building
-- [ ] Implement field/method lookup with HashMap (O(1))
 - [ ] String interning for type/field/method names
-- [ ] Compact binary metadata with bitflags
 
-**LuaRocks Distribution:**
+#### 2.6.3 Reflection LuaRocks Distribution
 
 - [ ] Create `.rockspec` file
 - [ ] Set up cargo build command
@@ -301,14 +371,14 @@ Lexer keyword `Namespace` exists (only `DeclareNamespaceStatement` for .d.tl fil
 - [ ] Publish to LuaRocks
 - [ ] Publish to GitHub releases
 
-**Runtime Integration:**
+#### 2.6.4 Reflection Runtime Integration
 
 - [ ] Create Lua runtime wrapper for native module
 - [ ] Implement `Runtime.isInstance()`
 - [ ] Implement `Runtime.typeof()`
 - [ ] Implement `Runtime.getFields()`
 
-**Codegen:**
+#### 2.6.5 Reflection Codegen
 
 - [ ] Assign unique `__typeId` to each class
 - [ ] Generate `__ancestorMask` bitset for inheritance
@@ -317,7 +387,10 @@ Lexer keyword `Namespace` exists (only `DeclareNamespaceStatement` for .d.tl fil
 - [ ] Generate lazy `_resolveType()` functions
 - [ ] Use bitflags for field modifiers (readonly, optional)
 - [ ] Use string interning for names
-- [ ] Fix test compilation: reflection_tests.rs
+
+#### 2.6.6 Reflection Tests
+
+- [ ] Fix reflection_tests.rs compilation
 
 **Test file:** reflection_tests.rs
 
@@ -382,13 +455,13 @@ All 15 optimization passes are registered. O1 passes (constant folding, dead cod
 
 TypedLua extends Lua with many features not in base Lua (classes, decorators, exceptions, rich enums, etc.). Each requires runtime support code embedded in generated Lua. Currently scattered in codegen - needs dedicated crate.
 
-**Crate Setup:**
+#### Runtime Crate Setup
 
 - [ ] Create `crates/typedlua-runtime/` with lib.rs
 - [ ] Add modules: classes.rs, decorators.rs, exceptions.rs, operators.rs, enums.rs, reflection.rs
 - [ ] Create `lua/` directory for Lua source snippets
 
-**Lua Runtime Snippets:**
+#### Runtime Lua Snippets
 
 - [ ] Extract decorator runtime to `lua/decorator_runtime.lua`
 - [ ] Create class system runtime in `lua/class_runtime.lua`
@@ -397,20 +470,20 @@ TypedLua extends Lua with many features not in base Lua (classes, decorators, ex
 - [ ] Create enum runtime in `lua/enum_runtime.lua`
 - [ ] Create reflection runtime in `lua/reflection_runtime.lua`
 
-**Const String Exports:**
+#### Runtime Const String Exports
 
 - [ ] Use `include_str!` to embed Lua snippets as const strings
 - [ ] Export one const per feature (e.g., `pub const DECORATOR_RUNTIME: &str`)
 - [ ] Version snippets per Lua target (5.1, 5.2, 5.3, 5.4) where needed
 
-**Integration:**
+#### Runtime Integration
 
 - [ ] Add `typedlua-runtime` dependency to `typedlua-core`
 - [ ] Update codegen to import runtime constants
 - [ ] Track which features are used (uses_decorators, uses_exceptions, etc.)
 - [ ] Only embed runtime for features actually used in compiled code
 
-**Testing:**
+#### Runtime Testing
 
 - [ ] Unit test each Lua snippet independently
 - [ ] Integration tests with codegen
@@ -423,7 +496,7 @@ TypedLua extends Lua with many features not in base Lua (classes, decorators, ex
 
 Current approach: capability checks scattered in codegen (`supports_bitwise_ops()`, `supports_goto()`). Doesn't scale well.
 
-**Trait Definition:**
+#### Strategy Trait Definition
 
 - [ ] Create `crates/typedlua-core/src/codegen/strategies/mod.rs`
 - [ ] Define `CodeGenStrategy` trait with methods:
@@ -432,21 +505,21 @@ Current approach: capability checks scattered in codegen (`supports_bitwise_ops(
   - `generate_continue(&self, label) -> String`
   - `emit_preamble(&self) -> Option<String>` (for library includes)
 
-**Strategy Implementations:**
+#### Strategy Implementations
 
 - [ ] Create `strategies/lua51.rs` implementing `CodeGenStrategy`
 - [ ] Create `strategies/lua52.rs` implementing `CodeGenStrategy`
 - [ ] Create `strategies/lua53.rs` implementing `CodeGenStrategy`
 - [ ] Create `strategies/lua54.rs` implementing `CodeGenStrategy`
 
-**Integration:**
+#### Strategy Integration
 
 - [ ] Add `strategy: Box<dyn CodeGenStrategy>` field to `CodeGenerator`
 - [ ] Select strategy based on `LuaTarget` during initialization
 - [ ] Replace conditional logic in codegen with strategy method calls
 - [ ] Remove `supports_*` methods from `LuaTarget` (logic now in strategies)
 
-**Testing:**
+#### Strategy Testing
 
 - [ ] Unit test each strategy independently
 - [ ] Regression tests for version-specific output
@@ -459,20 +532,20 @@ Current approach: capability checks scattered in codegen (`supports_bitwise_ops(
 
 CodeGenerator is 3,120 lines - too large. Break into focused modules.
 
-**Directory Structure:**
+#### Codegen Directory Structure
 
 - [ ] Create `crates/typedlua-core/src/codegen/strategies/` (Lua version strategies)
 - [ ] Create `crates/typedlua-core/src/codegen/emitters/` (AST → Lua emitters)
 - [ ] Create `crates/typedlua-core/src/codegen/transforms/` (pluggable transforms)
 
-**Emitters (AST → Lua):**
+#### Codegen Emitters
 
 - [ ] Extract expression generation to `emitters/expressions.rs`
 - [ ] Extract statement generation to `emitters/statements.rs`
 - [ ] Extract type erasure to `emitters/types.rs`
 - [ ] Main codegen becomes orchestrator (~300 lines)
 
-**Transforms (Pipeline Pattern):**
+#### Codegen Transforms
 
 - [ ] Define `CodeGenTransform` trait (like `OptimizationPass`)
 - [ ] Create `transforms/classes.rs` for class → table transformation
@@ -480,7 +553,7 @@ CodeGenerator is 3,120 lines - too large. Break into focused modules.
 - [ ] Create `transforms/modules.rs` for import/export handling
 - [ ] Move sourcemap logic to `transforms/sourcemaps.rs`
 
-**Integration:**
+#### Codegen Integration
 
 - [ ] Register transforms in CodeGenerator::new()
 - [ ] Run transforms in pipeline during generation
@@ -494,19 +567,19 @@ CodeGenerator is 3,120 lines - too large. Break into focused modules.
 
 Type checker is 3,544 lines. Extract specialized visitors for different concerns.
 
-**Visitor Trait:**
+#### Visitor Trait Definition
 
 - [ ] Create `crates/typedlua-core/src/typechecker/visitors/mod.rs`
 - [ ] Define `TypeCheckVisitor` trait with visit methods
 
-**Specialized Visitors:**
+#### Specialized Visitors
 
 - [ ] Create `visitors/narrowing.rs` - Type narrowing logic
 - [ ] Create `visitors/generics.rs` - Generic instantiation and constraints
 - [ ] Create `visitors/access_control.rs` - public/private/protected checks
 - [ ] Create `visitors/inference.rs` - Type inference rules
 
-**Integration:**
+#### Visitor Integration
 
 - [ ] Main TypeChecker orchestrates visitors
 - [ ] Each visitor testable independently

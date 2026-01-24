@@ -115,7 +115,6 @@ fn test_error_inheritance() {
 }
 
 #[test]
-#[ignore]
 fn test_throw_error_class() {
     let source = r#"
         class Error {
@@ -138,7 +137,6 @@ fn test_throw_error_class() {
 }
 
 #[test]
-#[ignore]
 fn test_catch_error_class() {
     let source = r#"
         class Error {
@@ -168,7 +166,6 @@ fn test_catch_error_class() {
 // ============================================================================
 
 #[test]
-#[ignore]
 fn test_require_helper() {
     let source = r#"
         class ArgumentError {
@@ -199,7 +196,6 @@ fn test_require_helper() {
 }
 
 #[test]
-#[ignore]
 fn test_check_helper() {
     let source = r#"
         class ArgumentError {
@@ -231,7 +227,6 @@ fn test_check_helper() {
 }
 
 #[test]
-#[ignore]
 fn test_unreachable_helper() {
     let source = r#"
         class StateError {

@@ -1,5 +1,3 @@
-#![cfg(feature = "unimplemented")]
-
 use std::sync::Arc;
 use typedlua_core::codegen::CodeGenerator;
 use typedlua_core::config::CompilerOptions;

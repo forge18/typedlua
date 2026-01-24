@@ -71,6 +71,8 @@ pub struct TypeChecker<'a> {
     current_module_id: Option<crate::module_resolver::ModuleId>,
     /// Module resolver for imports
     module_resolver: Option<Arc<crate::module_resolver::ModuleResolver>>,
+    /// Stack of whether we're inside a catch block (for rethrow validation)
+    in_catch_block: Vec<bool>,
     diagnostic_handler: Arc<dyn DiagnosticHandler>,
     interner: &'a crate::string_interner::StringInterner,
     common: &'a crate::string_interner::CommonIdentifiers,
@@ -94,6 +96,7 @@ impl<'a> TypeChecker<'a> {
             module_registry: None,
             current_module_id: None,
             module_resolver: None,
+            in_catch_block: Vec::new(),
             diagnostic_handler,
             interner,
             common,
@@ -220,6 +223,10 @@ impl<'a> TypeChecker<'a> {
             Statement::DeclareType(alias) => self.check_type_alias(alias), // Reuse existing logic
             Statement::DeclareInterface(iface) => self.check_interface_declaration(iface), // Reuse existing logic
             Statement::DeclareConst(const_decl) => self.register_declare_const(const_decl),
+            // Exception handling
+            Statement::Throw(throw_stmt) => self.check_throw_statement(throw_stmt),
+            Statement::Try(try_stmt) => self.check_try_statement(try_stmt),
+            Statement::Rethrow(span) => self.check_rethrow_statement(*span),
         }
     }
 
@@ -414,6 +421,7 @@ impl<'a> TypeChecker<'a> {
                 return_type: Box::new(decl.return_type.clone().unwrap_or_else(|| {
                     Type::new(TypeKind::Primitive(PrimitiveType::Void), decl.span)
                 })),
+                throws: decl.throws.clone(),
                 span: decl.span,
             }),
             decl.span,
@@ -1776,14 +1784,14 @@ impl<'a> TypeChecker<'a> {
                 ));
             }
         } else if op.parameters.is_empty() {
-            if !matches!(op.operator, OperatorKind::Subtract | OperatorKind::Length) {
+            if !matches!(op.operator, OperatorKind::UnaryMinus | OperatorKind::Length) {
                 return Err(TypeCheckError::new(
                     "Only unary minus (-) and length (#) operators can have 0 parameters",
                     op.span,
                 ));
             }
         } else if op.parameters.len() == 1 {
-            if matches!(op.operator, OperatorKind::Subtract | OperatorKind::Length) {
+            if matches!(op.operator, OperatorKind::UnaryMinus | OperatorKind::Length) {
                 return Err(TypeCheckError::new(
                     "Binary operator must have exactly 1 parameter",
                     op.span,
@@ -2349,6 +2357,27 @@ impl<'a> TypeChecker<'a> {
                 // In a full implementation, we'd check if right is a function and apply left to it
                 // For simplicity, we'll type check right and return its type
                 // (This handles cases like: value |> func where func returns something)
+                self.infer_expression_type(right_expr)
+            }
+
+            ExpressionKind::Try(try_expr) => {
+                let expr_type = self.infer_expression_type(&try_expr.expression)?;
+                let catch_type = self.infer_expression_type(&try_expr.catch_expression)?;
+
+                if TypeCompatibility::is_assignable(&expr_type, &catch_type) {
+                    Ok(catch_type)
+                } else if TypeCompatibility::is_assignable(&catch_type, &expr_type) {
+                    Ok(expr_type)
+                } else {
+                    Ok(Type::new(
+                        TypeKind::Union(vec![expr_type, catch_type]),
+                        span,
+                    ))
+                }
+            }
+
+            ExpressionKind::ErrorChain(left_expr, right_expr) => {
+                let _left_type = self.infer_expression_type(left_expr)?;
                 self.infer_expression_type(right_expr)
             }
 
@@ -3161,6 +3190,7 @@ impl<'a> TypeChecker<'a> {
                 type_parameters: func.type_parameters.clone(),
                 parameters: func.parameters.clone(),
                 return_type: Box::new(func.return_type.clone()),
+                throws: func.throws.clone(),
                 span: func.span,
             }),
             func.span,
@@ -3490,6 +3520,96 @@ impl<'a> TypeChecker<'a> {
         }
 
         exports
+    }
+
+    fn check_throw_statement(&mut self, stmt: &ThrowStatement) -> Result<(), TypeCheckError> {
+        self.infer_expression_type(&stmt.expression)?;
+        Ok(())
+    }
+
+    fn check_rethrow_statement(&self, span: Span) -> Result<(), TypeCheckError> {
+        if self.in_catch_block.last() != Some(&true) {
+            return Err(TypeCheckError::new(
+                "rethrow can only be used outside of a catch block",
+                span,
+            ));
+        }
+        Ok(())
+    }
+
+    fn check_try_statement(&mut self, stmt: &TryStatement) -> Result<(), TypeCheckError> {
+        self.check_block(&stmt.try_block)?;
+
+        for catch_clause in &stmt.catch_clauses {
+            self.check_catch_clause(catch_clause)?;
+        }
+
+        if let Some(finally_block) = &stmt.finally_block {
+            self.check_block(finally_block)?;
+        }
+
+        Ok(())
+    }
+
+    fn check_catch_clause(&mut self, clause: &CatchClause) -> Result<(), TypeCheckError> {
+        self.symbol_table.enter_scope();
+
+        let _catch_var_type = match &clause.pattern {
+            CatchPattern::Untyped { variable, span } => {
+                let any_type = Type::new(TypeKind::Primitive(PrimitiveType::Unknown), *span);
+                let symbol = Symbol::new(
+                    self.interner.resolve(variable.node).to_string(),
+                    SymbolKind::Variable,
+                    any_type.clone(),
+                    *span,
+                );
+                self.symbol_table
+                    .declare(symbol)
+                    .map_err(|e| TypeCheckError::new(e, *span))?;
+                any_type
+            }
+            CatchPattern::Typed {
+                variable,
+                type_annotation,
+                span,
+            } => {
+                let symbol = Symbol::new(
+                    self.interner.resolve(variable.node).to_string(),
+                    SymbolKind::Variable,
+                    type_annotation.clone(),
+                    *span,
+                );
+                self.symbol_table
+                    .declare(symbol)
+                    .map_err(|e| TypeCheckError::new(e, *span))?;
+                type_annotation.clone()
+            }
+            CatchPattern::MultiTyped {
+                variable,
+                type_annotations,
+                span,
+            } => {
+                let union_type = Type::new(TypeKind::Union(type_annotations.clone()), *span);
+                let symbol = Symbol::new(
+                    self.interner.resolve(variable.node).to_string(),
+                    SymbolKind::Variable,
+                    union_type.clone(),
+                    *span,
+                );
+                self.symbol_table
+                    .declare(symbol)
+                    .map_err(|e| TypeCheckError::new(e, *span))?;
+                union_type
+            }
+        };
+
+        self.in_catch_block.push(true);
+        let result = self.check_block(&clause.body);
+        self.in_catch_block.pop();
+
+        self.symbol_table.exit_scope();
+
+        result
     }
 }
 

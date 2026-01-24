@@ -353,6 +353,7 @@ impl Parser<'_> {
                 type_parameters: None,
                 parameters,
                 return_type,
+                throws: None,
                 span: start_span.combine(&end_span),
             }),
             span: start_span.combine(&end_span),

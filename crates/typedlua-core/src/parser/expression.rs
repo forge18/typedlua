@@ -105,6 +105,11 @@ impl Parser<'_> {
     }
 
     fn parse_conditional(&mut self) -> Result<Expression, ParserError> {
+        // Check for try expression at the beginning
+        if self.check(&TokenKind::Try) {
+            return self.parse_try_expression_full();
+        }
+
         let expr = self.parse_logical_or()?;
 
         if self.match_token(&[TokenKind::Question]) {
@@ -123,6 +128,44 @@ impl Parser<'_> {
         }
 
         Ok(expr)
+    }
+
+    fn parse_try_expression_full(&mut self) -> Result<Expression, ParserError> {
+        let start_span = self.current_span();
+        self.consume(TokenKind::Try, "Expected 'try'")?;
+
+        let expression = self.parse_expression()?;
+        self.consume(TokenKind::Catch, "Expected 'catch' after try expression")?;
+
+        let catch_variable: crate::ast::Ident;
+        let catch_expression: Expression;
+
+        // Check if next token is an identifier (catch variable) or the fallback
+        if matches!(&self.current().kind, TokenKind::Identifier(_))
+            && !matches!(self.nth_token_kind(1), Some(TokenKind::Catch))
+        {
+            // Parse catch variable first, then fallback
+            catch_variable = self.parse_identifier()?;
+            self.consume(TokenKind::Catch, "Expected 'catch' after catch variable")?;
+            catch_expression = self.parse_expression()?;
+        } else {
+            // No catch variable, use __error as the variable name
+            let error_var = self.interner.intern("__error");
+            catch_variable = crate::ast::Spanned::new(error_var, self.current_span());
+            catch_expression = self.parse_expression()?;
+        }
+
+        let end_span = catch_expression.span;
+
+        Ok(Expression {
+            kind: ExpressionKind::Try(TryExpression {
+                expression: Box::new(expression),
+                catch_variable,
+                catch_expression: Box::new(catch_expression),
+                span: start_span.combine(&end_span),
+            }),
+            span: start_span.combine(&end_span),
+        })
     }
 
     fn parse_logical_or(&mut self) -> Result<Expression, ParserError> {
@@ -475,6 +518,15 @@ impl Parser<'_> {
                             };
                         }
                     }
+                }
+                TokenKind::BangBang => {
+                    self.advance();
+                    let right = self.parse_postfix()?;
+                    let span = expr.span.combine(&right.span);
+                    expr = Expression {
+                        kind: ExpressionKind::ErrorChain(Box::new(expr), Box::new(right)),
+                        span,
+                    };
                 }
                 _ => break,
             }

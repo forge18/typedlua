@@ -82,6 +82,7 @@ pub struct FunctionType {
     pub type_parameters: Option<Vec<crate::ast::statement::TypeParameter>>,
     pub parameters: Vec<Parameter>,
     pub return_type: Box<Type>,
+    pub throws: Option<Vec<Type>>,
     pub span: Span,
 }
 

@@ -21,6 +21,11 @@ pub enum Statement {
     Continue(Span),
     Expression(Expression),
     Block(Block),
+    // Exception handling statements
+    Throw(ThrowStatement),
+    Try(TryStatement),
+    Rethrow(Span),
+
     // Declaration file statements
     DeclareFunction(DeclareFunctionStatement),
     DeclareNamespace(DeclareNamespaceStatement),
@@ -50,6 +55,7 @@ pub struct FunctionDeclaration {
     pub type_parameters: Option<Vec<TypeParameter>>,
     pub parameters: Vec<Parameter>,
     pub return_type: Option<Type>,
+    pub throws: Option<Vec<Type>>,
     pub body: Block,
     pub span: Span,
 }
@@ -429,6 +435,7 @@ pub struct DeclareFunctionStatement {
     pub type_parameters: Option<Vec<TypeParameter>>,
     pub parameters: Vec<Parameter>,
     pub return_type: Type,
+    pub throws: Option<Vec<Type>>,
     pub is_export: bool, // For `export function` inside namespaces
     pub span: Span,
 }
@@ -446,4 +453,43 @@ pub struct DeclareConstStatement {
     pub type_annotation: Type,
     pub is_export: bool, // For `export const` inside namespaces
     pub span: Span,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThrowStatement {
+    pub expression: Expression,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TryStatement {
+    pub try_block: Block,
+    pub catch_clauses: Vec<CatchClause>,
+    pub finally_block: Option<Block>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatchClause {
+    pub pattern: CatchPattern,
+    pub body: Block,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CatchPattern {
+    Untyped {
+        variable: Ident,
+        span: Span,
+    },
+    Typed {
+        variable: Ident,
+        type_annotation: Type,
+        span: Span,
+    },
+    MultiTyped {
+        variable: Ident,
+        type_annotations: Vec<Type>,
+        span: Span,
+    },
 }

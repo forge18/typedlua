@@ -45,6 +45,9 @@ impl StatementParser for Parser<'_> {
                 self.parse_class_declaration()
             }
             TokenKind::Declare => self.parse_declare_statement(),
+            TokenKind::Throw => self.parse_throw_statement(),
+            TokenKind::Try => self.parse_try_statement(),
+            TokenKind::Rethrow => self.parse_rethrow_statement(),
             _ => {
                 // Expression statement
                 let expr = self.parse_expression()?;
@@ -140,7 +143,31 @@ impl Parser<'_> {
             None
         };
 
-        // Support both { } and Lua-style ... end
+        let throws = if self.match_token(&[TokenKind::Throws]) {
+            let mut error_types = Vec::new();
+
+            // Check if there's a left parenthesis - if not, it's a single type without parens
+            if self.check(&TokenKind::LeftParen) {
+                self.consume(TokenKind::LeftParen, "Expected '(' after 'throws'")?;
+                if !self.check(&TokenKind::RightParen) {
+                    loop {
+                        error_types.push(self.parse_type()?);
+                        if !self.match_token(&[TokenKind::Comma]) {
+                            break;
+                        }
+                    }
+                }
+                self.consume(TokenKind::RightParen, "Expected ')' after throws types")?;
+            } else {
+                // Single error type without parentheses
+                error_types.push(self.parse_type()?);
+            }
+            Some(error_types)
+        } else {
+            None
+        };
+
+        // Support both brace-style { } and Lua-style ... end
         let use_braces = self.check(&TokenKind::LeftBrace);
         if use_braces {
             self.consume(TokenKind::LeftBrace, "Expected '{'")?;
@@ -158,6 +185,7 @@ impl Parser<'_> {
             type_parameters,
             parameters,
             return_type,
+            throws,
             body,
             span: start_span.combine(&end_span),
         }))
@@ -798,6 +826,30 @@ impl Parser<'_> {
             )
         };
 
+        let throws = if self.match_token(&[TokenKind::Throws]) {
+            let mut error_types = Vec::new();
+
+            // Check if there's a left parenthesis - if not, it's a single type without parens
+            if self.check(&TokenKind::LeftParen) {
+                self.consume(TokenKind::LeftParen, "Expected '(' after 'throws'")?;
+                if !self.check(&TokenKind::RightParen) {
+                    loop {
+                        error_types.push(self.parse_type()?);
+                        if !self.match_token(&[TokenKind::Comma]) {
+                            break;
+                        }
+                    }
+                }
+                self.consume(TokenKind::RightParen, "Expected ')' after throws types")?;
+            } else {
+                // Single error type without parentheses
+                error_types.push(self.parse_type()?);
+            }
+            Some(error_types)
+        } else {
+            None
+        };
+
         let end_span = self.current_span();
 
         Ok(Statement::DeclareFunction(DeclareFunctionStatement {
@@ -805,6 +857,7 @@ impl Parser<'_> {
             type_parameters,
             parameters,
             return_type,
+            throws,
             is_export: false,
             span: start_span.combine(&end_span),
         }))
@@ -1289,6 +1342,7 @@ impl Parser<'_> {
         decorators: Vec<Decorator>,
         access: Option<AccessModifier>,
     ) -> Result<ClassMember, ParserError> {
+        eprintln!("parse_operator: current token is {:?}", self.current().kind);
         let start_span = self.current_span();
         self.consume(TokenKind::Operator, "Expected 'operator'")?;
 
@@ -1296,14 +1350,15 @@ impl Parser<'_> {
 
         let mut operator = operator_kind;
 
-        if operator == OperatorKind::Subtract {
-            if self.check(&TokenKind::LeftParen) {
-                self.consume(TokenKind::LeftParen, "Expected '(' after operator")?;
-                if self.check(&TokenKind::RightParen) {
-                    self.consume(TokenKind::RightParen, "Expected ')'")?;
-                    operator = OperatorKind::UnaryMinus;
-                }
-            }
+        // Check for unary minus: operator -() with empty parens
+        // Use lookahead to avoid consuming ( before we know it's unary minus
+        if operator == OperatorKind::Subtract
+            && self.check(&TokenKind::LeftParen)
+            && self.nth_token_kind(1) == Some(&TokenKind::RightParen)
+        {
+            self.advance(); // consume (
+            self.advance(); // consume )
+            operator = OperatorKind::UnaryMinus;
         }
 
         let mut parameters = Vec::new();
@@ -1336,6 +1391,7 @@ impl Parser<'_> {
             None
         };
 
+        // Support both brace-style { } and Lua-style ... end
         let use_braces = self.check(&TokenKind::LeftBrace);
         if use_braces {
             self.consume(TokenKind::LeftBrace, "Expected '{'")?;
@@ -1346,6 +1402,9 @@ impl Parser<'_> {
         } else {
             self.consume(TokenKind::End, "Expected 'end' after operator body")?;
         }
+
+        // Debug: print next token
+        // eprintln!("After operator: next token is {:?}", self.current().kind);
         let end_span = self.current_span();
 
         Ok(ClassMember::Operator(OperatorDeclaration {
@@ -1360,7 +1419,6 @@ impl Parser<'_> {
     }
 
     fn parse_operator_kind(&mut self) -> Result<OperatorKind, ParserError> {
-        let span = self.current_span();
         let op = match &self.current().kind {
             TokenKind::Plus => {
                 self.advance();
@@ -1469,7 +1527,7 @@ impl Parser<'_> {
             }
             _ => {
                 return Err(ParserError {
-                    message: format!("Invalid operator symbol"),
+                    message: "Invalid operator symbol".to_string(),
                     span: self.current_span(),
                 });
             }
@@ -1477,8 +1535,136 @@ impl Parser<'_> {
         Ok(op)
     }
 
-    fn is_unary_operator(op: &OperatorKind) -> bool {
-        matches!(op, OperatorKind::Subtract | OperatorKind::Length)
+    fn parse_throw_statement(&mut self) -> Result<Statement, ParserError> {
+        let start_span = self.current_span();
+        self.consume(TokenKind::Throw, "Expected 'throw'")?;
+
+        let expression = self.parse_expression()?;
+        let end_span = expression.span;
+
+        Ok(Statement::Throw(ThrowStatement {
+            expression,
+            span: start_span.combine(&end_span),
+        }))
+    }
+
+    fn parse_rethrow_statement(&mut self) -> Result<Statement, ParserError> {
+        let start_span = self.current_span();
+        self.consume(TokenKind::Rethrow, "Expected 'rethrow'")?;
+
+        Ok(Statement::Rethrow(start_span))
+    }
+
+    fn parse_try_statement(&mut self) -> Result<Statement, ParserError> {
+        let start_span = self.current_span();
+        self.consume(TokenKind::Try, "Expected 'try'")?;
+
+        let use_braces = self.check(&TokenKind::LeftBrace);
+        if use_braces {
+            self.consume(TokenKind::LeftBrace, "Expected '{'")?;
+        }
+        let try_block = self.parse_block()?;
+        if use_braces {
+            self.consume(TokenKind::RightBrace, "Expected '}' after try block")?;
+        } else {
+            self.consume(TokenKind::End, "Expected 'end' after try block")?;
+        }
+
+        let mut catch_clauses = Vec::new();
+        while self.match_token(&[TokenKind::Catch]) {
+            catch_clauses.push(self.parse_catch_clause()?);
+        }
+
+        let finally_block = if self.match_token(&[TokenKind::Finally]) {
+            let use_braces = self.check(&TokenKind::LeftBrace);
+            if use_braces {
+                self.consume(TokenKind::LeftBrace, "Expected '{'")?;
+            }
+            let finally = self.parse_block()?;
+            if use_braces {
+                self.consume(TokenKind::RightBrace, "Expected '}' after finally block")?;
+            } else {
+                self.consume(TokenKind::End, "Expected 'end' after finally block")?;
+            }
+            Some(finally)
+        } else {
+            None
+        };
+
+        let end_span = if let Some(ref last_catch) = catch_clauses.last() {
+            last_catch.span
+        } else if let Some(ref fin) = finally_block {
+            fin.span
+        } else {
+            try_block.span
+        };
+
+        Ok(Statement::Try(TryStatement {
+            try_block,
+            catch_clauses,
+            finally_block,
+            span: start_span.combine(&end_span),
+        }))
+    }
+
+    fn parse_catch_clause(&mut self) -> Result<CatchClause, ParserError> {
+        let start_span = self.current_span();
+
+        self.consume(TokenKind::LeftParen, "Expected '(' after 'catch'")?;
+
+        let variable = self.parse_identifier()?;
+        let span_after_var = self.current_span();
+
+        let pattern = if self.match_token(&[TokenKind::Colon]) {
+            let mut type_annotations = Vec::new();
+            type_annotations.push(self.parse_type()?);
+
+            while self.match_token(&[TokenKind::Pipe]) {
+                type_annotations.push(self.parse_type()?);
+            }
+
+            if type_annotations.len() == 1 {
+                let type_annotation = type_annotations.into_iter().next().unwrap();
+                let span = type_annotation.span;
+                CatchPattern::Typed {
+                    variable,
+                    type_annotation,
+                    span: start_span.combine(&span),
+                }
+            } else {
+                CatchPattern::MultiTyped {
+                    variable,
+                    type_annotations,
+                    span: start_span.combine(&span_after_var),
+                }
+            }
+        } else {
+            CatchPattern::Untyped {
+                variable,
+                span: start_span.combine(&span_after_var),
+            }
+        };
+
+        self.consume(TokenKind::RightParen, "Expected ')' after catch parameter")?;
+
+        let use_braces = self.check(&TokenKind::LeftBrace);
+        if use_braces {
+            self.consume(TokenKind::LeftBrace, "Expected '{'")?;
+        }
+        let body = self.parse_block()?;
+        if use_braces {
+            self.consume(TokenKind::RightBrace, "Expected '}' after catch body")?;
+        } else {
+            self.consume(TokenKind::End, "Expected 'end' after catch body")?;
+        }
+
+        let end_span = body.span;
+
+        Ok(CatchClause {
+            pattern,
+            body,
+            span: start_span.combine(&end_span),
+        })
     }
 
     // Helper methods (pub so other parser modules can use them)
@@ -1794,6 +1980,9 @@ impl Spannable for Statement {
             Statement::DeclareType(t) => t.span,
             Statement::DeclareInterface(i) => i.span,
             Statement::DeclareConst(c) => c.span,
+            Statement::Throw(t) => t.span,
+            Statement::Try(t) => t.span,
+            Statement::Rethrow(s) => *s,
         }
     }
 }
