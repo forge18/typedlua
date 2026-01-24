@@ -1,9 +1,15 @@
 use crate::ast::expression::{BinaryOp, Expression, ExpressionKind, Literal, UnaryOp};
-use crate::ast::statement::{ForStatement, Statement};
+use crate::ast::pattern::Pattern;
+use crate::ast::statement::{Block, ForStatement, Statement, VariableDeclaration, VariableKind};
 use crate::ast::Program;
+use crate::ast::Spanned;
 use crate::config::OptimizationLevel;
 use crate::errors::CompilationError;
 use crate::optimizer::OptimizationPass;
+use crate::span::Span;
+use crate::string_interner::StringInterner;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 /// Constant folding optimization pass
 /// Evaluates constant expressions at compile time
@@ -280,9 +286,7 @@ impl DeadCodeEliminationPass {
                         self.eliminate_dead_code(&mut for_gen.body.statements)
                     }
                 },
-                Statement::Function(func) => {
-                    self.eliminate_dead_code(&mut func.body.statements)
-                }
+                Statement::Function(func) => self.eliminate_dead_code(&mut func.body.statements),
                 _ => false,
             };
 
@@ -630,9 +634,18 @@ impl TablePreallocationPass {
 // =============================================================================
 
 /// Global localization optimization pass
-/// Identifies frequently used globals and creates local references
-/// Note: This is analysis-only - codegen uses this info to emit local caches
-pub struct GlobalLocalizationPass;
+/// Identifies frequently used globals and creates local references to reduce
+/// repeated table lookups in Lua (e.g., `local _math = math` then use `_math.sin`)
+pub struct GlobalLocalizationPass {
+    interner: Arc<StringInterner>,
+}
+
+impl GlobalLocalizationPass {
+    /// Create a new pass with the given string interner
+    pub fn new(interner: Arc<StringInterner>) -> Self {
+        GlobalLocalizationPass { interner }
+    }
+}
 
 impl OptimizationPass for GlobalLocalizationPass {
     fn name(&self) -> &'static str {
@@ -644,99 +657,544 @@ impl OptimizationPass for GlobalLocalizationPass {
     }
 
     fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
-        // Track global usage counts by StringId
-        let mut global_usage: std::collections::HashMap<crate::string_interner::StringId, usize> =
-            std::collections::HashMap::new();
-
-        for stmt in &program.statements {
-            self.collect_global_usage(stmt, &mut global_usage);
-        }
-
-        // Globals used more than 2 times benefit from localization
-        // This is analysis only - codegen would use this info
-        let _frequently_used: Vec<_> = global_usage
-            .into_iter()
-            .filter(|(_, count)| *count > 2)
-            .collect();
-
-        // Currently a no-op analysis pass
-        Ok(false)
+        // Apply global localization to the top-level program statements as a block.
+        // This ensures that frequently used globals are hoisted to a local variable at the program scope.
+        let mut block = Block {
+            statements: std::mem::take(&mut program.statements),
+            span: program.span,
+        };
+        let changed = self.localize_in_block(&mut block, HashSet::new());
+        program.statements = block.statements;
+        program.span = block.span; // preserve span (unchanged)
+        Ok(changed)
     }
 }
 
 impl GlobalLocalizationPass {
-    fn collect_global_usage(
+    #[allow(dead_code)]
+
+    fn localize_in_block(
+        &self,
+        block: &mut Block,
+        mut declared_locals: HashSet<crate::string_interner::StringId>,
+    ) -> bool {
+        let mut changed = false;
+
+        let mut global_usage: HashMap<crate::string_interner::StringId, usize> = HashMap::new();
+
+        for stmt in &block.statements {
+            self.collect_global_usage_optimized(stmt, &mut global_usage, &declared_locals);
+        }
+
+        let frequently_used: Vec<_> = global_usage
+            .into_iter()
+            .filter(|(_, count)| *count > 1)
+            .filter(|(name, _)| !declared_locals.contains(name))
+            .collect();
+
+        let mut new_statements = Vec::new();
+
+        for (name, count) in &frequently_used {
+            if *count > 1 {
+                let local_name_id = self.create_local_name(*name);
+                let span = Span::dummy();
+                let var_decl = self.create_local_declaration(*name, local_name_id, span);
+
+                new_statements.push(Statement::Variable(var_decl));
+                declared_locals.insert(local_name_id);
+                changed = true;
+            }
+        }
+
+        for stmt in &mut block.statements {
+            self.replace_global_usages(stmt, &frequently_used, &declared_locals);
+        }
+
+        new_statements.extend(block.statements.clone());
+        block.statements = new_statements;
+
+        changed
+    }
+
+    fn create_local_declaration(
+        &self,
+        global_name: crate::string_interner::StringId,
+        local_name: crate::string_interner::StringId,
+        span: Span,
+    ) -> VariableDeclaration {
+        let local_ident = Spanned::new(local_name, span);
+        let initializer = Expression::new(ExpressionKind::Identifier(global_name), span);
+
+        VariableDeclaration {
+            kind: VariableKind::Local,
+            pattern: Pattern::Identifier(local_ident),
+            type_annotation: None,
+            initializer,
+            span,
+        }
+    }
+
+    fn create_local_name(
+        &self,
+        original: crate::string_interner::StringId,
+    ) -> crate::string_interner::StringId {
+        let name = self.interner.resolve(original);
+        let local_name = format!("_{}", name);
+        self.interner.get_or_intern(&local_name)
+    }
+
+    fn collect_global_usage_optimized(
         &self,
         stmt: &Statement,
-        usage: &mut std::collections::HashMap<crate::string_interner::StringId, usize>,
+        usage: &mut HashMap<crate::string_interner::StringId, usize>,
+        declared_locals: &HashSet<crate::string_interner::StringId>,
     ) {
         match stmt {
             Statement::Variable(decl) => {
-                self.collect_from_expression(&decl.initializer, usage);
+                self.collect_from_expression_optimized(&decl.initializer, usage, declared_locals);
             }
             Statement::Expression(expr) => {
-                self.collect_from_expression(expr, usage);
+                self.collect_from_expression_optimized(expr, usage, declared_locals);
             }
             Statement::If(if_stmt) => {
-                self.collect_from_expression(&if_stmt.condition, usage);
+                self.collect_from_expression_optimized(&if_stmt.condition, usage, declared_locals);
                 for s in &if_stmt.then_block.statements {
-                    self.collect_global_usage(s, usage);
+                    self.collect_global_usage_optimized(s, usage, declared_locals);
                 }
                 for else_if in &if_stmt.else_ifs {
-                    self.collect_from_expression(&else_if.condition, usage);
+                    self.collect_from_expression_optimized(
+                        &else_if.condition,
+                        usage,
+                        declared_locals,
+                    );
                     for s in &else_if.block.statements {
-                        self.collect_global_usage(s, usage);
+                        self.collect_global_usage_optimized(s, usage, declared_locals);
                     }
                 }
                 if let Some(else_block) = &if_stmt.else_block {
                     for s in &else_block.statements {
-                        self.collect_global_usage(s, usage);
+                        self.collect_global_usage_optimized(s, usage, declared_locals);
                     }
                 }
             }
             Statement::Function(func) => {
                 for s in &func.body.statements {
-                    self.collect_global_usage(s, usage);
+                    self.collect_global_usage_optimized(s, usage, declared_locals);
                 }
             }
             Statement::Return(ret) => {
                 for expr in &ret.values {
-                    self.collect_from_expression(expr, usage);
+                    self.collect_from_expression_optimized(expr, usage, declared_locals);
+                }
+            }
+            Statement::For(for_stmt) => {
+                let mut locals = declared_locals.clone();
+                match &**for_stmt {
+                    ForStatement::Numeric(for_num) => {
+                        locals.insert(for_num.variable.node);
+                    }
+                    ForStatement::Generic(for_gen) => {
+                        for var in &for_gen.variables {
+                            locals.insert(var.node);
+                        }
+                    }
+                }
+                match &**for_stmt {
+                    ForStatement::Numeric(for_num) => {
+                        for s in &for_num.body.statements {
+                            self.collect_global_usage_optimized(s, usage, &locals);
+                        }
+                    }
+                    ForStatement::Generic(for_gen) => {
+                        for s in &for_gen.body.statements {
+                            self.collect_global_usage_optimized(s, usage, &locals);
+                        }
+                    }
                 }
             }
             _ => {}
         }
     }
 
-    fn collect_from_expression(
+    fn collect_from_expression_optimized(
         &self,
         expr: &Expression,
-        usage: &mut std::collections::HashMap<crate::string_interner::StringId, usize>,
+        usage: &mut HashMap<crate::string_interner::StringId, usize>,
+        declared_locals: &HashSet<crate::string_interner::StringId>,
     ) {
         match &expr.kind {
             ExpressionKind::Identifier(name) => {
-                // Track identifier usage by StringId
-                // Without access to the interner, we can't filter by name
-                // but we can still count usage
-                *usage.entry(name.node).or_insert(0) += 1;
+                if !declared_locals.contains(name) {
+                    *usage.entry(*name).or_insert(0) += 1;
+                }
             }
             ExpressionKind::Binary(_, left, right) => {
-                self.collect_from_expression(left, usage);
-                self.collect_from_expression(right, usage);
+                self.collect_from_expression_optimized(left, usage, declared_locals);
+                self.collect_from_expression_optimized(right, usage, declared_locals);
             }
             ExpressionKind::Unary(_, operand) => {
-                self.collect_from_expression(operand, usage);
+                self.collect_from_expression_optimized(operand, usage, declared_locals);
             }
             ExpressionKind::Call(func, args) => {
-                self.collect_from_expression(func, usage);
+                self.collect_from_expression_optimized(func, usage, declared_locals);
                 for arg in args {
-                    self.collect_from_expression(&arg.value, usage);
+                    self.collect_from_expression_optimized(&arg.value, usage, declared_locals);
                 }
             }
             ExpressionKind::Member(obj, _) => {
-                self.collect_from_expression(obj, usage);
+                self.collect_from_expression_optimized(obj, usage, declared_locals);
+            }
+            ExpressionKind::MethodCall(obj, _, args) => {
+                self.collect_from_expression_optimized(obj, usage, declared_locals);
+                for arg in args {
+                    self.collect_from_expression_optimized(&arg.value, usage, declared_locals);
+                }
+            }
+            ExpressionKind::Index(obj, index) => {
+                self.collect_from_expression_optimized(obj, usage, declared_locals);
+                self.collect_from_expression_optimized(index, usage, declared_locals);
+            }
+            ExpressionKind::Conditional(cond, then_expr, else_expr) => {
+                self.collect_from_expression_optimized(cond, usage, declared_locals);
+                self.collect_from_expression_optimized(then_expr, usage, declared_locals);
+                self.collect_from_expression_optimized(else_expr, usage, declared_locals);
+            }
+            ExpressionKind::Pipe(left, right) => {
+                self.collect_from_expression_optimized(left, usage, declared_locals);
+                self.collect_from_expression_optimized(right, usage, declared_locals);
+            }
+            ExpressionKind::Arrow(arrow) => {
+                for param in &arrow.parameters {
+                    if let Some(default) = &param.default {
+                        self.collect_from_expression_optimized(default, usage, declared_locals);
+                    }
+                }
+                self.collect_from_arrow_body(&arrow.body, usage, declared_locals);
+            }
+            ExpressionKind::Match(match_expr) => {
+                self.collect_from_expression_optimized(&match_expr.value, usage, declared_locals);
+                for arm in &match_expr.arms {
+                    self.collect_from_match_arm_body(&arm.body, usage, declared_locals);
+                }
+            }
+            ExpressionKind::New(callee, args) => {
+                self.collect_from_expression_optimized(callee, usage, declared_locals);
+                for arg in args {
+                    self.collect_from_expression_optimized(&arg.value, usage, declared_locals);
+                }
+            }
+            ExpressionKind::Try(try_expr) => {
+                self.collect_from_expression_optimized(
+                    &try_expr.expression,
+                    usage,
+                    declared_locals,
+                );
+                self.collect_from_expression_optimized(
+                    &try_expr.catch_expression,
+                    usage,
+                    declared_locals,
+                );
+            }
+            ExpressionKind::ErrorChain(_, expr) => {
+                self.collect_from_expression_optimized(expr, usage, declared_locals);
+            }
+            ExpressionKind::OptionalMember(obj, _) => {
+                self.collect_from_expression_optimized(obj, usage, declared_locals);
+            }
+            ExpressionKind::OptionalIndex(obj, index) => {
+                self.collect_from_expression_optimized(obj, usage, declared_locals);
+                self.collect_from_expression_optimized(index, usage, declared_locals);
+            }
+            ExpressionKind::OptionalCall(obj, args) => {
+                self.collect_from_expression_optimized(obj, usage, declared_locals);
+                for arg in args {
+                    self.collect_from_expression_optimized(&arg.value, usage, declared_locals);
+                }
+            }
+            ExpressionKind::OptionalMethodCall(obj, _, args) => {
+                self.collect_from_expression_optimized(obj, usage, declared_locals);
+                for arg in args {
+                    self.collect_from_expression_optimized(&arg.value, usage, declared_locals);
+                }
+            }
+            ExpressionKind::TypeAssertion(expr, _) => {
+                self.collect_from_expression_optimized(expr, usage, declared_locals);
             }
             _ => {}
+        }
+    }
+
+    fn collect_from_arrow_body(
+        &self,
+        body: &crate::ast::expression::ArrowBody,
+        usage: &mut HashMap<crate::string_interner::StringId, usize>,
+        declared_locals: &HashSet<crate::string_interner::StringId>,
+    ) {
+        match body {
+            crate::ast::expression::ArrowBody::Expression(expr) => {
+                self.collect_from_expression_optimized(expr, usage, declared_locals);
+            }
+            crate::ast::expression::ArrowBody::Block(block) => {
+                for stmt in &block.statements {
+                    self.collect_global_usage_optimized(stmt, usage, declared_locals);
+                }
+            }
+        }
+    }
+
+    fn collect_from_match_arm_body(
+        &self,
+        body: &crate::ast::expression::MatchArmBody,
+        usage: &mut HashMap<crate::string_interner::StringId, usize>,
+        declared_locals: &HashSet<crate::string_interner::StringId>,
+    ) {
+        match body {
+            crate::ast::expression::MatchArmBody::Expression(expr) => {
+                self.collect_from_expression_optimized(expr, usage, declared_locals);
+            }
+            crate::ast::expression::MatchArmBody::Block(block) => {
+                for stmt in &block.statements {
+                    self.collect_global_usage_optimized(stmt, usage, declared_locals);
+                }
+            }
+        }
+    }
+
+    fn replace_global_usages(
+        &self,
+        stmt: &mut Statement,
+        frequently_used: &[(crate::string_interner::StringId, usize)],
+        declared_locals: &HashSet<crate::string_interner::StringId>,
+    ) {
+        match stmt {
+            Statement::Variable(decl) => {
+                self.replace_in_expression(&mut decl.initializer, frequently_used, declared_locals);
+            }
+            Statement::Expression(expr) => {
+                self.replace_in_expression(expr, frequently_used, declared_locals);
+            }
+            Statement::If(if_stmt) => {
+                self.replace_in_expression(
+                    &mut if_stmt.condition,
+                    frequently_used,
+                    declared_locals,
+                );
+                for s in &mut if_stmt.then_block.statements {
+                    self.replace_global_usages(s, frequently_used, declared_locals);
+                }
+                for else_if in &mut if_stmt.else_ifs {
+                    self.replace_in_expression(
+                        &mut else_if.condition,
+                        frequently_used,
+                        declared_locals,
+                    );
+                    for s in &mut else_if.block.statements {
+                        self.replace_global_usages(s, frequently_used, declared_locals);
+                    }
+                }
+                if let Some(else_block) = &mut if_stmt.else_block {
+                    for s in &mut else_block.statements {
+                        self.replace_global_usages(s, frequently_used, declared_locals);
+                    }
+                }
+            }
+            Statement::While(while_stmt) => {
+                self.replace_in_expression(
+                    &mut while_stmt.condition,
+                    frequently_used,
+                    declared_locals,
+                );
+                for s in &mut while_stmt.body.statements {
+                    self.replace_global_usages(s, frequently_used, declared_locals);
+                }
+            }
+            Statement::For(for_stmt) => {
+                let mut new_locals = declared_locals.clone();
+                match &mut **for_stmt {
+                    ForStatement::Numeric(ref mut for_num) => {
+                        new_locals.insert(for_num.variable.node);
+                    }
+                    ForStatement::Generic(ref mut for_gen) => {
+                        for var in &for_gen.variables {
+                            new_locals.insert(var.node);
+                        }
+                    }
+                }
+                match &mut **for_stmt {
+                    ForStatement::Numeric(ref mut for_num) => {
+                        for s in &mut for_num.body.statements {
+                            self.replace_global_usages(s, frequently_used, &new_locals);
+                        }
+                    }
+                    ForStatement::Generic(ref mut for_gen) => {
+                        for s in &mut for_gen.body.statements {
+                            self.replace_global_usages(s, frequently_used, &new_locals);
+                        }
+                    }
+                }
+            }
+            Statement::Return(ret) => {
+                for expr in &mut ret.values {
+                    self.replace_in_expression(expr, frequently_used, declared_locals);
+                }
+            }
+            Statement::Function(func) => {
+                let new_locals = declared_locals.clone();
+                for s in &mut func.body.statements {
+                    self.replace_global_usages(s, frequently_used, &new_locals);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn replace_in_expression(
+        &self,
+        expr: &mut Expression,
+        frequently_used: &[(crate::string_interner::StringId, usize)],
+        declared_locals: &HashSet<crate::string_interner::StringId>,
+    ) {
+        match &mut expr.kind {
+            ExpressionKind::Identifier(name) => {
+                if !declared_locals.contains(name) {
+                    for (global_name, count) in frequently_used {
+                        if *name == *global_name && *count > 1 {
+                            let local_name_id = self.create_local_name(*name);
+                            *name = local_name_id;
+                            break;
+                        }
+                    }
+                }
+            }
+            ExpressionKind::Binary(_op, left, right) => {
+                self.replace_in_expression(left, frequently_used, declared_locals);
+                self.replace_in_expression(right, frequently_used, declared_locals);
+            }
+            ExpressionKind::Unary(_op, operand) => {
+                self.replace_in_expression(operand, frequently_used, declared_locals);
+            }
+            ExpressionKind::Call(func, args) => {
+                self.replace_in_expression(func, frequently_used, declared_locals);
+                for arg in args {
+                    self.replace_in_expression(&mut arg.value, frequently_used, declared_locals);
+                }
+            }
+            ExpressionKind::Member(obj, _) => {
+                self.replace_in_expression(obj, frequently_used, declared_locals);
+            }
+            ExpressionKind::MethodCall(obj, _, args) => {
+                self.replace_in_expression(obj, frequently_used, declared_locals);
+                for arg in args {
+                    self.replace_in_expression(&mut arg.value, frequently_used, declared_locals);
+                }
+            }
+            ExpressionKind::Index(obj, index) => {
+                self.replace_in_expression(obj, frequently_used, declared_locals);
+                self.replace_in_expression(index, frequently_used, declared_locals);
+            }
+            ExpressionKind::Conditional(cond, then_expr, else_expr) => {
+                self.replace_in_expression(cond, frequently_used, declared_locals);
+                self.replace_in_expression(then_expr, frequently_used, declared_locals);
+                self.replace_in_expression(else_expr, frequently_used, declared_locals);
+            }
+            ExpressionKind::Pipe(left, right) => {
+                self.replace_in_expression(left, frequently_used, declared_locals);
+                self.replace_in_expression(right, frequently_used, declared_locals);
+            }
+            ExpressionKind::Match(match_expr) => {
+                self.replace_in_expression(&mut match_expr.value, frequently_used, declared_locals);
+                for arm in &mut match_expr.arms {
+                    self.replace_in_match_arm_body(&mut arm.body, frequently_used, declared_locals);
+                }
+            }
+            ExpressionKind::Arrow(arrow) => {
+                for param in &mut arrow.parameters {
+                    if let Some(default) = &mut param.default {
+                        self.replace_in_expression(default, frequently_used, declared_locals);
+                    }
+                }
+                self.replace_in_arrow_body(&mut arrow.body, frequently_used, declared_locals);
+            }
+            ExpressionKind::New(callee, args) => {
+                self.replace_in_expression(callee, frequently_used, declared_locals);
+                for arg in args {
+                    self.replace_in_expression(&mut arg.value, frequently_used, declared_locals);
+                }
+            }
+            ExpressionKind::Try(try_expr) => {
+                self.replace_in_expression(
+                    &mut try_expr.expression,
+                    frequently_used,
+                    declared_locals,
+                );
+                self.replace_in_expression(
+                    &mut try_expr.catch_expression,
+                    frequently_used,
+                    declared_locals,
+                );
+            }
+            ExpressionKind::ErrorChain(_, expr) => {
+                self.replace_in_expression(expr, frequently_used, declared_locals);
+            }
+            ExpressionKind::OptionalMember(obj, _) => {
+                self.replace_in_expression(obj, frequently_used, declared_locals);
+            }
+            ExpressionKind::OptionalIndex(obj, index) => {
+                self.replace_in_expression(obj, frequently_used, declared_locals);
+                self.replace_in_expression(index, frequently_used, declared_locals);
+            }
+            ExpressionKind::OptionalCall(obj, args) => {
+                self.replace_in_expression(obj, frequently_used, declared_locals);
+                for arg in args {
+                    self.replace_in_expression(&mut arg.value, frequently_used, declared_locals);
+                }
+            }
+            ExpressionKind::OptionalMethodCall(obj, _, args) => {
+                self.replace_in_expression(obj, frequently_used, declared_locals);
+                for arg in args {
+                    self.replace_in_expression(&mut arg.value, frequently_used, declared_locals);
+                }
+            }
+            ExpressionKind::TypeAssertion(expr, _) => {
+                self.replace_in_expression(expr, frequently_used, declared_locals);
+            }
+            _ => {}
+        }
+    }
+
+    fn replace_in_arrow_body(
+        &self,
+        body: &mut crate::ast::expression::ArrowBody,
+        frequently_used: &[(crate::string_interner::StringId, usize)],
+        declared_locals: &HashSet<crate::string_interner::StringId>,
+    ) {
+        match body {
+            crate::ast::expression::ArrowBody::Expression(expr) => {
+                self.replace_in_expression(expr, frequently_used, declared_locals);
+            }
+            crate::ast::expression::ArrowBody::Block(block) => {
+                for stmt in &mut block.statements {
+                    self.replace_global_usages(stmt, frequently_used, declared_locals);
+                }
+            }
+        }
+    }
+
+    fn replace_in_match_arm_body(
+        &self,
+        body: &mut crate::ast::expression::MatchArmBody,
+        frequently_used: &[(crate::string_interner::StringId, usize)],
+        declared_locals: &HashSet<crate::string_interner::StringId>,
+    ) {
+        match body {
+            crate::ast::expression::MatchArmBody::Expression(expr) => {
+                self.replace_in_expression(expr, frequently_used, declared_locals);
+            }
+            crate::ast::expression::MatchArmBody::Block(block) => {
+                for stmt in &mut block.statements {
+                    self.replace_global_usages(stmt, frequently_used, declared_locals);
+                }
+            }
         }
     }
 }
@@ -768,8 +1226,10 @@ impl OptimizationPass for FunctionInliningPass {
 
     fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
         // Collect inlinable functions (small, non-recursive, single return)
-        let mut inlinable: std::collections::HashMap<crate::string_interner::StringId, &crate::ast::statement::FunctionDeclaration> =
-            std::collections::HashMap::new();
+        let mut inlinable: std::collections::HashMap<
+            crate::string_interner::StringId,
+            &crate::ast::statement::FunctionDeclaration,
+        > = std::collections::HashMap::new();
 
         for stmt in &program.statements {
             if let Statement::Function(func) = stmt {
@@ -803,15 +1263,24 @@ impl FunctionInliningPass {
         match stmt {
             Statement::Expression(expr) => self.expr_contains_call_to(expr, name),
             Statement::Variable(decl) => self.expr_contains_call_to(&decl.initializer, name),
-            Statement::Return(ret) => {
-                ret.values.iter().any(|e| self.expr_contains_call_to(e, name))
-            }
+            Statement::Return(ret) => ret
+                .values
+                .iter()
+                .any(|e| self.expr_contains_call_to(e, name)),
             Statement::If(if_stmt) => {
                 self.expr_contains_call_to(&if_stmt.condition, name)
-                    || if_stmt.then_block.statements.iter().any(|s| self.contains_call_to(s, name))
+                    || if_stmt
+                        .then_block
+                        .statements
+                        .iter()
+                        .any(|s| self.contains_call_to(s, name))
                     || if_stmt.else_ifs.iter().any(|ei| {
                         self.expr_contains_call_to(&ei.condition, name)
-                            || ei.block.statements.iter().any(|s| self.contains_call_to(s, name))
+                            || ei
+                                .block
+                                .statements
+                                .iter()
+                                .any(|s| self.contains_call_to(s, name))
                     })
                     || if_stmt.else_block.as_ref().map_or(false, |eb| {
                         eb.statements.iter().any(|s| self.contains_call_to(s, name))
@@ -821,16 +1290,22 @@ impl FunctionInliningPass {
         }
     }
 
-    fn expr_contains_call_to(&self, expr: &Expression, name: crate::string_interner::StringId) -> bool {
+    fn expr_contains_call_to(
+        &self,
+        expr: &Expression,
+        name: crate::string_interner::StringId,
+    ) -> bool {
         match &expr.kind {
             ExpressionKind::Call(func, args) => {
                 if let ExpressionKind::Identifier(id) = &func.kind {
-                    if id.node == name {
+                    if *id == name {
                         return true;
                     }
                 }
                 self.expr_contains_call_to(func, name)
-                    || args.iter().any(|a| self.expr_contains_call_to(&a.value, name))
+                    || args
+                        .iter()
+                        .any(|a| self.expr_contains_call_to(&a.value, name))
             }
             ExpressionKind::Binary(_, left, right) => {
                 self.expr_contains_call_to(left, name) || self.expr_contains_call_to(right, name)
@@ -1032,10 +1507,14 @@ impl DeadStoreEliminationPass {
         }
     }
 
-    fn collect_reads_from_expr(&self, expr: &Expression, reads: &mut std::collections::HashSet<crate::string_interner::StringId>) {
+    fn collect_reads_from_expr(
+        &self,
+        expr: &Expression,
+        reads: &mut std::collections::HashSet<crate::string_interner::StringId>,
+    ) {
         match &expr.kind {
             ExpressionKind::Identifier(name) => {
-                reads.insert(name.node);
+                reads.insert(*name);
             }
             ExpressionKind::Binary(_, left, right) => {
                 self.collect_reads_from_expr(left, reads);
@@ -1169,9 +1648,11 @@ impl OptimizationPass for OperatorInliningPass {
                 // Count classes for potential operator analysis
                 _class_count += 1;
                 // Methods could potentially be operators (based on naming convention)
-                let _method_count = class.members.iter().filter(|m| {
-                    matches!(m, crate::ast::statement::ClassMember::Method(_))
-                }).count();
+                let _method_count = class
+                    .members
+                    .iter()
+                    .filter(|m| matches!(m, crate::ast::statement::ClassMember::Method(_)))
+                    .count();
             }
         }
 
@@ -1204,9 +1685,11 @@ impl OptimizationPass for InterfaceMethodInliningPass {
         for stmt in &program.statements {
             if let Statement::Interface(iface) = stmt {
                 // Count methods in interfaces for potential inlining analysis
-                _interface_method_count += iface.members.iter().filter(|m| {
-                    matches!(m, crate::ast::statement::InterfaceMember::Method(_))
-                }).count();
+                _interface_method_count += iface
+                    .members
+                    .iter()
+                    .filter(|m| matches!(m, crate::ast::statement::InterfaceMember::Method(_)))
+                    .count();
             }
         }
 
@@ -1234,8 +1717,10 @@ impl OptimizationPass for DevirtualizationPass {
 
     fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
         // Collect class methods for potential devirtualization
-        let mut _class_methods: std::collections::HashMap<crate::string_interner::StringId, Vec<crate::string_interner::StringId>> =
-            std::collections::HashMap::new();
+        let mut _class_methods: std::collections::HashMap<
+            crate::string_interner::StringId,
+            Vec<crate::string_interner::StringId>,
+        > = std::collections::HashMap::new();
 
         for stmt in &program.statements {
             if let Statement::Class(class) = stmt {
