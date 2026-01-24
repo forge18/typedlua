@@ -1,6 +1,6 @@
 # TypedLua TODO
 
-**Last Updated:** 2026-01-24
+**Last Updated:** 2026-01-24 (Dead Store Elimination complete)
 
 ---
 
@@ -401,9 +401,9 @@ Pure Lua reflection via compile-time metadata generation. No native code or FFI 
 
 ### 3.1-3.4 Compiler Optimizations
 
-**Status:** O1 passes implemented and tested, O2/O3 passes scaffolded (analysis-only), Auto level support added | **Model:** Opus
+**Status:** O1 passes complete, O2 passes mostly complete (7/10), O3 passes scaffolded | **Model:** Opus
 
-All 15 optimization passes are registered. O1 passes (constant folding, dead code elimination, algebraic simplification) are fully functional. O2/O3 passes are analysis-only placeholders awaiting full implementation.
+All 15 optimization passes are registered. O1 passes (constant folding, dead code elimination, algebraic simplification) are fully functional. O2 passes: function inlining, loop optimization, null coalescing, safe navigation, exception handling, string concatenation, and dead store elimination are complete. Remaining O2: method-to-function conversion, tail call optimization, rich enum optimization. O3 passes are analysis-only placeholders.
 
 **3.1 Optimization Infrastructure:**
 
@@ -486,11 +486,13 @@ All 15 optimization passes are registered. O1 passes (constant folding, dead cod
   - [x] Handle nested concatenations and parentheses
   - [ ] Loop-based concatenation optimization (DEFERRED - requires block transformation)
 
-- [ ] Dead store elimination
-  - [ ] Perform liveness analysis on local variables within basic blocks
-  - [ ] Flag assignments whose values are never read before being overwritten or out of scope
-  - [ ] Remove flagged store instructions in a dedicated pass
-  - [ ] Verify correctness with tests ensuring no observable side‑effects removed
+- [x] Dead store elimination
+  - [x] Perform liveness analysis on local variables within basic blocks
+  - [x] Flag assignments whose values are never read before being overwritten or out of scope
+  - [x] Remove flagged store instructions in a dedicated pass
+  - [x] Verify correctness with tests ensuring no observable side‑effects removed
+  - [x] Handle nested function bodies and arrow functions recursively
+  - [x] Preserve variables captured by closures
 
 - [ ] Method to function call conversion
   - [ ] Scan method call sites where receiver type is known and method is static
@@ -519,28 +521,32 @@ All 15 optimization passes are registered. O1 passes (constant folding, dead cod
   - [ ] Analyze concrete type information at call sites
   - [ ] Replace virtual dispatch with direct function call where type is known
   - [ ] Add tests for class hierarchy method calls
+
 - [ ] Generic specialization
   - [ ] Detect generic function instantiations with concrete type arguments
   - [ ] Generate specialized monomorphic versions of generic functions
   - [ ] Inline specialized versions where beneficial
   - [ ] Write tests for generic function performance and correctness
+
 - [ ] Operator inlining
   - [ ] Identify frequently used operator overloads
   - [ ] Inline operator body at call sites when small
   - [ ] Ensure correct handling of metamethod lookups
   - [ ] Add tests for operator inlining correctness
+
 - [ ] Interface method inlining
   - [ ] Analyze interface method calls with known implementing class
   - [ ] Inline method body when implementation is known and small
   - [ ] Preserve semantics for dynamic dispatch fallback
   - [ ] Add tests for interface method inlining scenarios
+  
 - [ ] Aggressive inlining (threshold: 15 statements)
   - [ ] Extend inlining criteria to larger functions up to 15 statements
   - [ ] Implement heuristics to avoid code bloat
   - [ ] Add benchmarks to evaluate impact
   - [ ] Write tests for large function inlining and recursion safety
 
-**Test files:** optimizer_integration_tests.rs, o1_combined_tests.rs, o3_combined_tests.rs
+**Test files:** optimizer_integration_tests.rs, o1_combined_tests.rs, o3_combined_tests.rs, dead_store_elimination_tests.rs (19 tests)
 
 ---
 
