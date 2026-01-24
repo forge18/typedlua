@@ -41,6 +41,10 @@ pub enum ExpressionKind {
     Template(TemplateLiteral),
     TypeAssertion(Box<Expression>, Type),
     New(Box<Expression>, Vec<Argument>),
+    OptionalMember(Box<Expression>, Ident),
+    OptionalIndex(Box<Expression>, Box<Expression>),
+    OptionalCall(Box<Expression>, Vec<Argument>),
+    OptionalMethodCall(Box<Expression>, Ident, Vec<Argument>),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -69,6 +73,7 @@ pub enum BinaryOp {
     GreaterThanOrEqual,
     And,
     Or,
+    NullCoalesce,
     Concatenate,
     BitwiseAnd,
     BitwiseOr,

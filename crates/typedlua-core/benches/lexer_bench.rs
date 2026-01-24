@@ -1,5 +1,8 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use typedlua_core::Lexer;
+use std::sync::Arc;
+use typedlua_core::diagnostics::CollectingDiagnosticHandler;
+use typedlua_core::lexer::Lexer;
+use typedlua_core::string_interner::StringInterner;
 
 fn bench_lexer_simple(c: &mut Criterion) {
     let source = r#"
@@ -12,8 +15,10 @@ fn bench_lexer_simple(c: &mut Criterion) {
 
     c.bench_function("lexer_simple", |b| {
         b.iter(|| {
-            let lexer = Lexer::new(black_box(source));
-            lexer.collect::<Vec<_>>()
+            let handler = Arc::new(CollectingDiagnosticHandler::new());
+            let interner = StringInterner::new();
+            let mut lexer = Lexer::new(black_box(source), handler, &interner);
+            lexer.tokenize().ok()
         })
     });
 }
@@ -37,8 +42,10 @@ fn bench_lexer_class(c: &mut Criterion) {
 
     c.bench_function("lexer_class", |b| {
         b.iter(|| {
-            let lexer = Lexer::new(black_box(source));
-            lexer.collect::<Vec<_>>()
+            let handler = Arc::new(CollectingDiagnosticHandler::new());
+            let interner = StringInterner::new();
+            let mut lexer = Lexer::new(black_box(source), handler, &interner);
+            lexer.tokenize().ok()
         })
     });
 }
@@ -57,8 +64,10 @@ fn bench_lexer_size_scaling(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::from_parameter(size), &source, |b, s| {
             b.iter(|| {
-                let lexer = Lexer::new(black_box(s));
-                lexer.collect::<Vec<_>>()
+                let handler = Arc::new(CollectingDiagnosticHandler::new());
+                let interner = StringInterner::new();
+                let mut lexer = Lexer::new(black_box(s), handler, &interner);
+                lexer.tokenize().ok()
             })
         });
     }

@@ -1068,6 +1068,11 @@ impl Parser<'_> {
             return self.parse_constructor(decorators);
         }
 
+        // Check for operator
+        if self.check(&TokenKind::Operator) {
+            return self.parse_operator(decorators, access);
+        }
+
         let start_span = self.current_span();
         let name = self.parse_identifier()?;
 
@@ -1277,6 +1282,203 @@ impl Parser<'_> {
             body,
             span: start_span.combine(&end_span),
         }))
+    }
+
+    fn parse_operator(
+        &mut self,
+        decorators: Vec<Decorator>,
+        access: Option<AccessModifier>,
+    ) -> Result<ClassMember, ParserError> {
+        let start_span = self.current_span();
+        self.consume(TokenKind::Operator, "Expected 'operator'")?;
+
+        let operator_kind = self.parse_operator_kind()?;
+
+        let mut operator = operator_kind;
+
+        if operator == OperatorKind::Subtract {
+            if self.check(&TokenKind::LeftParen) {
+                self.consume(TokenKind::LeftParen, "Expected '(' after operator")?;
+                if self.check(&TokenKind::RightParen) {
+                    self.consume(TokenKind::RightParen, "Expected ')'")?;
+                    operator = OperatorKind::UnaryMinus;
+                }
+            }
+        }
+
+        let mut parameters = Vec::new();
+
+        if operator == OperatorKind::NewIndex {
+            self.consume(TokenKind::LeftParen, "Expected '(' after operator")?;
+            let params = self.parse_parameter_list()?;
+            self.consume(TokenKind::RightParen, "Expected ')'")?;
+            if params.len() != 2 {
+                return Err(ParserError {
+                    message: "operator []= requires exactly 2 parameters (index and value)".into(),
+                    span: self.current_span(),
+                });
+            }
+            parameters = params;
+        } else if self.check(&TokenKind::LeftParen) {
+            self.consume(TokenKind::LeftParen, "Expected '(' after operator")?;
+            if !self.check(&TokenKind::RightParen) {
+                let params = self.parse_parameter_list()?;
+                self.consume(TokenKind::RightParen, "Expected ')'")?;
+                parameters = params;
+            } else {
+                self.consume(TokenKind::RightParen, "Expected ')'")?;
+            }
+        }
+
+        let return_type = if self.match_token(&[TokenKind::Colon]) {
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
+        let use_braces = self.check(&TokenKind::LeftBrace);
+        if use_braces {
+            self.consume(TokenKind::LeftBrace, "Expected '{'")?;
+        }
+        let body = self.parse_block()?;
+        if use_braces {
+            self.consume(TokenKind::RightBrace, "Expected '}' after operator body")?;
+        } else {
+            self.consume(TokenKind::End, "Expected 'end' after operator body")?;
+        }
+        let end_span = self.current_span();
+
+        Ok(ClassMember::Operator(OperatorDeclaration {
+            decorators,
+            access,
+            operator,
+            parameters,
+            return_type,
+            body,
+            span: start_span.combine(&end_span),
+        }))
+    }
+
+    fn parse_operator_kind(&mut self) -> Result<OperatorKind, ParserError> {
+        let span = self.current_span();
+        let op = match &self.current().kind {
+            TokenKind::Plus => {
+                self.advance();
+                OperatorKind::Add
+            }
+            TokenKind::Minus => {
+                self.advance();
+                OperatorKind::Subtract
+            }
+            TokenKind::Star => {
+                self.advance();
+                OperatorKind::Multiply
+            }
+            TokenKind::Slash => {
+                self.advance();
+                OperatorKind::Divide
+            }
+            TokenKind::Percent => {
+                self.advance();
+                OperatorKind::Modulo
+            }
+            TokenKind::Caret => {
+                self.advance();
+                OperatorKind::Power
+            }
+            TokenKind::DotDot => {
+                self.advance();
+                OperatorKind::Concatenate
+            }
+            TokenKind::SlashSlash => {
+                self.advance();
+                OperatorKind::FloorDivide
+            }
+            TokenKind::EqualEqual => {
+                self.advance();
+                OperatorKind::Equal
+            }
+            TokenKind::BangEqual | TokenKind::TildeEqual => {
+                self.advance();
+                OperatorKind::NotEqual
+            }
+            TokenKind::LessThan => {
+                self.advance();
+                OperatorKind::LessThan
+            }
+            TokenKind::LessEqual => {
+                self.advance();
+                OperatorKind::LessThanOrEqual
+            }
+            TokenKind::GreaterThan => {
+                self.advance();
+                OperatorKind::GreaterThan
+            }
+            TokenKind::GreaterEqual => {
+                self.advance();
+                OperatorKind::GreaterThanOrEqual
+            }
+            TokenKind::Ampersand => {
+                self.advance();
+                OperatorKind::BitwiseAnd
+            }
+            TokenKind::Pipe => {
+                self.advance();
+                OperatorKind::BitwiseOr
+            }
+            TokenKind::Tilde => {
+                self.advance();
+                OperatorKind::BitwiseXor
+            }
+            TokenKind::LessLess => {
+                self.advance();
+                OperatorKind::ShiftLeft
+            }
+            TokenKind::GreaterGreater => {
+                self.advance();
+                OperatorKind::ShiftRight
+            }
+            TokenKind::LeftBracket => {
+                self.advance();
+                if self.check(&TokenKind::RightBracket)
+                    && self.nth_token_kind(1) == Some(&TokenKind::Equal)
+                {
+                    self.advance();
+                    self.advance();
+                    OperatorKind::NewIndex
+                } else if self.match_token(&[TokenKind::RightBracket]) {
+                    OperatorKind::Index
+                } else {
+                    return Err(ParserError {
+                        message: "Expected ']' or '=' after '[' in operator definition".into(),
+                        span: self.current_span(),
+                    });
+                }
+            }
+            TokenKind::LeftParen => {
+                self.advance();
+                self.consume(
+                    TokenKind::RightParen,
+                    "Expected ')' after '(' in operator()",
+                )?;
+                OperatorKind::Call
+            }
+            TokenKind::Hash => {
+                self.advance();
+                OperatorKind::Length
+            }
+            _ => {
+                return Err(ParserError {
+                    message: format!("Invalid operator symbol"),
+                    span: self.current_span(),
+                });
+            }
+        };
+        Ok(op)
+    }
+
+    fn is_unary_operator(op: &OperatorKind) -> bool {
+        matches!(op, OperatorKind::Subtract | OperatorKind::Length)
     }
 
     // Helper methods (pub so other parser modules can use them)

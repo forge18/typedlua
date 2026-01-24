@@ -1,5 +1,9 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use typedlua_core::Parser;
+use std::sync::Arc;
+use typedlua_core::diagnostics::CollectingDiagnosticHandler;
+use typedlua_core::lexer::Lexer;
+use typedlua_core::parser::Parser;
+use typedlua_core::string_interner::StringInterner;
 
 fn bench_parser_simple(c: &mut Criterion) {
     let source = r#"
@@ -12,8 +16,12 @@ fn bench_parser_simple(c: &mut Criterion) {
 
     c.bench_function("parser_simple", |b| {
         b.iter(|| {
-            let mut parser = Parser::new(black_box(source));
-            parser.parse()
+            let handler = Arc::new(CollectingDiagnosticHandler::new());
+            let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+            let mut lexer = Lexer::new(black_box(source), handler.clone(), &interner);
+            let tokens = lexer.tokenize().ok()?;
+            let mut parser = Parser::new(tokens, handler, &interner, &common_ids);
+            parser.parse().ok()
         })
     });
 }
@@ -37,8 +45,12 @@ fn bench_parser_class(c: &mut Criterion) {
 
     c.bench_function("parser_class", |b| {
         b.iter(|| {
-            let mut parser = Parser::new(black_box(source));
-            parser.parse()
+            let handler = Arc::new(CollectingDiagnosticHandler::new());
+            let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+            let mut lexer = Lexer::new(black_box(source), handler.clone(), &interner);
+            let tokens = lexer.tokenize().ok()?;
+            let mut parser = Parser::new(tokens, handler, &interner, &common_ids);
+            parser.parse().ok()
         })
     });
 }
@@ -77,8 +89,12 @@ fn bench_parser_interface(c: &mut Criterion) {
 
     c.bench_function("parser_interface", |b| {
         b.iter(|| {
-            let mut parser = Parser::new(black_box(source));
-            parser.parse()
+            let handler = Arc::new(CollectingDiagnosticHandler::new());
+            let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+            let mut lexer = Lexer::new(black_box(source), handler.clone(), &interner);
+            let tokens = lexer.tokenize().ok()?;
+            let mut parser = Parser::new(tokens, handler, &interner, &common_ids);
+            parser.parse().ok()
         })
     });
 }
@@ -100,8 +116,12 @@ fn bench_parser_size_scaling(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::from_parameter(size), &source, |b, s| {
             b.iter(|| {
-                let mut parser = Parser::new(black_box(s));
-                parser.parse()
+                let handler = Arc::new(CollectingDiagnosticHandler::new());
+                let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+                let mut lexer = Lexer::new(black_box(s), handler.clone(), &interner);
+                let tokens = lexer.tokenize().ok()?;
+                let mut parser = Parser::new(tokens, handler, &interner, &common_ids);
+                parser.parse().ok()
             })
         });
     }

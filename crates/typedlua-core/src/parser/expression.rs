@@ -126,13 +126,32 @@ impl Parser<'_> {
     }
 
     fn parse_logical_or(&mut self) -> Result<Expression, ParserError> {
-        let mut expr = self.parse_logical_and()?;
+        let mut expr = self.parse_null_coalesce()?;
 
         while self.match_token(&[TokenKind::Or]) {
-            let right = self.parse_logical_and()?;
+            let right = self.parse_null_coalesce()?;
             let span = expr.span.combine(&right.span);
             expr = Expression {
                 kind: ExpressionKind::Binary(BinaryOp::Or, Box::new(expr), Box::new(right)),
+                span,
+            };
+        }
+
+        Ok(expr)
+    }
+
+    fn parse_null_coalesce(&mut self) -> Result<Expression, ParserError> {
+        let mut expr = self.parse_logical_and()?;
+
+        while self.match_token(&[TokenKind::QuestionQuestion]) {
+            let right = self.parse_logical_and()?;
+            let span = expr.span.combine(&right.span);
+            expr = Expression {
+                kind: ExpressionKind::Binary(
+                    BinaryOp::NullCoalesce,
+                    Box::new(expr),
+                    Box::new(right),
+                ),
                 span,
             };
         }
@@ -402,6 +421,60 @@ impl Parser<'_> {
                         kind: ExpressionKind::Pipe(Box::new(expr), Box::new(right)),
                         span,
                     };
+                }
+                TokenKind::QuestionDot => {
+                    self.advance();
+                    match &self.current().kind {
+                        TokenKind::LeftBracket => {
+                            self.advance();
+                            let index = self.parse_expression()?;
+                            self.consume(TokenKind::RightBracket, "Expected ']' after index")?;
+                            let span = expr.span.combine(&index.span);
+                            expr = Expression {
+                                kind: ExpressionKind::OptionalIndex(
+                                    Box::new(expr),
+                                    Box::new(index),
+                                ),
+                                span,
+                            };
+                        }
+                        TokenKind::LeftParen => {
+                            self.advance();
+                            let arguments = self.parse_argument_list()?;
+                            let end_span = self.current_span();
+                            self.consume(TokenKind::RightParen, "Expected ')' after arguments")?;
+                            let span = expr.span.combine(&end_span);
+                            expr = Expression {
+                                kind: ExpressionKind::OptionalCall(Box::new(expr), arguments),
+                                span,
+                            };
+                        }
+                        TokenKind::ColonColon => {
+                            self.advance();
+                            let method = self.parse_identifier()?;
+                            self.consume(TokenKind::LeftParen, "Expected '(' after method name")?;
+                            let arguments = self.parse_argument_list()?;
+                            let end_span = self.current_span();
+                            self.consume(TokenKind::RightParen, "Expected ')' after arguments")?;
+                            let span = expr.span.combine(&end_span);
+                            expr = Expression {
+                                kind: ExpressionKind::OptionalMethodCall(
+                                    Box::new(expr),
+                                    method,
+                                    arguments,
+                                ),
+                                span,
+                            };
+                        }
+                        _ => {
+                            let member = self.parse_identifier()?;
+                            let span = expr.span.combine(&member.span);
+                            expr = Expression {
+                                kind: ExpressionKind::OptionalMember(Box::new(expr), member),
+                                span,
+                            };
+                        }
+                    }
                 }
                 _ => break,
             }
@@ -849,6 +922,7 @@ impl Parser<'_> {
     fn match_unary_op(&mut self) -> Option<UnaryOp> {
         let op = match &self.current().kind {
             TokenKind::Not => Some(UnaryOp::Not),
+            TokenKind::Bang => Some(UnaryOp::Not),
             TokenKind::Minus => Some(UnaryOp::Negate),
             TokenKind::Hash => Some(UnaryOp::Length),
             TokenKind::Tilde => Some(UnaryOp::BitwiseNot),

@@ -178,7 +178,15 @@ impl<'a> Lexer<'a> {
             }
             '?' => {
                 self.advance();
-                TokenKind::Question
+                if self.current() == '?' {
+                    self.advance();
+                    TokenKind::QuestionQuestion
+                } else if self.current() == '.' {
+                    self.advance();
+                    TokenKind::QuestionDot
+                } else {
+                    TokenKind::Question
+                }
             }
             '@' => {
                 self.advance();

@@ -122,6 +122,10 @@ impl<'a> Parser<'a> {
         std::mem::discriminant(&self.current().kind) == std::mem::discriminant(kind)
     }
 
+    fn nth_token_kind(&self, n: usize) -> Option<&TokenKind> {
+        self.tokens.get(self.position + n).map(|t| &t.kind)
+    }
+
     fn match_token(&mut self, kinds: &[TokenKind]) -> bool {
         for kind in kinds {
             if self.check(kind) {

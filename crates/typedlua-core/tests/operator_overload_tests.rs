@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use typedlua_core::codegen::CodeGenerator;
 use typedlua_core::config::CompilerOptions;
-use typedlua_core::diagnostics::CollectingDiagnosticHandler;
+use typedlua_core::diagnostics::{CollectingDiagnosticHandler, DiagnosticHandler, DiagnosticLevel};
 use typedlua_core::lexer::Lexer;
 use typedlua_core::parser::Parser;
 use typedlua_core::string_interner::StringInterner;
@@ -13,22 +13,35 @@ fn compile_and_check(source: &str) -> Result<String, String> {
 
     // Lex
     let mut lexer = Lexer::new(source, handler.clone(), &interner);
-    let tokens = lexer
-        .tokenize()
-        .map_err(|e| format!("Lexing failed: {:?}", e))?;
+    let tokens = match lexer.tokenize() {
+        Ok(t) => t,
+        Err(e) => return Err(format!("Lexing failed: {:?}", e)),
+    };
 
     // Parse
     let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-    let program = parser
-        .parse()
-        .map_err(|e| format!("Parsing failed: {:?}", e))?;
+    let program = match parser.parse() {
+        Ok(p) => p,
+        Err(e) => return Err(format!("Parsing failed: {:?}", e)),
+    };
 
     // Type check
     let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids)
         .with_options(CompilerOptions::default());
-    type_checker
-        .check_program(&program)
-        .map_err(|e| e.message)?;
+    if let Err(e) = type_checker.check_program(&program) {
+        return Err(format!("Type checking failed: {}", e.message));
+    }
+
+    // Check for diagnostics
+    let errors: Vec<_> = handler
+        .get_diagnostics()
+        .iter()
+        .filter(|d| d.level == DiagnosticLevel::Error)
+        .map(|d| d.message.clone())
+        .collect();
+    if !errors.is_empty() {
+        return Err(format!("Type checking errors: {:?}", errors));
+    }
 
     // Generate code
     let mut codegen = CodeGenerator::new(&interner);
@@ -66,6 +79,7 @@ fn test_operator_add() {
     let result = compile_and_check(source);
     assert!(result.is_ok(), "Failed to compile: {:?}", result.err());
     let output = result.unwrap();
+    eprintln!("OUTPUT:\n{}", output);
 
     // Verify metamethod is generated
     assert!(
@@ -73,7 +87,7 @@ fn test_operator_add() {
         "Should generate __add metamethod"
     );
     assert!(
-        output.contains("function(self, other)"),
+        output.contains("function Vector.__add(self, other)"),
         "Should have self and other parameters"
     );
 }
@@ -269,8 +283,13 @@ fn test_operator_new_index() {
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Failed to compile: {:?}", result.err());
-    let output = result.unwrap();
+    let output = match result {
+        Ok(o) => o,
+        Err(e) => {
+            panic!("Failed to compile: {:?}", e);
+        }
+    };
+    eprintln!("OUTPUT:\n{}", output);
 
     assert!(
         output.contains("Matrix.__newindex"),

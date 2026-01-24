@@ -39,6 +39,11 @@ enum ClassMemberKind {
     Setter {
         parameter_type: Type,
     },
+    Operator {
+        operator: OperatorKind,
+        parameters: Vec<Parameter>,
+        return_type: Option<Type>,
+    },
 }
 
 /// Context for tracking the current class during type checking
@@ -130,8 +135,8 @@ impl<'a> TypeChecker<'a> {
     /// Create a TypeChecker with module support for multi-module compilation
     pub fn new_with_module_support(
         diagnostic_handler: Arc<dyn DiagnosticHandler>,
-    interner: &'a crate::string_interner::StringInterner,
-    common: &'a crate::string_interner::CommonIdentifiers,
+        interner: &'a crate::string_interner::StringInterner,
+        common: &'a crate::string_interner::CommonIdentifiers,
         registry: Arc<crate::module_resolver::ModuleRegistry>,
         module_id: crate::module_resolver::ModuleId,
         resolver: Arc<crate::module_resolver::ModuleResolver>,
@@ -266,7 +271,12 @@ impl<'a> TypeChecker<'a> {
     ) -> Result<(), TypeCheckError> {
         match pattern {
             Pattern::Identifier(ident) => {
-                let symbol = Symbol::new(self.interner.resolve(ident.node).to_string(), kind, typ, span);
+                let symbol = Symbol::new(
+                    self.interner.resolve(ident.node).to_string(),
+                    kind,
+                    typ,
+                    span,
+                );
                 self.symbol_table
                     .declare(symbol)
                     .map_err(|e| TypeCheckError::new(e, span))?;
@@ -284,8 +294,12 @@ impl<'a> TypeChecker<'a> {
                                 // Rest gets array type
                                 let array_type =
                                     Type::new(TypeKind::Array(elem_type.clone()), span);
-                                let symbol =
-                                    Symbol::new(self.interner.resolve(ident.node).to_string(), kind, array_type, span);
+                                let symbol = Symbol::new(
+                                    self.interner.resolve(ident.node).to_string(),
+                                    kind,
+                                    array_type,
+                                    span,
+                                );
                                 self.symbol_table
                                     .declare(symbol)
                                     .map_err(|e| TypeCheckError::new(e, span))?;
@@ -334,8 +348,12 @@ impl<'a> TypeChecker<'a> {
                             self.declare_pattern(value_pattern, prop_type, kind, span)?;
                         } else {
                             // Shorthand: { x } means { x: x }
-                            let symbol =
-                                Symbol::new(self.interner.resolve(prop_pattern.key.node).to_string(), kind, prop_type, span);
+                            let symbol = Symbol::new(
+                                self.interner.resolve(prop_pattern.key.node).to_string(),
+                                kind,
+                                prop_type,
+                                span,
+                            );
                             self.symbol_table
                                 .declare(symbol)
                                 .map_err(|e| TypeCheckError::new(e, span))?;
@@ -433,7 +451,10 @@ impl<'a> TypeChecker<'a> {
                 // Type parameters are treated as local types in the function scope
                 // We register them as type aliases for now
                 self.type_env
-                    .register_type_alias(self.interner.resolve(type_param.name.node).to_string(), param_type)
+                    .register_type_alias(
+                        self.interner.resolve(type_param.name.node).to_string(),
+                        param_type,
+                    )
                     .map_err(|e| TypeCheckError::new(e, type_param.span))?;
             }
         }
@@ -903,7 +924,10 @@ impl<'a> TypeChecker<'a> {
         };
 
         self.type_env
-            .register_type_alias(self.interner.resolve(enum_decl.name.node).to_string(), enum_type)
+            .register_type_alias(
+                self.interner.resolve(enum_decl.name.node).to_string(),
+                enum_type,
+            )
             .map_err(|e| TypeCheckError::new(e, enum_decl.span))?;
 
         Ok(())
@@ -970,7 +994,10 @@ impl<'a> TypeChecker<'a> {
                 );
 
                 self.type_env
-                    .register_type_alias(self.interner.resolve(type_param.name.node).to_string(), param_type)
+                    .register_type_alias(
+                        self.interner.resolve(type_param.name.node).to_string(),
+                        param_type,
+                    )
                     .map_err(|e| TypeCheckError::new(e, type_param.span))?;
             }
         }
@@ -1030,6 +1057,7 @@ impl<'a> TypeChecker<'a> {
                     ClassMember::Getter(g) => &g.name.node == param_name,
                     ClassMember::Setter(s) => &s.name.node == param_name,
                     ClassMember::Constructor(_) => false,
+                    ClassMember::Operator(_) => false,
                 }) {
                     return Err(TypeCheckError::new(
                         format!(
@@ -1130,16 +1158,34 @@ impl<'a> TypeChecker<'a> {
                 ClassMember::Constructor(_) => {
                     // Constructor doesn't have access modifiers for member access
                 }
+                ClassMember::Operator(op) => {
+                    let op_name = self.operator_kind_name(&op.operator);
+                    member_infos.push(ClassMemberInfo {
+                        name: op_name,
+                        access: op.access.unwrap_or(AccessModifier::Public),
+                        _is_static: false,
+                        kind: ClassMemberKind::Operator {
+                            operator: op.operator,
+                            parameters: op.parameters.clone(),
+                            return_type: op.return_type.clone(),
+                        },
+                        is_final: false,
+                    });
+                }
             }
         }
 
         // Store class members for access checking
-        self.class_members
-            .insert(self.interner.resolve(class_decl.name.node).to_string(), member_infos);
+        self.class_members.insert(
+            self.interner.resolve(class_decl.name.node).to_string(),
+            member_infos,
+        );
 
         // Store whether the class is final
-        self.final_classes
-            .insert(self.interner.resolve(class_decl.name.node).to_string(), class_decl.is_final);
+        self.final_classes.insert(
+            self.interner.resolve(class_decl.name.node).to_string(),
+            class_decl.is_final,
+        );
 
         // Set current class context
         let parent = class_decl.extends.as_ref().and_then(|ext| {
@@ -1195,6 +1241,9 @@ impl<'a> TypeChecker<'a> {
                 }
                 ClassMember::Setter(setter) => {
                     self.check_class_setter(setter)?;
+                }
+                ClassMember::Operator(op) => {
+                    self.check_operator_declaration(op)?;
                 }
             }
         }
@@ -1428,6 +1477,30 @@ impl<'a> TypeChecker<'a> {
         // Enter constructor scope
         self.symbol_table.enter_scope();
 
+        // Declare 'self' parameter (implicit in constructors)
+        if let Some(class_ctx) = &self.current_class {
+            let self_type = Type::new(
+                TypeKind::Reference(crate::ast::types::TypeReference {
+                    name: crate::ast::Spanned::new(
+                        self.interner.intern(&class_ctx.name),
+                        ctor.span,
+                    ),
+                    type_arguments: None,
+                    span: ctor.span,
+                }),
+                ctor.span,
+            );
+            let symbol = crate::typechecker::symbol_table::Symbol::new(
+                "self".to_string(),
+                crate::typechecker::symbol_table::SymbolKind::Parameter,
+                self_type,
+                ctor.span,
+            );
+            self.symbol_table
+                .declare(symbol)
+                .map_err(|e| TypeCheckError::new(e, ctor.span))?;
+        }
+
         // Declare parameters
         for param in &ctor.parameters {
             let param_type = param.type_annotation.clone().unwrap_or_else(|| {
@@ -1503,6 +1576,32 @@ impl<'a> TypeChecker<'a> {
         // Enter method scope
         self.symbol_table.enter_scope();
 
+        // Declare 'self' parameter for non-static methods
+        if !method.is_static {
+            if let Some(class_ctx) = &self.current_class {
+                let self_type = Type::new(
+                    TypeKind::Reference(crate::ast::types::TypeReference {
+                        name: crate::ast::Spanned::new(
+                            self.interner.intern(&class_ctx.name),
+                            method.span,
+                        ),
+                        type_arguments: None,
+                        span: method.span,
+                    }),
+                    method.span,
+                );
+                let symbol = crate::typechecker::symbol_table::Symbol::new(
+                    "self".to_string(),
+                    crate::typechecker::symbol_table::SymbolKind::Parameter,
+                    self_type,
+                    method.span,
+                );
+                self.symbol_table
+                    .declare(symbol)
+                    .map_err(|e| TypeCheckError::new(e, method.span))?;
+            }
+        }
+
         // Register type parameters if generic
         if let Some(type_params) = &method.type_parameters {
             for type_param in type_params {
@@ -1516,7 +1615,10 @@ impl<'a> TypeChecker<'a> {
                 );
 
                 self.type_env
-                    .register_type_alias(self.interner.resolve(type_param.name.node).to_string(), param_type)
+                    .register_type_alias(
+                        self.interner.resolve(type_param.name.node).to_string(),
+                        param_type,
+                    )
                     .map_err(|e| TypeCheckError::new(e, type_param.span))?;
             }
         }
@@ -1561,6 +1663,32 @@ impl<'a> TypeChecker<'a> {
         // Enter getter scope
         self.symbol_table.enter_scope();
 
+        // Declare 'self' parameter for non-static getters
+        if !getter.is_static {
+            if let Some(class_ctx) = &self.current_class {
+                let self_type = Type::new(
+                    TypeKind::Reference(crate::ast::types::TypeReference {
+                        name: crate::ast::Spanned::new(
+                            self.interner.intern(&class_ctx.name),
+                            getter.span,
+                        ),
+                        type_arguments: None,
+                        span: getter.span,
+                    }),
+                    getter.span,
+                );
+                let symbol = crate::typechecker::symbol_table::Symbol::new(
+                    "self".to_string(),
+                    crate::typechecker::symbol_table::SymbolKind::Parameter,
+                    self_type,
+                    getter.span,
+                );
+                self.symbol_table
+                    .declare(symbol)
+                    .map_err(|e| TypeCheckError::new(e, getter.span))?;
+            }
+        }
+
         // Set current function return type
         let old_return_type = self.current_function_return_type.clone();
         self.current_function_return_type = Some(getter.return_type.clone());
@@ -1585,6 +1713,32 @@ impl<'a> TypeChecker<'a> {
         // Enter setter scope
         self.symbol_table.enter_scope();
 
+        // Declare 'self' parameter for non-static setters
+        if !setter.is_static {
+            if let Some(class_ctx) = &self.current_class {
+                let self_type = Type::new(
+                    TypeKind::Reference(crate::ast::types::TypeReference {
+                        name: crate::ast::Spanned::new(
+                            self.interner.intern(&class_ctx.name),
+                            setter.span,
+                        ),
+                        type_arguments: None,
+                        span: setter.span,
+                    }),
+                    setter.span,
+                );
+                let symbol = crate::typechecker::symbol_table::Symbol::new(
+                    "self".to_string(),
+                    crate::typechecker::symbol_table::SymbolKind::Parameter,
+                    self_type,
+                    setter.span,
+                );
+                self.symbol_table
+                    .declare(symbol)
+                    .map_err(|e| TypeCheckError::new(e, setter.span))?;
+            }
+        }
+
         // Declare the parameter
         let param_type = setter.parameter.type_annotation.clone().unwrap_or_else(|| {
             Type::new(
@@ -1607,6 +1761,152 @@ impl<'a> TypeChecker<'a> {
         self.symbol_table.exit_scope();
 
         Ok(())
+    }
+
+    /// Check operator declaration
+    fn check_operator_declaration(
+        &mut self,
+        op: &OperatorDeclaration,
+    ) -> Result<(), TypeCheckError> {
+        if op.operator == OperatorKind::NewIndex {
+            if op.parameters.len() != 2 {
+                return Err(TypeCheckError::new(
+                    "operator []= must have exactly 2 parameters",
+                    op.span,
+                ));
+            }
+        } else if op.parameters.is_empty() {
+            if !matches!(op.operator, OperatorKind::Subtract | OperatorKind::Length) {
+                return Err(TypeCheckError::new(
+                    "Only unary minus (-) and length (#) operators can have 0 parameters",
+                    op.span,
+                ));
+            }
+        } else if op.parameters.len() == 1 {
+            if matches!(op.operator, OperatorKind::Subtract | OperatorKind::Length) {
+                return Err(TypeCheckError::new(
+                    "Binary operator must have exactly 1 parameter",
+                    op.span,
+                ));
+            }
+        } else {
+            return Err(TypeCheckError::new(
+                "Operator must have 0, 1, or 2 parameters",
+                op.span,
+            ));
+        }
+
+        match op.operator {
+            OperatorKind::Equal | OperatorKind::NotEqual => {
+                if let Some(ref ret_type) = op.return_type {
+                    if !self.is_boolean_type(ret_type) {
+                        return Err(TypeCheckError::new(
+                            format!(
+                                "Operator '{}' must return 'boolean'",
+                                self.operator_kind_name(&op.operator)
+                            ),
+                            ret_type.span,
+                        ));
+                    }
+                }
+            }
+            OperatorKind::LessThan
+            | OperatorKind::LessThanOrEqual
+            | OperatorKind::GreaterThan
+            | OperatorKind::GreaterThanOrEqual => {
+                if let Some(ref ret_type) = op.return_type {
+                    if !self.is_boolean_type(ret_type) {
+                        return Err(TypeCheckError::new(
+                            format!(
+                                "Operator '{}' must return 'boolean'",
+                                self.operator_kind_name(&op.operator)
+                            ),
+                            ret_type.span,
+                        ));
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        self.symbol_table.enter_scope();
+
+        if let Some(class_ctx) = &self.current_class {
+            let self_type = Type::new(
+                TypeKind::Reference(crate::ast::types::TypeReference {
+                    name: crate::ast::Spanned::new(self.interner.intern(&class_ctx.name), op.span),
+                    type_arguments: None,
+                    span: op.span,
+                }),
+                op.span,
+            );
+            let symbol = crate::typechecker::symbol_table::Symbol::new(
+                "self".to_string(),
+                crate::typechecker::symbol_table::SymbolKind::Parameter,
+                self_type,
+                op.span,
+            );
+            self.symbol_table
+                .declare(symbol)
+                .map_err(|e| TypeCheckError::new(e, op.span))?;
+        }
+
+        for param in &op.parameters {
+            let param_type = param.type_annotation.clone().unwrap_or_else(|| {
+                Type::new(TypeKind::Primitive(PrimitiveType::Unknown), param.span)
+            });
+
+            self.declare_pattern(
+                &param.pattern,
+                param_type,
+                SymbolKind::Parameter,
+                param.span,
+            )?;
+        }
+
+        let old_return_type = self.current_function_return_type.clone();
+        self.current_function_return_type = op.return_type.clone();
+
+        self.check_block(&op.body)?;
+
+        self.current_function_return_type = old_return_type;
+
+        self.symbol_table.exit_scope();
+
+        Ok(())
+    }
+
+    fn is_boolean_type(&self, typ: &Type) -> bool {
+        matches!(typ.kind, TypeKind::Primitive(PrimitiveType::Boolean))
+    }
+
+    fn operator_kind_name(&self, op: &OperatorKind) -> String {
+        match op {
+            OperatorKind::Add => "__add".to_string(),
+            OperatorKind::Subtract => "__sub".to_string(),
+            OperatorKind::Multiply => "__mul".to_string(),
+            OperatorKind::Divide => "__div".to_string(),
+            OperatorKind::Modulo => "__mod".to_string(),
+            OperatorKind::Power => "__pow".to_string(),
+            OperatorKind::Concatenate => "__concat".to_string(),
+            OperatorKind::FloorDivide => "__idiv".to_string(),
+            OperatorKind::Equal => "__eq".to_string(),
+            OperatorKind::NotEqual => "__eq".to_string(),
+            OperatorKind::LessThan => "__lt".to_string(),
+            OperatorKind::LessThanOrEqual => "__le".to_string(),
+            OperatorKind::GreaterThan => "__lt".to_string(),
+            OperatorKind::GreaterThanOrEqual => "__le".to_string(),
+            OperatorKind::BitwiseAnd => "__band".to_string(),
+            OperatorKind::BitwiseOr => "__bor".to_string(),
+            OperatorKind::BitwiseXor => "__bxor".to_string(),
+            OperatorKind::ShiftLeft => "__shl".to_string(),
+            OperatorKind::ShiftRight => "__shr".to_string(),
+            OperatorKind::Index => "__index".to_string(),
+            OperatorKind::NewIndex => "__newindex".to_string(),
+            OperatorKind::Call => "__call".to_string(),
+            OperatorKind::UnaryMinus => "__unm".to_string(),
+            OperatorKind::Length => "__len".to_string(),
+        }
     }
 
     /// Check that an override method properly overrides a parent method
@@ -1824,6 +2124,33 @@ impl<'a> TypeChecker<'a> {
                 self.infer_index_type(&obj_type, span)
             }
 
+            ExpressionKind::OptionalMember(object, member) => {
+                let obj_type = self.infer_expression_type(object)?;
+                let member_name = self.interner.resolve(member.node);
+                let member_type = self.infer_member_type(&obj_type, &member_name, span)?;
+                self.make_optional_type(member_type, span)
+            }
+
+            ExpressionKind::OptionalIndex(object, index) => {
+                let obj_type = self.infer_expression_type(object)?;
+                let _index_type = self.infer_expression_type(index)?;
+                let indexed_type = self.infer_index_type(&obj_type, span)?;
+                self.make_optional_type(indexed_type, span)
+            }
+
+            ExpressionKind::OptionalCall(callee, args) => {
+                let callee_type = self.infer_expression_type(callee)?;
+                let return_type = self.infer_call_type(&callee_type, args, span)?;
+                self.make_optional_type(return_type, span)
+            }
+
+            ExpressionKind::OptionalMethodCall(object, method, args) => {
+                let obj_type = self.infer_expression_type(object)?;
+                let method_name = self.interner.resolve(method.node);
+                let method_type = self.infer_method_type(&obj_type, &method_name, args, span)?;
+                self.make_optional_type(method_type, span)
+            }
+
             ExpressionKind::Array(elements) => {
                 if elements.is_empty() {
                     // Empty array has unknown element type
@@ -2036,8 +2363,8 @@ impl<'a> TypeChecker<'a> {
     fn infer_binary_op_type(
         &self,
         op: BinaryOp,
-        _left: &Type,
-        _right: &Type,
+        left: &Type,
+        right: &Type,
         span: Span,
     ) -> Result<Type, TypeCheckError> {
         match op {
@@ -2048,11 +2375,9 @@ impl<'a> TypeChecker<'a> {
             | BinaryOp::Modulo
             | BinaryOp::Power
             | BinaryOp::IntegerDivide => {
-                // Arithmetic operations return number
                 Ok(Type::new(TypeKind::Primitive(PrimitiveType::Number), span))
             }
             BinaryOp::Concatenate => {
-                // String concatenation returns string
                 Ok(Type::new(TypeKind::Primitive(PrimitiveType::String), span))
             }
             BinaryOp::Equal
@@ -2062,22 +2387,115 @@ impl<'a> TypeChecker<'a> {
             | BinaryOp::GreaterThan
             | BinaryOp::GreaterThanOrEqual
             | BinaryOp::Instanceof => {
-                // Comparison operations return boolean
                 Ok(Type::new(TypeKind::Primitive(PrimitiveType::Boolean), span))
             }
             BinaryOp::And | BinaryOp::Or => {
-                // Logical operations can return either operand type in Lua
-                // For now, return unknown
                 Ok(Type::new(TypeKind::Primitive(PrimitiveType::Unknown), span))
             }
+            BinaryOp::NullCoalesce => self.infer_null_coalesce_type(left, right, span),
             BinaryOp::BitwiseAnd
             | BinaryOp::BitwiseOr
             | BinaryOp::BitwiseXor
             | BinaryOp::ShiftLeft
             | BinaryOp::ShiftRight => {
-                // Bitwise operations return number
                 Ok(Type::new(TypeKind::Primitive(PrimitiveType::Number), span))
             }
+        }
+    }
+
+    /// Infer type of null coalescing operation (left ?? right)
+    /// Result type is: left_without_nil | right_type
+    fn infer_null_coalesce_type(
+        &self,
+        left: &Type,
+        right: &Type,
+        span: Span,
+    ) -> Result<Type, TypeCheckError> {
+        let left_without_nil = self.remove_nil_from_type(left, span)?;
+        let result = Type::new(TypeKind::Union(vec![left_without_nil, right.clone()]), span);
+        Ok(result)
+    }
+
+    /// Remove nil from a type
+    fn remove_nil_from_type(&self, typ: &Type, span: Span) -> Result<Type, TypeCheckError> {
+        match &typ.kind {
+            TypeKind::Union(types) => {
+                let non_nil_types: Vec<Type> = types
+                    .iter()
+                    .filter(|t| !self.is_nil_type(t))
+                    .cloned()
+                    .collect();
+                if non_nil_types.is_empty() {
+                    Ok(Type::new(TypeKind::Primitive(PrimitiveType::Never), span))
+                } else if non_nil_types.len() == 1 {
+                    Ok(non_nil_types[0].clone())
+                } else {
+                    Ok(Type::new(TypeKind::Union(non_nil_types), span))
+                }
+            }
+            _ => {
+                if self.is_nil_type(typ) {
+                    Ok(Type::new(TypeKind::Primitive(PrimitiveType::Never), span))
+                } else {
+                    Ok(typ.clone())
+                }
+            }
+        }
+    }
+
+    /// Check if a type is nil
+    fn is_nil_type(&self, typ: &Type) -> bool {
+        match &typ.kind {
+            TypeKind::Primitive(PrimitiveType::Nil) => true,
+            TypeKind::Nullable(inner) => self.is_nil_type(inner),
+            _ => false,
+        }
+    }
+
+    /// Make a type optional by adding nil to the union
+    fn make_optional_type(&self, typ: Type, span: Span) -> Result<Type, TypeCheckError> {
+        let nil_type = Type::new(TypeKind::Primitive(PrimitiveType::Nil), span);
+        Ok(Type::new(TypeKind::Union(vec![typ, nil_type]), span))
+    }
+
+    /// Infer type of a method call on an object
+    fn infer_method_type(
+        &self,
+        obj_type: &Type,
+        method_name: &str,
+        _args: &[Argument],
+        span: Span,
+    ) -> Result<Type, TypeCheckError> {
+        // Look up the method in the object type
+        match &obj_type.kind {
+            TypeKind::Object(obj) => {
+                for member in &obj.members {
+                    if let ObjectTypeMember::Method(method) = member {
+                        if self.interner.resolve(method.name.node) == method_name {
+                            // Return the return type of the method
+                            return Ok(method.return_type.clone());
+                        }
+                    }
+                }
+                // Method not found - return unknown
+                Ok(Type::new(TypeKind::Primitive(PrimitiveType::Unknown), span))
+            }
+            TypeKind::Reference(type_ref) => {
+                let type_name = self.interner.resolve(type_ref.name.node);
+                if let Some(class_members) = self.class_members.get(&type_name) {
+                    for member in class_members {
+                        if member.name == method_name {
+                            if let ClassMemberKind::Method { return_type, .. } = &member.kind {
+                                return Ok(return_type.clone().unwrap_or_else(|| {
+                                    Type::new(TypeKind::Primitive(PrimitiveType::Unknown), span)
+                                }));
+                            }
+                        }
+                    }
+                }
+                Ok(Type::new(TypeKind::Primitive(PrimitiveType::Unknown), span))
+            }
+            _ => Ok(Type::new(TypeKind::Primitive(PrimitiveType::Unknown), span)),
         }
     }
 
@@ -2989,8 +3407,7 @@ impl<'a> TypeChecker<'a> {
                             }
                             Statement::Function(func_decl) => {
                                 let func_name = self.interner.resolve(func_decl.name.node);
-                                if let Some(symbol) = self.symbol_table.lookup(&func_name)
-                                {
+                                if let Some(symbol) = self.symbol_table.lookup(&func_name) {
                                     exports.add_named(
                                         func_name,
                                         ExportedSymbol::new(symbol.clone(), false),
@@ -2999,9 +3416,7 @@ impl<'a> TypeChecker<'a> {
                             }
                             Statement::Class(class_decl) => {
                                 let class_name = self.interner.resolve(class_decl.name.node);
-                                if let Some(symbol) =
-                                    self.symbol_table.lookup(&class_name)
-                                {
+                                if let Some(symbol) = self.symbol_table.lookup(&class_name) {
                                     exports.add_named(
                                         class_name,
                                         ExportedSymbol::new(symbol.clone(), false),
@@ -3010,9 +3425,7 @@ impl<'a> TypeChecker<'a> {
                             }
                             Statement::TypeAlias(type_alias) => {
                                 let alias_name = self.interner.resolve(type_alias.name.node);
-                                if let Some(symbol) =
-                                    self.symbol_table.lookup(&alias_name)
-                                {
+                                if let Some(symbol) = self.symbol_table.lookup(&alias_name) {
                                     exports.add_named(
                                         alias_name,
                                         ExportedSymbol::new(symbol.clone(), true),
@@ -3020,10 +3433,9 @@ impl<'a> TypeChecker<'a> {
                                 }
                             }
                             Statement::Interface(interface_decl) => {
-                                let interface_name = self.interner.resolve(interface_decl.name.node);
-                                if let Some(symbol) =
-                                    self.symbol_table.lookup(&interface_name)
-                                {
+                                let interface_name =
+                                    self.interner.resolve(interface_decl.name.node);
+                                if let Some(symbol) = self.symbol_table.lookup(&interface_name) {
                                     exports.add_named(
                                         interface_name,
                                         ExportedSymbol::new(symbol.clone(), true),

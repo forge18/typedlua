@@ -76,6 +76,7 @@ pub enum ClassMember {
     Method(MethodDeclaration),
     Getter(GetterDeclaration),
     Setter(SetterDeclaration),
+    Operator(OperatorDeclaration),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -144,6 +145,45 @@ pub struct SetterDeclaration {
     pub is_static: bool,
     pub name: Ident,
     pub parameter: Parameter,
+    pub body: Block,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OperatorKind {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Modulo,
+    Power,
+    Concatenate,
+    FloorDivide,
+    Equal,
+    NotEqual,
+    LessThan,
+    LessThanOrEqual,
+    GreaterThan,
+    GreaterThanOrEqual,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    ShiftLeft,
+    ShiftRight,
+    Index,
+    NewIndex,
+    Call,
+    UnaryMinus,
+    Length,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperatorDeclaration {
+    pub decorators: Vec<Decorator>,
+    pub access: Option<AccessModifier>,
+    pub operator: OperatorKind,
+    pub parameters: Vec<Parameter>,
+    pub return_type: Option<Type>,
     pub body: Block,
     pub span: Span,
 }

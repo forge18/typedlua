@@ -22,30 +22,29 @@ TypedLua brings static type checking to Lua while maintaining its simplicity and
 
 ## Project Status
 
-**Phase 0: Foundation - Complete ✅**
+**Current Status: Beta**
 
-The compiler foundation is built and ready:
-- ✅ Cargo workspace with 3 crates (core, cli, lsp)
-- ✅ Dependency injection architecture
-- ✅ Configuration system (tlconfig.yaml)
-- ✅ Diagnostic and error handling
-- ✅ CI/CD pipeline with tests, formatting, and linting
-- ✅ 21 passing tests with full code coverage
+The compiler is feature-complete and ready for testing:
 
-**Next: Phase 1 - Lexer & Parser** (In Progress)
+- ✅ Full lexer with 40+ token types, template strings, string interning
+- ✅ Complete parser with 15 statement types, 13 expression kinds, error recovery
+- ✅ Type checker with generics, narrowing, 12 utility types, decorators
+- ✅ Code generator targeting Lua 5.1-5.4 with source maps and bundling
+- ✅ CLI with watch mode, parallel compilation, configuration files
+- ✅ LSP with hover, completion, go-to-definition, references, rename, formatting
+- ✅ VS Code extension
+
+**Remaining Work: Polish & Release** (In Progress)
 
 ## Installation
 
-*Coming soon - the compiler is under active development*
-
 ```bash
-# Install via cargo (when released)
-cargo install typedlua
-
-# Or build from source
+# Build from source
 git clone https://github.com/forge18/typed-lua
 cd typed-lua
 cargo build --release
+
+# The binary will be at target/release/typedlua
 ```
 
 ## Quick Start
@@ -200,21 +199,26 @@ See [docs/LANGUAGE_FEATURES.md](docs/LANGUAGE_FEATURES.md) for detailed document
 
 ## Roadmap
 
+### Completed
+
 - [x] **Phase 0: Foundation** - Project setup, DI, configuration, CI/CD
-- [ ] **Phase 1: Lexer & Parser** - Tokenization and AST construction
-- [ ] **Phase 2: Type System** - Type checking and inference
-- [ ] **Phase 3: Code Generation** - Lua output with source maps
-- [ ] **Phase 4: CLI** - Command-line interface and watch mode
-- [ ] **Phase 5: Advanced Features** - Generics, utility types, narrowing
-- [ ] **Phase 6: OOP** - Classes, inheritance, access modifiers
-- [ ] **Phase 7: FP** - Pattern matching, destructuring, pipe operators
-- [ ] **Phase 8: Decorators** - Decorator syntax and built-ins
-- [ ] **Phase 9: LSP** - Full language server with VS Code extension
-- [ ] **Phase 10: Standard Library** - Type definitions for Lua stdlib
-- [ ] **Phase 11: Polish** - Performance optimization, error messages
+- [x] **Phase 1: Lexer & Parser** - Tokenization and AST construction
+- [x] **Phase 2: Type System** - Type checking and inference
+- [x] **Phase 3: Code Generation** - Lua output with source maps
+- [x] **Phase 4: CLI** - Command-line interface and watch mode
+- [x] **Phase 5: Advanced Features** - Generics, utility types, narrowing
+- [x] **Phase 6: OOP** - Classes, inheritance, access modifiers
+- [x] **Phase 7: FP** - Pattern matching, destructuring, pipe operators
+- [x] **Phase 8: Decorators** - Decorator syntax and built-ins
+- [x] **Phase 9: LSP** - Full language server with VS Code extension
+- [x] **Phase 10: Standard Library** - Type definitions for Lua stdlib
+
+### In Progress
+
+- [ ] **Phase 11: Polish** - Performance optimization, incremental compilation, error messages
 - [ ] **Phase 12: Release** - v1.0.0 launch
 
-See [TODO.md](TODO.md) for detailed progress tracking.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed implementation status.
 
 ## Contributing
 
@@ -243,6 +247,6 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ---
 
-**Status:** 🚧 Under Active Development - Phase 0 Complete
+**Status:** 🚀 Beta - Core Features Complete, Polishing for v1.0
 
 Built with ❤️ by the TypedLua team

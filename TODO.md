@@ -8,57 +8,143 @@
 
 ### 1.4 Null Coalescing Operator (`??`)
 
-**Status:** Complete (including O2 optimization) | **Model:** Sonnet
+**Status:** IMPLEMENTED | **Model:** Sonnet
 
-- [x] Add `NullCoalesce` variant to `BinaryOp` enum in ast/expression.rs (already existed)
-- [x] Lexer: Parse `??` token (and `?.` for safe navigation)
+- [x] Add `NullCoalesce` variant to `BinaryOp` enum in ast/expression.rs
+- [x] Lexer: Ensure `??` token exists (TokenKind::QuestionQuestion)
 - [x] Parser: Parse `??` with correct precedence (lower than comparison, higher than `or`)
+- [x] Parser: Map `TokenKind::QuestionQuestion` to `BinaryOp::NullCoalesce` in binary expression parsing
 - [x] Type checker: Type left operand as any type, right operand compatible with non-nil version of left
+- [x] Type checker: Result type is union of left (without nil) and right type
 - [x] Codegen: Simple form `(a ~= nil and a or b)` for identifiers and simple member access
 - [x] Codegen: IIFE form for complex expressions (avoid double evaluation)
-- [x] Codegen: O2 optimization - skip nil check for guaranteed non-nil expressions (literals, objects, arrays, new expressions)
-- [x] Tests: null_coalescing_tests.rs (24/24 pass)
-- [x] Tests: null_coalescing_iife_tests.rs (15/15 pass)
+- [x] Codegen: Handle member access correctly in simple form
+- [ ] Codegen: O2 optimization - skip nil check for guaranteed non-nil expressions (literals, objects, arrays, new expressions) - Deferred to O2 implementation
+- [x] Remove `#[ignore]` from tests in null_coalescing_tests.rs
+- [x] Remove `#[ignore]` from tests in null_coalescing_iife_tests.rs (removed cfg flag, O2 tests marked with #[ignore])
+- [x] Fix and enable all tests
 
 ---
 
 ### 1.5 Safe Navigation Operator (`?.`)
 
-**Status:** Implementation completed but blocked by StringId migration | **Model:** Sonnet
+**Status:** IMPLEMENTED | **Model:** Sonnet
 
-- [x] Add `OptionalMember`, `OptionalIndex`, `OptionalCall`, `OptionalMethodCall` expression kinds to AST
-- [x] Parser: Parse `?.` as optional member access
-- [x] Parser: Parse `?.[` as optional index access  
-- [x] Parser: Parse `?.method()` as optional method call
-- [x] Parser: Parse `?.()` as optional function call
-- [x] Type checker: If receiver is `T | nil`, result is `PropertyType | nil`
-- [x] Type checker: Implement `make_optional_type()` helper for creating `T | nil` union types
-- [x] Type checker: Implement `infer_method_type()` for method call type inference
-- [x] Type checker: Implement `check_call_arguments()` for argument compatibility checking
-- [x] Codegen: IIFE form for long chains (3+ levels)
-- [x] Codegen: Simple `and` chaining for short chains (optimization)
-- [x] Codegen: Implement `is_simple_expression()` to determine optimization strategy
-- [x] Codegen: Generate optimized code for all optional access patterns
-- [x] Fix test compilation: safe_navigation_tests.rs
+**AST Changes:**
+
+- [x] Add `OptionalMember` variant to `ExpressionKind` enum (object, property_name, span)
+- [x] Add `OptionalIndex` variant to `ExpressionKind` enum (object, index, span)
+- [x] Add `OptionalCall` variant to `ExpressionKind` enum (callee, arguments, span)
+- [x] Add `OptionalMethodCall` variant to `ExpressionKind` enum (object, method_name, arguments, span)
+
+**Lexer:**
+
+- [x] Verify `TokenKind::QuestionDot` exists for `?.` token
+
+**Parser:**
+
+- [x] Parse `?.` as optional member access in postfix expression handling
+- [x] Parse `?.[` as optional index access (check for `[` after `?.`)
+- [x] Parse `?.identifier()` as optional method call
+- [x] Parse `?.()` as optional function call
+- [x] Handle precedence correctly (same as regular member access)
+
+**Type Checker:**
+
+- [x] Type `OptionalMember`: If receiver is `T | nil`, result is `PropertyType | nil`
+- [x] Type `OptionalIndex`: If receiver is `T | nil`, result is `IndexedType | nil`
+- [x] Type `OptionalCall`: If callee is `T | nil`, result is `ReturnType | nil`
+- [x] Type `OptionalMethodCall`: Combine method lookup with optional receiver
+- [x] Implement `make_optional_type()` helper for creating `T | nil` union types
+- [x] Implement `infer_method_type()` for method call type inference
+
+**Code Generation:**
+
+- [x] Implement `is_simple_expression()` to determine if IIFE needed
+- [x] Codegen for `OptionalMember`: Simple `and` chaining for short chains (1-2 levels)
+- [x] Codegen for `OptionalMember`: IIFE form for long chains (3+ levels)
+- [x] Codegen for `OptionalIndex`: Similar strategy (simple vs IIFE)
+- [x] Codegen for `OptionalCall`: Handle nil-safe function calls
+- [x] Codegen for `OptionalMethodCall`: Combine member access + call
+- [x] Generate optimized code for all optional access patterns
+
+**Testing:**
+
+- [x] Remove `#![cfg(feature = "unimplemented")]` from safe_navigation_tests.rs
+- [x] Fix and enable all tests (26 pass, 2 ignored for O2 optimization)
 
 **Test file:** safe_navigation_tests.rs
+
+**O2 Optimizations Deferred:**
+- [ ] Codegen: O2 optimization - skip nil check for guaranteed non-nil expressions (literals, objects, arrays, new expressions)
 
 ---
 
 ### 1.6 Operator Overloading
 
-**Status:** Lexer keyword exists, implementation missing | **Model:** Sonnet
+**Status:** PARTIALLY IMPLEMENTED | **Model:** Sonnet
 
-Lexer keyword `Operator` exists but no AST/parser/type checker/codegen.
+Lexer keyword `Operator` exists. AST and parser complete, type checker and codegen in progress.
 
-- [ ] Create `OperatorDeclaration` struct in AST
-- [ ] Create `OperatorKind` enum (Add, Sub, Mul, Div, Mod, Pow, Eq, Lt, Le, Concat, Len, Index, NewIndex, Call, Unm)
-- [ ] Parser: Parse `operator` followed by operator symbol in class body
-- [ ] Type checker: Validate operator signatures (e.g., `operator ==` must return boolean)
-- [ ] Type checker: Binary operators take one parameter (right operand)
-- [ ] Type checker: Unary operators take no parameters
-- [ ] Codegen: Map to Lua metamethods (`__add`, `__sub`, etc.)
-- [ ] Fix test compilation: operator_overload_tests.rs
+**AST Changes:**
+
+- [x] Create `OperatorDeclaration` struct in AST (class_id, operator, parameters, body, span)
+- [x] Create `OperatorKind` enum (Add, Sub, Mul, Div, Mod, Pow, Eq, Lt, Le, Concat, Len, Index, NewIndex, Call, Unm, Ne, Ge)
+- [x] Add `Operator` variant to `ClassMember` enum
+
+**Parser:**
+
+- [x] Parse `operator` keyword in class body
+- [x] Parse operator symbol after `operator`
+- [x] Validate operator symbol against allowed set
+- [x] Parse parameters for binary (1 param) vs unary (0 params) operators
+- [x] Parse function body after parameters
+
+**Type Checker - Signature Validation:**
+
+- [x] Binary operators require exactly 1 parameter (right operand)
+- [x] Unary operators require 0 parameters
+- [x] `operator ==` and `operator ~=` must return `boolean`
+- [x] `operator <`, `operator <=`, `operator >`, `operator >=` must return `boolean`
+- [x] `operator and`, `operator or` disallowed (short-circuit semantics)
+
+**Codegen - Arithmetic Operators:**
+
+- [x] `__add` for `+` (number, string, custom)
+- [x] `__sub` for `-`
+- [x] `__mul` for `*`
+- [x] `__div` for `/`
+- [x] `__mod` for `%`
+- [x] `__pow` for `^`
+
+**Codegen - Comparison Operators:**
+
+- [x] `__eq` for `==`
+- [x] `__lt` for `<`
+- [x] `__le` for `<=`
+
+**Codegen - Index Operators:**
+
+- [x] `__index` for `[]` access
+- [x] `__newindex` for index assignment
+
+**Codegen - Special Operators:**
+
+- [x] `__concat` for `..`
+- [x] `__unm` for unary `-`
+- [x] `__len` for `#`
+- [x] `__call` for `()` invocation
+
+**Codegen - Integration:**
+
+- [x] Generate metamethod table for class
+- [x] Wire operators to metatable `__metatable` slot
+
+**Testing:**
+
+- [ ] Fix remaining test failures:
+  - [ ] test_operator_unary_minus - unary minus parsing
+  - [ ] test_multiple_operators - syntax error in test
 
 **Test file:** operator_overload_tests.rs
 
@@ -289,6 +375,164 @@ All 15 optimization passes are registered. O1 passes (constant folding, dead cod
 ---
 
 ## P1: Core Infrastructure
+
+### Create typedlua-runtime Crate
+
+**Status:** Not Started | **Expected:** Better modularity, testability, versioning | **Model:** Sonnet
+
+TypedLua extends Lua with many features not in base Lua (classes, decorators, exceptions, rich enums, etc.). Each requires runtime support code embedded in generated Lua. Currently scattered in codegen - needs dedicated crate.
+
+**Crate Setup:**
+
+- [ ] Create `crates/typedlua-runtime/` with lib.rs
+- [ ] Add modules: classes.rs, decorators.rs, exceptions.rs, operators.rs, enums.rs, reflection.rs
+- [ ] Create `lua/` directory for Lua source snippets
+
+**Lua Runtime Snippets:**
+
+- [ ] Extract decorator runtime to `lua/decorator_runtime.lua`
+- [ ] Create class system runtime in `lua/class_runtime.lua`
+- [ ] Create exception helpers in `lua/exception_runtime.lua` (pcall/xpcall wrappers)
+- [ ] Create operator helpers in `lua/operator_helpers.lua` (safe nav, null coalesce)
+- [ ] Create enum runtime in `lua/enum_runtime.lua`
+- [ ] Create reflection runtime in `lua/reflection_runtime.lua`
+
+**Const String Exports:**
+
+- [ ] Use `include_str!` to embed Lua snippets as const strings
+- [ ] Export one const per feature (e.g., `pub const DECORATOR_RUNTIME: &str`)
+- [ ] Version snippets per Lua target (5.1, 5.2, 5.3, 5.4) where needed
+
+**Integration:**
+
+- [ ] Add `typedlua-runtime` dependency to `typedlua-core`
+- [ ] Update codegen to import runtime constants
+- [ ] Track which features are used (uses_decorators, uses_exceptions, etc.)
+- [ ] Only embed runtime for features actually used in compiled code
+
+**Testing:**
+
+- [ ] Unit test each Lua snippet independently
+- [ ] Integration tests with codegen
+
+---
+
+### Lua Target Strategy Pattern
+
+**Status:** Not Started | **Expected:** Better maintainability, easier to add versions | **Model:** Sonnet
+
+Current approach: capability checks scattered in codegen (`supports_bitwise_ops()`, `supports_goto()`). Doesn't scale well.
+
+**Trait Definition:**
+
+- [ ] Create `crates/typedlua-core/src/codegen/strategies/mod.rs`
+- [ ] Define `CodeGenStrategy` trait with methods:
+  - `generate_bitwise_op(&self, op, lhs, rhs) -> String`
+  - `generate_integer_divide(&self, lhs, rhs) -> String`
+  - `generate_continue(&self, label) -> String`
+  - `emit_preamble(&self) -> Option<String>` (for library includes)
+
+**Strategy Implementations:**
+
+- [ ] Create `strategies/lua51.rs` implementing `CodeGenStrategy`
+- [ ] Create `strategies/lua52.rs` implementing `CodeGenStrategy`
+- [ ] Create `strategies/lua53.rs` implementing `CodeGenStrategy`
+- [ ] Create `strategies/lua54.rs` implementing `CodeGenStrategy`
+
+**Integration:**
+
+- [ ] Add `strategy: Box<dyn CodeGenStrategy>` field to `CodeGenerator`
+- [ ] Select strategy based on `LuaTarget` during initialization
+- [ ] Replace conditional logic in codegen with strategy method calls
+- [ ] Remove `supports_*` methods from `LuaTarget` (logic now in strategies)
+
+**Testing:**
+
+- [ ] Unit test each strategy independently
+- [ ] Regression tests for version-specific output
+
+---
+
+### Code Generator Modularization
+
+**Status:** Not Started | **Expected:** 50%+ maintainability improvement | **Model:** Sonnet
+
+CodeGenerator is 3,120 lines - too large. Break into focused modules.
+
+**Directory Structure:**
+
+- [ ] Create `crates/typedlua-core/src/codegen/strategies/` (Lua version strategies)
+- [ ] Create `crates/typedlua-core/src/codegen/emitters/` (AST → Lua emitters)
+- [ ] Create `crates/typedlua-core/src/codegen/transforms/` (pluggable transforms)
+
+**Emitters (AST → Lua):**
+
+- [ ] Extract expression generation to `emitters/expressions.rs`
+- [ ] Extract statement generation to `emitters/statements.rs`
+- [ ] Extract type erasure to `emitters/types.rs`
+- [ ] Main codegen becomes orchestrator (~300 lines)
+
+**Transforms (Pipeline Pattern):**
+
+- [ ] Define `CodeGenTransform` trait (like `OptimizationPass`)
+- [ ] Create `transforms/classes.rs` for class → table transformation
+- [ ] Create `transforms/decorators.rs` for decorator emission
+- [ ] Create `transforms/modules.rs` for import/export handling
+- [ ] Move sourcemap logic to `transforms/sourcemaps.rs`
+
+**Integration:**
+
+- [ ] Register transforms in CodeGenerator::new()
+- [ ] Run transforms in pipeline during generation
+- [ ] Each transform testable in isolation
+
+---
+
+### Type Checker Visitor Pattern
+
+**Status:** Not Started | **Expected:** Better separation of concerns | **Model:** Sonnet
+
+Type checker is 3,544 lines. Extract specialized visitors for different concerns.
+
+**Visitor Trait:**
+
+- [ ] Create `crates/typedlua-core/src/typechecker/visitors/mod.rs`
+- [ ] Define `TypeCheckVisitor` trait with visit methods
+
+**Specialized Visitors:**
+
+- [ ] Create `visitors/narrowing.rs` - Type narrowing logic
+- [ ] Create `visitors/generics.rs` - Generic instantiation and constraints
+- [ ] Create `visitors/access_control.rs` - public/private/protected checks
+- [ ] Create `visitors/inference.rs` - Type inference rules
+
+**Integration:**
+
+- [ ] Main TypeChecker orchestrates visitors
+- [ ] Each visitor testable independently
+- [ ] Clear separation of type system concerns
+
+---
+
+### Builder Pattern for CodeGenerator
+
+**Status:** Not Started | **Expected:** Better testability, clearer API | **Model:** Haiku
+
+Current constructor only takes `StringInterner`. Builder pattern for complex setup.
+
+**Implementation:**
+
+- [ ] Create `CodeGeneratorBuilder` struct
+- [ ] Methods: `interner()`, `target()`, `strategy()`, `enable_sourcemaps()`, `bundle_mode()`, etc.
+- [ ] `build()` returns configured `CodeGenerator`
+
+**Benefits:**
+
+- [ ] Clear configuration interface
+- [ ] Easier partial configuration in tests
+- [ ] Self-documenting API
+
+---
 
 ### Arena Allocation Integration
 

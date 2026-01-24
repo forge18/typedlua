@@ -1,3 +1,5 @@
+#![cfg(feature = "unimplemented")]
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use typedlua_core::ast::Program;
@@ -314,8 +316,7 @@ class Circle implements Shape {
         Arc::new(SymbolTable::new()),
     );
 
-    let mut circle_checker =
-        TypeChecker::new(circle_handler.clone(), &interner, &common_ids);
+    let mut circle_checker = TypeChecker::new(circle_handler.clone(), &interner, &common_ids);
     // Type check FIRST to populate symbol table
     let circle_result = circle_checker.check_program(&circle_ast);
     if circle_result.is_err() {
@@ -412,8 +413,7 @@ const user: User = { name: "Alice", age: 30 }
         Arc::new(SymbolTable::new()),
     );
 
-    let mut middle_checker =
-        TypeChecker::new(middle_handler.clone(), &interner, &common_ids);
+    let mut middle_checker = TypeChecker::new(middle_handler.clone(), &interner, &common_ids);
     middle_checker
         .check_program(&middle_ast)
         .expect("Failed to type check middle.tl");

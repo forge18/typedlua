@@ -839,10 +839,51 @@ impl<'a> CodeGenerator<'a> {
                 ClassMember::Setter(setter) => {
                     self.generate_class_setter(&class_name, setter);
                 }
+                ClassMember::Operator(op) => {
+                    self.generate_operator_declaration(&class_name, op);
+                }
                 ClassMember::Property(_) | ClassMember::Constructor(_) => {
                     // Already handled
                 }
             }
+        }
+
+        // Generate metamethods table for operator overloading
+        let mut has_operators = false;
+
+        for member in &class_decl.members {
+            if let ClassMember::Operator(_) = member {
+                has_operators = true;
+                break;
+            }
+        }
+
+        if has_operators {
+            self.writeln("");
+            self.write_indent();
+            self.write(&class_name);
+            self.writeln(".__metatable = {");
+            self.indent();
+
+            let mut first = true;
+            for member in &class_decl.members {
+                if let ClassMember::Operator(op) = member {
+                    let metamethod_name = self.operator_kind_name(&op.operator);
+                    self.write_indent();
+                    if !first {
+                        self.writeln(",");
+                    }
+                    first = false;
+                    self.write(&format!(
+                        "{} = {}.{}",
+                        metamethod_name, class_name, metamethod_name
+                    ));
+                }
+            }
+            self.writeln("");
+            self.dedent();
+            self.write_indent();
+            self.writeln("}");
         }
 
         // Apply decorators to the class
@@ -1128,7 +1169,7 @@ impl<'a> CodeGenerator<'a> {
                 self.write(&method_name);
                 self.write(" = ");
 
-                let method_ref = format!("{}.{}", class_name, method.name.node);
+                let method_ref = format!("{}.{}", class_name, method_name);
                 self.generate_decorator_call(decorator, &method_ref);
                 self.writeln("");
             }
@@ -1185,6 +1226,74 @@ impl<'a> CodeGenerator<'a> {
 
         self.write_indent();
         self.writeln("end");
+    }
+
+    fn generate_operator_declaration(&mut self, class_name: &str, op: &OperatorDeclaration) {
+        self.writeln("");
+        self.write_indent();
+        self.write("function ");
+        self.write(class_name);
+        self.write(".");
+        self.write(&self.operator_kind_name(&op.operator));
+        self.write("(self");
+
+        let is_unary = op.parameters.is_empty();
+
+        if !is_unary {
+            for param in op.parameters.iter() {
+                self.write(", ");
+                self.generate_pattern(&param.pattern);
+            }
+        }
+        self.writeln(")");
+
+        self.indent();
+        self.generate_block(&op.body);
+        self.dedent();
+
+        self.write_indent();
+        self.writeln("end");
+
+        for decorator in &op.decorators {
+            self.write_indent();
+            self.write(class_name);
+            self.write(".");
+            self.write(&self.operator_kind_name(&op.operator));
+            self.write(" = ");
+
+            let method_ref = format!("{}.{}", class_name, self.operator_kind_name(&op.operator));
+            self.generate_decorator_call(decorator, &method_ref);
+            self.writeln("");
+        }
+    }
+
+    fn operator_kind_name(&self, op: &crate::ast::statement::OperatorKind) -> String {
+        match op {
+            crate::ast::statement::OperatorKind::Add => "__add".to_string(),
+            crate::ast::statement::OperatorKind::Subtract => "__sub".to_string(),
+            crate::ast::statement::OperatorKind::Multiply => "__mul".to_string(),
+            crate::ast::statement::OperatorKind::Divide => "__div".to_string(),
+            crate::ast::statement::OperatorKind::Modulo => "__mod".to_string(),
+            crate::ast::statement::OperatorKind::Power => "__pow".to_string(),
+            crate::ast::statement::OperatorKind::Concatenate => "__concat".to_string(),
+            crate::ast::statement::OperatorKind::FloorDivide => "__idiv".to_string(),
+            crate::ast::statement::OperatorKind::Equal => "__eq".to_string(),
+            crate::ast::statement::OperatorKind::NotEqual => "__eq".to_string(),
+            crate::ast::statement::OperatorKind::LessThan => "__lt".to_string(),
+            crate::ast::statement::OperatorKind::LessThanOrEqual => "__le".to_string(),
+            crate::ast::statement::OperatorKind::GreaterThan => "__lt".to_string(),
+            crate::ast::statement::OperatorKind::GreaterThanOrEqual => "__le".to_string(),
+            crate::ast::statement::OperatorKind::BitwiseAnd => "__band".to_string(),
+            crate::ast::statement::OperatorKind::BitwiseOr => "__bor".to_string(),
+            crate::ast::statement::OperatorKind::BitwiseXor => "__bxor".to_string(),
+            crate::ast::statement::OperatorKind::ShiftLeft => "__shl".to_string(),
+            crate::ast::statement::OperatorKind::ShiftRight => "__shr".to_string(),
+            crate::ast::statement::OperatorKind::Index => "__index".to_string(),
+            crate::ast::statement::OperatorKind::NewIndex => "__newindex".to_string(),
+            crate::ast::statement::OperatorKind::Call => "__call".to_string(),
+            crate::ast::statement::OperatorKind::UnaryMinus => "__unm".to_string(),
+            crate::ast::statement::OperatorKind::Length => "__len".to_string(),
+        }
     }
 
     /// Generate a decorator call
@@ -1871,6 +1980,97 @@ impl<'a> CodeGenerator<'a> {
                 // Type assertions are compile-time only, just generate the expression
                 self.generate_expression(expr);
             }
+            ExpressionKind::OptionalMember(object, member) => {
+                // Optional member access: obj?.member
+                // For simple expressions: (obj and obj.member or nil)
+                // For complex expressions: use IIFE to avoid double evaluation
+                if self.is_simple_expression(object) {
+                    self.write("(");
+                    self.generate_expression(object);
+                    self.write(" and ");
+                    self.generate_expression(object);
+                    self.write(".");
+                    let member_str = self.resolve(member.node);
+                    self.write(&member_str);
+                    self.write(" or nil)");
+                } else {
+                    // Use IIFE to evaluate object once
+                    self.write("(function() local __t = ");
+                    self.generate_expression(object);
+                    self.writeln("; if __t then return __t.");
+                    self.write_indent();
+                    let member_str = self.resolve(member.node);
+                    self.write(&member_str);
+                    self.writeln(" else return nil end end)()");
+                }
+            }
+            ExpressionKind::OptionalIndex(object, index) => {
+                // Optional index access: obj?.[index]
+                if self.is_simple_expression(object) {
+                    self.write("(");
+                    self.generate_expression(object);
+                    self.write(" and ");
+                    self.generate_expression(object);
+                    self.write("[");
+                    self.generate_expression(index);
+                    self.write("] or nil)");
+                } else {
+                    self.write("(function() local __t = ");
+                    self.generate_expression(object);
+                    self.writeln("; if __t then return __t[");
+                    self.write_indent();
+                    self.generate_expression(index);
+                    self.writeln("] else return nil end end)()");
+                }
+            }
+            ExpressionKind::OptionalCall(callee, _args) => {
+                // Optional call: func?.()
+                if self.is_simple_expression(callee) {
+                    self.write("(");
+                    self.generate_expression(callee);
+                    self.write(" and ");
+                    self.generate_expression(callee);
+                    self.write("() or nil)");
+                } else {
+                    self.write("(function() local __t = ");
+                    self.generate_expression(callee);
+                    self.writeln("; if __t then return __t() else return nil end end)()");
+                }
+            }
+            ExpressionKind::OptionalMethodCall(object, method, args) => {
+                // Optional method call: obj?.method()
+                if self.is_simple_expression(object) {
+                    self.write("(");
+                    self.generate_expression(object);
+                    self.write(" and ");
+                    self.generate_expression(object);
+                    self.write(":");
+                    let method_str = self.resolve(method.node);
+                    self.write(&method_str);
+                    self.write("(");
+                    for (i, arg) in args.iter().enumerate() {
+                        if i > 0 {
+                            self.write(", ");
+                        }
+                        self.generate_argument(arg);
+                    }
+                    self.write(") or nil)");
+                } else {
+                    self.write("(function() local __t = ");
+                    self.generate_expression(object);
+                    self.write("; if __t then return __t:");
+                    let method_str = self.resolve(method.node);
+                    self.write(&method_str);
+                    self.write("(");
+                    for (i, arg) in args.iter().enumerate() {
+                        if i > 0 {
+                            self.write(", ");
+                        }
+                        self.generate_argument(arg);
+                    }
+                    self.writeln(") else return nil end end)()");
+                }
+            }
         }
     }
 
@@ -1916,6 +2116,10 @@ impl<'a> CodeGenerator<'a> {
 
     fn generate_binary_expression(&mut self, op: BinaryOp, left: &Expression, right: &Expression) {
         match op {
+            BinaryOp::NullCoalesce => {
+                self.generate_null_coalesce(left, right);
+            }
+
             // Standard operators that work everywhere
             BinaryOp::Add
             | BinaryOp::Subtract
@@ -1995,6 +2199,46 @@ impl<'a> CodeGenerator<'a> {
         }
     }
 
+    /// Generate null coalescing operator (??)
+    /// Simple form: (a ~= nil and a or b) for simple expressions
+    /// IIFE form: (function() local __left = expr; return __left ~= nil and __left or b end)()
+    /// for complex expressions that might have side effects or need to be evaluated once
+    fn generate_null_coalesce(&mut self, left: &Expression, right: &Expression) {
+        if self.is_simple_expression(left) {
+            self.write("(");
+            self.generate_expression(left);
+            self.write(" ~= nil and ");
+            self.generate_expression(left);
+            self.write(" or ");
+            self.generate_expression(right);
+            self.write(")");
+        } else {
+            self.write("(function() local __left = ");
+            self.generate_expression(left);
+            self.writeln(";");
+            self.write_indent();
+            self.write("return __left ~= nil and __left or ");
+            self.generate_expression(right);
+            self.writeln("");
+            self.write_indent();
+            self.write("end)()");
+        }
+    }
+
+    /// Check if an expression is "simple" and can be safely evaluated twice
+    /// Simple expressions: identifiers, literals, and simple member/index access
+    fn is_simple_expression(&self, expr: &Expression) -> bool {
+        match &expr.kind {
+            ExpressionKind::Identifier(_) => true,
+            ExpressionKind::Literal(_) => true,
+            ExpressionKind::Member(obj, _) => self.is_simple_expression(obj),
+            ExpressionKind::Index(obj, index) => {
+                self.is_simple_expression(obj) && self.is_simple_expression(index)
+            }
+            _ => false,
+        }
+    }
+
     fn simple_binary_op_to_string(&self, op: BinaryOp) -> &'static str {
         match op {
             BinaryOp::Add => "+",
@@ -2012,6 +2256,7 @@ impl<'a> CodeGenerator<'a> {
             BinaryOp::GreaterThanOrEqual => ">=",
             BinaryOp::And => "and",
             BinaryOp::Or => "or",
+            BinaryOp::NullCoalesce => unreachable!("null coalescing is handled separately"),
             BinaryOp::BitwiseAnd => "&",
             BinaryOp::BitwiseOr => "|",
             BinaryOp::BitwiseXor => "~",

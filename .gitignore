@@ -58,3 +58,7 @@ knowledge/
 credentials.json
 
 # TODO.md
+CLAUDE.md
+*/CLAUDE.md
+**/CLAUDE.md
+.DS_Store
