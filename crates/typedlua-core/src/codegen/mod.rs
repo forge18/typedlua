@@ -3649,7 +3649,14 @@ impl CodeGenerator {
             )
         });
 
-        if has_typed_catches {
+        let has_finally = stmt.finally_block.is_some();
+        let needs_xpcall = has_typed_catches || has_finally;
+        let prefer_xpcall = matches!(
+            self.optimization_level,
+            OptimizationLevel::O2 | OptimizationLevel::O3 | OptimizationLevel::Auto
+        );
+
+        if needs_xpcall || prefer_xpcall {
             self.generate_try_xpcall(stmt);
         } else {
             self.generate_try_pcall(stmt);
@@ -3698,19 +3705,43 @@ impl CodeGenerator {
         self.dedent();
 
         self.write_indent();
-        self.writeln("end, function(__err)");
+        self.writeln("end, ");
 
-        self.indent();
-        self.write_indent();
-        self.writeln("__error = __err");
+        let has_typed_catches = stmt.catch_clauses.iter().any(|clause| {
+            matches!(
+                clause.pattern,
+                CatchPattern::Typed { .. } | CatchPattern::MultiTyped { .. }
+            )
+        });
 
-        for catch_clause in &stmt.catch_clauses {
-            self.generate_catch_clause_xpcall(catch_clause);
+        let use_debug_traceback = matches!(
+            self.optimization_level,
+            OptimizationLevel::O2 | OptimizationLevel::O3 | OptimizationLevel::Auto
+        ) && !has_typed_catches;
+
+        if use_debug_traceback {
+            self.writeln("debug.traceback)");
+        } else {
+            self.writeln("function(__err)");
+            self.indent();
+            self.write_indent();
+            self.writeln("__error = __err");
+
+            for catch_clause in &stmt.catch_clauses {
+                self.generate_catch_clause_xpcall(catch_clause);
+            }
+
+            self.dedent();
+            self.write_indent();
+            self.writeln("end)");
         }
 
-        self.dedent();
-        self.write_indent();
-        self.writeln("end)");
+        if use_debug_traceback {
+            self.write_indent();
+            self.writeln("if __error == nil then return end");
+            self.write_indent();
+            self.writeln("local e = __error");
+        }
 
         for catch_clause in &stmt.catch_clauses {
             self.generate_block(&catch_clause.body);

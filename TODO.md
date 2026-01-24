@@ -471,12 +471,14 @@ All 15 optimization passes are registered. O1 passes (constant folding, dead cod
   - [x] Add tests for various optional navigation patterns
   - [x] O2 optimization - skip nil check for guaranteed non-nil expressions (literals, objects, arrays, new expressions)
 
-- [ ] Exception handling optimization
-  - [ ] Benchmark typical `try/catch` patterns using `pcall` vs `xpcall`
-  - [ ] Add analysis to select `pcall` when catch block is a single simple handler
-  - [ ] Keep `xpcall` for multi‑catch or rethrow scenarios
-  - [ ] Update codegen to emit chosen wrapper
-  - [ ] Write tests for simple try/catch (pcall) and complex (xpcall) cases
+- [x] Exception handling optimization
+  - [x] Benchmark typical `try/catch` patterns using `pcall` vs `xpcall`
+  - [x] Add analysis to select `pcall` when catch block is a single simple handler (O0/O1)
+  - [x] Keep `xpcall` for multi‑catch or rethrow scenarios
+  - [x] Update codegen to emit chosen wrapper
+  - [x] Write tests for simple try/catch (pcall) and complex (xpcall) cases
+  - [x] O2/O3 optimization: Use `xpcall` with `debug.traceback` for better stack traces
+  - [x] O2/O3 optimization: Skip type checking handler for untyped catches (use debug.traceback directly)
 
 - [ ] String concatenation optimization
   - [ ] Detect consecutive `..` operations inside loops or large literals

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use typedlua_core::codegen::CodeGenerator;
-use typedlua_core::config::CompilerOptions;
+use typedlua_core::config::{CompilerOptions, OptimizationLevel};
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::lexer::Lexer;
 use typedlua_core::parser::Parser;
@@ -8,6 +8,13 @@ use typedlua_core::string_interner::StringInterner;
 use typedlua_core::typechecker::TypeChecker;
 
 fn compile_with_optimization(source: &str) -> Result<String, String> {
+    compile_with_optimization_level(source, OptimizationLevel::O1)
+}
+
+fn compile_with_optimization_level(
+    source: &str,
+    level: OptimizationLevel,
+) -> Result<String, String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
     let interner = Arc::new(interner);
@@ -30,7 +37,7 @@ fn compile_with_optimization(source: &str) -> Result<String, String> {
         .check_program(&program)
         .map_err(|e| e.message)?;
 
-    let mut codegen = CodeGenerator::new(interner.clone());
+    let mut codegen = CodeGenerator::new(interner.clone()).with_optimization_level(level);
     let output = codegen.generate(&mut program);
 
     Ok(output)
@@ -105,7 +112,6 @@ fn test_optimizer_with_null_coalescing() {
 }
 
 #[test]
-#[ignore = "Exception handling not yet implemented - see TODO 2.1"]
 fn test_optimizer_with_exception_handling() {
     let source = r#"
         try {
@@ -115,22 +121,24 @@ fn test_optimizer_with_exception_handling() {
         }
     "#;
 
-    // O0 and O1 should use pcall
-    let output_o0 = compile_with_optimization(source).unwrap();
+    let output_o0 = compile_with_optimization_level(source, OptimizationLevel::O0).unwrap();
+    println!("O0 output:\n{}", output_o0);
     assert!(output_o0.contains("pcall"), "O0 should use pcall");
 
-    let output_o1 = compile_with_optimization(source).unwrap();
+    let output_o1 = compile_with_optimization_level(source, OptimizationLevel::O1).unwrap();
+    println!("O1 output:\n{}", output_o1);
     assert!(output_o1.contains("pcall"), "O1 should use pcall");
 
-    // O2 and O3 should use xpcall with debug.traceback
-    let output_o2 = compile_with_optimization(source).unwrap();
+    let output_o2 = compile_with_optimization_level(source, OptimizationLevel::O2).unwrap();
+    println!("O2 output:\n{}", output_o2);
     assert!(output_o2.contains("xpcall"), "O2 should use xpcall");
     assert!(
         output_o2.contains("debug.traceback"),
         "O2 should use debug.traceback"
     );
 
-    let output_o3 = compile_with_optimization(source).unwrap();
+    let output_o3 = compile_with_optimization_level(source, OptimizationLevel::O3).unwrap();
+    println!("O3 output:\n{}", output_o3);
     assert!(output_o3.contains("xpcall"), "O3 should use xpcall");
 }
 
