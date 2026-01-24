@@ -1,8 +1,10 @@
 use crate::document::Document;
 use lsp_types::*;
+
 use std::sync::Arc;
 use typedlua_core::ast::statement::{ClassMember, Statement};
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
+use typedlua_core::string_interner::StringInterner;
 use typedlua_core::{Lexer, Parser, Span};
 
 /// Provides document symbols (outline view)
@@ -17,13 +19,14 @@ impl SymbolsProvider {
     pub fn provide(&self, document: &Document) -> Vec<DocumentSymbol> {
         // Parse the document
         let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let mut lexer = Lexer::new(&document.text, handler.clone());
+        let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+        let mut lexer = Lexer::new(&document.text, handler.clone(), &interner);
         let tokens = match lexer.tokenize() {
             Ok(t) => t,
             Err(_) => return Vec::new(),
         };
 
-        let mut parser = Parser::new(tokens, handler);
+        let mut parser = Parser::new(tokens, handler, &interner, &common_ids);
         let ast = match parser.parse() {
             Ok(a) => a,
             Err(_) => return Vec::new(),
@@ -32,7 +35,7 @@ impl SymbolsProvider {
         // Extract symbols from AST
         let mut symbols = Vec::new();
         for stmt in &ast.statements {
-            if let Some(symbol) = self.extract_symbol_from_statement(stmt) {
+            if let Some(symbol) = self.extract_symbol_from_statement(stmt, &interner) {
                 symbols.push(symbol);
             }
         }
@@ -42,7 +45,11 @@ impl SymbolsProvider {
 
     /// Extract a document symbol from a statement
     #[allow(deprecated)]
-    fn extract_symbol_from_statement(&self, stmt: &Statement) -> Option<DocumentSymbol> {
+    fn extract_symbol_from_statement(
+        &self,
+        stmt: &Statement,
+        interner: &StringInterner,
+    ) -> Option<DocumentSymbol> {
         use typedlua_core::ast::pattern::Pattern;
 
         match stmt {
@@ -54,7 +61,7 @@ impl SymbolsProvider {
                     };
 
                     Some(DocumentSymbol {
-                        name: ident.node.clone(),
+                        name: interner.resolve(ident.node).to_string(),
                         detail: None,
                         kind,
                         tags: None,
@@ -72,13 +79,13 @@ impl SymbolsProvider {
 
                 // Add function body statements as children
                 for stmt in &func_decl.body.statements {
-                    if let Some(symbol) = self.extract_symbol_from_statement(stmt) {
+                    if let Some(symbol) = self.extract_symbol_from_statement(stmt, interner) {
                         children.push(symbol);
                     }
                 }
 
                 Some(DocumentSymbol {
-                    name: func_decl.name.node.clone(),
+                    name: interner.resolve(func_decl.name.node).to_string(),
                     detail: None,
                     kind: SymbolKind::FUNCTION,
                     tags: None,
@@ -97,13 +104,13 @@ impl SymbolsProvider {
 
                 // Add class members as children
                 for member in &class_decl.members {
-                    if let Some(symbol) = self.extract_symbol_from_class_member(member) {
+                    if let Some(symbol) = self.extract_symbol_from_class_member(member, interner) {
                         children.push(symbol);
                     }
                 }
 
                 Some(DocumentSymbol {
-                    name: class_decl.name.node.clone(),
+                    name: interner.resolve(class_decl.name.node).to_string(),
                     detail: None,
                     kind: SymbolKind::CLASS,
                     tags: None,
@@ -118,7 +125,7 @@ impl SymbolsProvider {
                 })
             }
             Statement::Interface(interface_decl) => Some(DocumentSymbol {
-                name: interface_decl.name.node.clone(),
+                name: interner.resolve(interface_decl.name.node).to_string(),
                 detail: None,
                 kind: SymbolKind::INTERFACE,
                 tags: None,
@@ -128,7 +135,7 @@ impl SymbolsProvider {
                 children: None,
             }),
             Statement::TypeAlias(type_decl) => Some(DocumentSymbol {
-                name: type_decl.name.node.clone(),
+                name: interner.resolve(type_decl.name.node).to_string(),
                 detail: None,
                 kind: SymbolKind::TYPE_PARAMETER,
                 tags: None,
@@ -138,7 +145,7 @@ impl SymbolsProvider {
                 children: None,
             }),
             Statement::Enum(enum_decl) => Some(DocumentSymbol {
-                name: enum_decl.name.node.clone(),
+                name: interner.resolve(enum_decl.name.node).to_string(),
                 detail: None,
                 kind: SymbolKind::ENUM,
                 tags: None,
@@ -152,10 +159,14 @@ impl SymbolsProvider {
     }
 
     /// Extract a document symbol from a class member
-    fn extract_symbol_from_class_member(&self, member: &ClassMember) -> Option<DocumentSymbol> {
+    fn extract_symbol_from_class_member(
+        &self,
+        member: &ClassMember,
+        interner: &StringInterner,
+    ) -> Option<DocumentSymbol> {
         match member {
             ClassMember::Property(prop) => Some(DocumentSymbol {
-                name: prop.name.node.clone(),
+                name: interner.resolve(prop.name.node).to_string(),
                 detail: None,
                 kind: SymbolKind::PROPERTY,
                 tags: None,
@@ -175,7 +186,7 @@ impl SymbolsProvider {
                 children: None,
             }),
             ClassMember::Method(method) => Some(DocumentSymbol {
-                name: method.name.node.clone(),
+                name: interner.resolve(method.name.node).to_string(),
                 detail: None,
                 kind: SymbolKind::METHOD,
                 tags: None,
@@ -185,7 +196,7 @@ impl SymbolsProvider {
                 children: None,
             }),
             ClassMember::Getter(getter) => Some(DocumentSymbol {
-                name: getter.name.node.clone(),
+                name: interner.resolve(getter.name.node).to_string(),
                 detail: Some("get".to_string()),
                 kind: SymbolKind::PROPERTY,
                 tags: None,
@@ -195,7 +206,7 @@ impl SymbolsProvider {
                 children: None,
             }),
             ClassMember::Setter(setter) => Some(DocumentSymbol {
-                name: setter.name.node.clone(),
+                name: interner.resolve(setter.name.node).to_string(),
                 detail: Some("set".to_string()),
                 kind: SymbolKind::PROPERTY,
                 tags: None,

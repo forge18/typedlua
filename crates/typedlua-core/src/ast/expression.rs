@@ -1,5 +1,6 @@
 use super::{pattern::Pattern, statement::TypeParameter, types::Type, Ident};
 use crate::span::Span;
+use crate::string_interner::StringId;
 use serde::{Deserialize, Serialize};
 
 use super::statement::{Block, Parameter};
@@ -18,7 +19,7 @@ impl Expression {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ExpressionKind {
-    Identifier(String),
+    Identifier(StringId),
     Literal(Literal),
     Binary(BinaryOp, Box<Expression>, Box<Expression>),
     Unary(UnaryOp, Box<Expression>),

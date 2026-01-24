@@ -1,5 +1,5 @@
-// Error path tests - using DI to test error scenarios
 use std::sync::Arc;
+use typedlua_core::string_interner::StringInterner;
 use typedlua_core::{
     codegen::CodeGenerator,
     diagnostics::{CollectingDiagnosticHandler, DiagnosticHandler, DiagnosticLevel},
@@ -8,13 +8,13 @@ use typedlua_core::{
     typechecker::TypeChecker,
 };
 
-// Parser error tests
 #[test]
 fn test_parser_missing_paren() {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
-    let mut lexer = Lexer::new("const x = (1 + 2", handler.clone());
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let mut lexer = Lexer::new("const x = (1 + 2", handler.clone(), &interner);
     let tokens = lexer.tokenize().unwrap();
-    let mut parser = Parser::new(tokens, handler.clone());
+    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
     let _ = parser.parse();
     assert!(handler.has_errors());
 }
@@ -22,9 +22,10 @@ fn test_parser_missing_paren() {
 #[test]
 fn test_parser_unexpected_token() {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
-    let mut lexer = Lexer::new("const x = + 5", handler.clone());
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let mut lexer = Lexer::new("const x = + 5", handler.clone(), &interner);
     let tokens = lexer.tokenize().unwrap();
-    let mut parser = Parser::new(tokens, handler.clone());
+    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
     let _ = parser.parse();
     assert!(handler.has_errors());
 }
@@ -32,9 +33,10 @@ fn test_parser_unexpected_token() {
 #[test]
 fn test_parser_incomplete_expression() {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
-    let mut lexer = Lexer::new("const x = 1 +", handler.clone());
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let mut lexer = Lexer::new("const x = 1 +", handler.clone(), &interner);
     let tokens = lexer.tokenize().unwrap();
-    let mut parser = Parser::new(tokens, handler.clone());
+    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
     let _ = parser.parse();
     assert!(handler.has_errors());
 }
@@ -43,42 +45,41 @@ fn test_parser_incomplete_expression() {
 #[test]
 fn test_type_mismatch() {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
-    let mut lexer = Lexer::new(r#"const x: number = "hello""#, handler.clone());
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let mut lexer = Lexer::new(r#"const x: number = "hello""#, handler.clone(), &interner);
     let tokens = lexer.tokenize().unwrap();
-    let mut parser = Parser::new(tokens, handler.clone());
+    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
     let program = parser.parse().unwrap();
 
-    let mut tc = TypeChecker::new(handler.clone());
+    let mut tc = TypeChecker::new(handler.clone(), &interner, common_ids);
     let _ = tc.check_program(&program);
-    // Type checker should ideally catch this, but test passes either way
-    // The important thing is it doesn't panic
 }
 
 #[test]
 fn test_undefined_variable() {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
-    let mut lexer = Lexer::new("const x = undefined", handler.clone());
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let mut lexer = Lexer::new("const x = undefined", handler.clone(), &interner);
     let tokens = lexer.tokenize().unwrap();
-    let mut parser = Parser::new(tokens, handler.clone());
+    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
     let program = parser.parse().unwrap();
 
-    let mut tc = TypeChecker::new(handler.clone());
+    let mut tc = TypeChecker::new(handler.clone(), &interner, common_ids);
     let _ = tc.check_program(&program);
-    // Exercises the type checker's undefined variable path
 }
 
 #[test]
 fn test_return_type_mismatch() {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
     let input = "function test(): string\n    return 42\nend";
-    let mut lexer = Lexer::new(input, handler.clone());
+    let mut lexer = Lexer::new(input, handler.clone(), &interner);
     let tokens = lexer.tokenize().unwrap();
-    let mut parser = Parser::new(tokens, handler.clone());
+    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
     let program = parser.parse().unwrap();
 
-    let mut tc = TypeChecker::new(handler.clone());
+    let mut tc = TypeChecker::new(handler.clone(), &interner, common_ids);
     let _ = tc.check_program(&program);
-    // Exercises the type checker's return type checking
 }
 
 // Diagnostic handler tests
@@ -111,12 +112,13 @@ fn test_diagnostic_levels() {
 #[test]
 fn test_codegen_doesnt_panic() {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
-    let mut lexer = Lexer::new("const x: number = 42", handler.clone());
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let mut lexer = Lexer::new("const x: number = 42", handler.clone(), &interner);
     let tokens = lexer.tokenize().unwrap();
-    let mut parser = Parser::new(tokens, handler);
+    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
     let program = parser.parse().unwrap();
 
-    let mut generator = CodeGenerator::new();
+    let mut generator = CodeGenerator::new(&interner);
     let output = generator.generate(&program);
     assert!(!output.is_empty());
 }
@@ -125,13 +127,14 @@ fn test_codegen_doesnt_panic() {
 #[test]
 fn test_full_pipeline_with_errors() {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
     let input = "const x: number = \"wrong\"\nconst y = undefined";
 
-    let mut lexer = Lexer::new(input, handler.clone());
+    let mut lexer = Lexer::new(input, handler.clone(), &interner);
     if let Ok(tokens) = lexer.tokenize() {
-        let mut parser = Parser::new(tokens, handler.clone());
+        let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
         if let Ok(program) = parser.parse() {
-            let mut tc = TypeChecker::new(handler.clone());
+            let mut tc = TypeChecker::new(handler.clone(), &interner, common_ids);
             let _ = tc.check_program(&program);
         }
     }

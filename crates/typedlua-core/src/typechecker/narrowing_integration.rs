@@ -3,6 +3,7 @@
 use super::narrowing::{narrow_type_from_condition, NarrowingContext};
 use crate::ast::expression::Expression;
 use crate::ast::types::Type;
+use crate::string_interner::{StringId, StringInterner};
 use rustc_hash::FxHashMap;
 
 /// Demonstration of how type narrowing integrates with if statement checking
@@ -30,33 +31,12 @@ impl IfStatementNarrowingExample {
     pub fn check_if_statement_with_narrowing(
         condition: &Expression,
         base_context: &NarrowingContext,
-        variable_types: &FxHashMap<String, Type>,
+        variable_types: &FxHashMap<StringId, Type>,
+        interner: &StringInterner,
     ) -> (NarrowingContext, NarrowingContext) {
         // Step 1: Analyze the condition to produce narrowed contexts
         let (then_context, else_context) =
-            narrow_type_from_condition(condition, base_context, variable_types);
-
-        // Step 2: When type checking the then-branch, use then_context
-        // to get narrowed types for variables
-        //
-        // Example:
-        // for var_name in then_branch_variables {
-        //     let var_type = then_context.get_narrowed_type(var_name)
-        //         .unwrap_or_else(|| variable_types.get(var_name));
-        //     // Use var_type when checking expressions in then branch
-        // }
-
-        // Step 3: When type checking the else-branch, use else_context
-        //
-        // Example:
-        // for var_name in else_branch_variables {
-        //     let var_type = else_context.get_narrowed_type(var_name)
-        //         .unwrap_or_else(|| variable_types.get(var_name));
-        //     // Use var_type when checking expressions in else branch
-        // }
-
-        // Step 4: After both branches, merge the contexts for the continuation
-        // let merged_context = NarrowingContext::merge(&then_context, &else_context);
+            narrow_type_from_condition(condition, base_context, variable_types, interner);
 
         (then_context, else_context)
     }
@@ -68,17 +48,25 @@ mod tests {
     use crate::ast::expression::{BinaryOp, ExpressionKind, Literal};
     use crate::ast::types::{PrimitiveType, TypeKind};
     use crate::span::Span;
+    use crate::string_interner::StringId;
 
     fn make_span() -> Span {
         Span::new(0, 0, 0, 0)
     }
 
+    fn get_string_id(s: &str, interner: &StringInterner) -> StringId {
+        interner.intern(s)
+    }
+
     #[test]
     fn test_if_statement_narrowing_example() {
+        let (interner, _) = crate::string_interner::StringInterner::new_with_common_identifiers();
+
         // Setup: x: string | nil
         let mut variable_types = FxHashMap::default();
+        let x_id = get_string_id("x", &interner);
         variable_types.insert(
-            "x".to_string(),
+            x_id,
             Type::new(
                 TypeKind::Union(vec![
                     Type::new(TypeKind::Primitive(PrimitiveType::String), make_span()),
@@ -93,7 +81,7 @@ mod tests {
             ExpressionKind::Binary(
                 BinaryOp::NotEqual,
                 Box::new(Expression::new(
-                    ExpressionKind::Identifier("x".to_string()),
+                    ExpressionKind::Identifier(x_id),
                     make_span(),
                 )),
                 Box::new(Expression::new(
@@ -111,17 +99,18 @@ mod tests {
             &condition,
             &base_context,
             &variable_types,
+            &interner,
         );
 
         // In then branch: x should be narrowed to string
-        let then_type = then_ctx.get_narrowed_type("x").unwrap();
+        let then_type = then_ctx.get_narrowed_type(x_id).unwrap();
         assert!(matches!(
             then_type.kind,
             TypeKind::Primitive(PrimitiveType::String)
         ));
 
         // In else branch: x should be nil
-        let else_type = else_ctx.get_narrowed_type("x").unwrap();
+        let else_type = else_ctx.get_narrowed_type(x_id).unwrap();
         assert!(matches!(
             else_type.kind,
             TypeKind::Primitive(PrimitiveType::Nil)
@@ -130,10 +119,13 @@ mod tests {
 
     #[test]
     fn test_typeof_narrowing_example() {
-        // Setup: x: string | number
+        let (interner, _) = crate::string_interner::StringInterner::new_with_common_identifiers();
+
         let mut variable_types = FxHashMap::default();
+        let x_id = get_string_id("x", &interner);
+        let typeof_id = get_string_id("typeof", &interner);
         variable_types.insert(
-            "x".to_string(),
+            x_id,
             Type::new(
                 TypeKind::Union(vec![
                     Type::new(TypeKind::Primitive(PrimitiveType::String), make_span()),
@@ -150,14 +142,11 @@ mod tests {
                 Box::new(Expression::new(
                     ExpressionKind::Call(
                         Box::new(Expression::new(
-                            ExpressionKind::Identifier("typeof".to_string()),
+                            ExpressionKind::Identifier(typeof_id),
                             make_span(),
                         )),
                         vec![crate::ast::expression::Argument {
-                            value: Expression::new(
-                                ExpressionKind::Identifier("x".to_string()),
-                                make_span(),
-                            ),
+                            value: Expression::new(ExpressionKind::Identifier(x_id), make_span()),
                             is_spread: false,
                             span: make_span(),
                         }],
@@ -179,17 +168,18 @@ mod tests {
             &condition,
             &base_context,
             &variable_types,
+            &interner,
         );
 
         // In then branch: x should be string
-        let then_type = then_ctx.get_narrowed_type("x").unwrap();
+        let then_type = then_ctx.get_narrowed_type(x_id).unwrap();
         assert!(matches!(
             then_type.kind,
             TypeKind::Primitive(PrimitiveType::String)
         ));
 
         // In else branch: x should be number
-        let else_type = else_ctx.get_narrowed_type("x").unwrap();
+        let else_type = else_ctx.get_narrowed_type(x_id).unwrap();
         assert!(matches!(
             else_type.kind,
             TypeKind::Primitive(PrimitiveType::Number)
@@ -198,10 +188,14 @@ mod tests {
 
     #[test]
     fn test_type_guard_narrowing() {
+        let (interner, _) = crate::string_interner::StringInterner::new_with_common_identifiers();
+
         // Setup: x: string | number | nil
         let mut variable_types = FxHashMap::default();
+        let x_id = get_string_id("x", &interner);
+        let is_string_id = get_string_id("isString", &interner);
         variable_types.insert(
-            "x".to_string(),
+            x_id,
             Type::new(
                 TypeKind::Union(vec![
                     Type::new(TypeKind::Primitive(PrimitiveType::String), make_span()),
@@ -216,14 +210,11 @@ mod tests {
         let condition = Expression::new(
             ExpressionKind::Call(
                 Box::new(Expression::new(
-                    ExpressionKind::Identifier("isString".to_string()),
+                    ExpressionKind::Identifier(is_string_id),
                     make_span(),
                 )),
                 vec![crate::ast::expression::Argument {
-                    value: Expression::new(
-                        ExpressionKind::Identifier("x".to_string()),
-                        make_span(),
-                    ),
+                    value: Expression::new(ExpressionKind::Identifier(x_id), make_span()),
                     is_spread: false,
                     span: make_span(),
                 }],
@@ -238,17 +229,18 @@ mod tests {
             &condition,
             &base_context,
             &variable_types,
+            &interner,
         );
 
         // In then branch: x should be narrowed to string
-        let then_type = then_ctx.get_narrowed_type("x").unwrap();
+        let then_type = then_ctx.get_narrowed_type(x_id).unwrap();
         assert!(matches!(
             then_type.kind,
             TypeKind::Primitive(PrimitiveType::String)
         ));
 
         // In else branch: x should be number | nil
-        let else_type = else_ctx.get_narrowed_type("x").unwrap();
+        let else_type = else_ctx.get_narrowed_type(x_id).unwrap();
         if let TypeKind::Union(types) = &else_type.kind {
             assert_eq!(types.len(), 2);
             assert!(types
@@ -267,15 +259,19 @@ mod tests {
         use crate::ast::types::TypeReference;
         use crate::ast::Ident;
 
-        // Setup: pet: Animal | Dog (union of two class types)
+        let (interner, _) = crate::string_interner::StringInterner::new_with_common_identifiers();
+
         let mut variable_types = FxHashMap::default();
+        let pet_id = get_string_id("pet", &interner);
+        let animal_id = get_string_id("Animal", &interner);
+        let dog_id = get_string_id("Dog", &interner);
         variable_types.insert(
-            "pet".to_string(),
+            pet_id,
             Type::new(
                 TypeKind::Union(vec![
                     Type::new(
                         TypeKind::Reference(TypeReference {
-                            name: Ident::new("Animal".to_string(), make_span()),
+                            name: Ident::new(animal_id, make_span()),
                             type_arguments: None,
                             span: make_span(),
                         }),
@@ -283,7 +279,7 @@ mod tests {
                     ),
                     Type::new(
                         TypeKind::Reference(TypeReference {
-                            name: Ident::new("Dog".to_string(), make_span()),
+                            name: Ident::new(dog_id, make_span()),
                             type_arguments: None,
                             span: make_span(),
                         }),
@@ -299,11 +295,11 @@ mod tests {
             ExpressionKind::Binary(
                 BinaryOp::Instanceof,
                 Box::new(Expression::new(
-                    ExpressionKind::Identifier("pet".to_string()),
+                    ExpressionKind::Identifier(pet_id),
                     make_span(),
                 )),
                 Box::new(Expression::new(
-                    ExpressionKind::Identifier("Dog".to_string()),
+                    ExpressionKind::Identifier(dog_id),
                     make_span(),
                 )),
             ),
@@ -317,12 +313,13 @@ mod tests {
             &condition,
             &base_context,
             &variable_types,
+            &interner,
         );
 
         // In then branch: pet should be narrowed to Dog
-        let then_type = then_ctx.get_narrowed_type("pet").unwrap();
+        let then_type = then_ctx.get_narrowed_type(pet_id).unwrap();
         if let TypeKind::Reference(type_ref) = &then_type.kind {
-            assert_eq!(type_ref.name.node, "Dog");
+            assert_eq!(type_ref.name.node, dog_id);
         } else {
             panic!("Expected reference type for then branch");
         }

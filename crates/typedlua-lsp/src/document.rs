@@ -11,8 +11,16 @@ use std::sync::Arc;
 use typedlua_core::ast::Program;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::module_resolver::{ModuleId, ModuleRegistry, ModuleResolver};
+use typedlua_core::string_interner::StringInterner;
 use typedlua_core::typechecker::SymbolTable;
 use typedlua_core::{Lexer, Parser};
+
+/// Parsed AST along with its string interner for resolving StringId values
+pub type ParsedAst = (
+    Arc<Program>,
+    Arc<StringInterner>,
+    Arc<typedlua_core::string_interner::CommonIdentifiers>,
+);
 
 /// Manages open documents and their cached analysis results
 #[derive(Debug)]
@@ -46,8 +54,8 @@ pub struct DocumentManager {
 pub struct Document {
     pub text: String,
     pub version: i32,
-    /// Cached parsed AST (invalidated on change)
-    ast: RefCell<Option<Arc<Program>>>,
+    /// Cached parsed AST with its interner (invalidated on change)
+    ast: RefCell<Option<ParsedAst>>,
     /// Cached symbol table (invalidated on change) - reserved for future optimization
     pub symbol_table: Option<Arc<SymbolTable>>,
     /// Module ID for this document (used for cross-file symbol resolution)
@@ -99,26 +107,39 @@ impl Document {
     /// in `DocumentManager::change()`).
     ///
     /// # Returns
-    /// - `Some(Arc<Program>)` if parsing succeeds (either from cache or fresh parse)
+    /// - `Some((Arc<Program>, Arc<StringInterner>))` if parsing succeeds (either from cache or fresh parse)
     /// - `None` if parsing fails
-    pub fn get_or_parse_ast(&self) -> Option<Arc<Program>> {
+    ///
+    /// The returned interner is required to resolve StringId values in the AST.
+    pub fn get_or_parse_ast(&self) -> Option<ParsedAst> {
         // Check if we have a cached AST
         if let Some(cached) = self.ast.borrow().as_ref() {
-            return Some(Arc::clone(cached));
+            return Some((
+                Arc::clone(&cached.0),
+                Arc::clone(&cached.1),
+                Arc::clone(&cached.2),
+            ));
         }
 
         // Parse the document
         let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let mut lexer = Lexer::new(&self.text, handler.clone());
+        let (mut interner, common_ids) = StringInterner::new_with_common_identifiers();
+        let mut lexer = Lexer::new(&self.text, handler.clone(), &mut interner);
         let tokens = lexer.tokenize().ok()?;
 
-        let mut parser = Parser::new(tokens, handler);
+        let mut parser = Parser::new(tokens, handler, &mut interner, &common_ids);
         let program = parser.parse().ok()?;
 
         let ast_arc = Arc::new(program);
-        *self.ast.borrow_mut() = Some(Arc::clone(&ast_arc));
+        let interner_arc = Arc::new(interner);
+        let common_ids_arc = Arc::new(common_ids);
+        *self.ast.borrow_mut() = Some((
+            Arc::clone(&ast_arc),
+            Arc::clone(&interner_arc),
+            Arc::clone(&common_ids_arc),
+        ));
 
-        Some(ast_arc)
+        Some((ast_arc, interner_arc, common_ids_arc))
     }
 
     /// Clear the cached AST (called when document changes)
@@ -201,7 +222,7 @@ impl DocumentManager {
         // Eagerly parse the document to warm the cache
         if let Some(doc) = self.documents.get(&uri) {
             // Pre-parse to populate the AST cache
-            if let Some(ast) = doc.get_or_parse_ast() {
+            if let Some((ast, interner, _common_ids)) = doc.get_or_parse_ast() {
                 // Update symbol index if this document has a module ID
                 if let Some(mid) = module_id.as_ref() {
                     let module_resolver = Arc::clone(&self.module_resolver);
@@ -209,6 +230,7 @@ impl DocumentManager {
                         &uri,
                         mid,
                         &ast,
+                        &interner,
                         |import_path, current_module_id| {
                             module_resolver
                                 .resolve(import_path, current_module_id.path())
@@ -262,7 +284,7 @@ impl DocumentManager {
         // Eagerly re-parse the changed document to warm the cache
         if let Some(doc) = self.documents.get(&uri) {
             // Pre-parse to populate the AST cache
-            if let Some(ast) = doc.get_or_parse_ast() {
+            if let Some((ast, interner, _common_ids)) = doc.get_or_parse_ast() {
                 // Update symbol index if this document has a module ID
                 if let Some(module_id) = self.uri_to_module_id.get(&uri).cloned() {
                     let module_resolver = Arc::clone(&self.module_resolver);
@@ -270,6 +292,7 @@ impl DocumentManager {
                         &uri,
                         &module_id,
                         &ast,
+                        &interner,
                         |import_path, current_module_id| {
                             module_resolver
                                 .resolve(import_path, current_module_id.path())
@@ -366,10 +389,10 @@ impl DocumentManager {
     /// This is a convenience method that combines document lookup with AST parsing/caching.
     ///
     /// # Returns
-    /// - `Some(Arc<Program>)` if document exists and parsing succeeds
+    /// - `Some((Arc<Program>, Arc<StringInterner>))` if document exists and parsing succeeds
     /// - `None` if document doesn't exist or parsing fails
     #[allow(dead_code)] // Public API for AST access with caching
-    pub fn get_or_parse_ast(&self, uri: &Uri) -> Option<Arc<Program>> {
+    pub fn get_or_parse_ast(&self, uri: &Uri) -> Option<ParsedAst> {
         self.get(uri).and_then(|doc| doc.get_or_parse_ast())
     }
 

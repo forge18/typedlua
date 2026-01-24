@@ -1,10 +1,12 @@
 use crate::document::Document;
 use lsp_types::*;
+
 use std::sync::Arc;
 use typedlua_core::ast::expression::{Expression, ExpressionKind};
 use typedlua_core::ast::pattern::Pattern;
 use typedlua_core::ast::statement::{ClassMember, Statement, VariableKind};
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
+use typedlua_core::string_interner::StringInterner;
 use typedlua_core::{Lexer, Parser, Span};
 
 /// Provides semantic tokens for syntax highlighting based on semantic analysis
@@ -48,7 +50,8 @@ impl SemanticTokensProvider {
     pub fn provide_full(&self, document: &Document) -> SemanticTokens {
         // Parse the document
         let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let mut lexer = Lexer::new(&document.text, handler.clone());
+        let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+        let mut lexer = Lexer::new(&document.text, handler.clone(), &interner);
         let tokens = match lexer.tokenize() {
             Ok(t) => t,
             Err(_) => {
@@ -59,7 +62,7 @@ impl SemanticTokensProvider {
             }
         };
 
-        let mut parser = Parser::new(tokens, handler);
+        let mut parser = Parser::new(tokens, handler, &interner, &common_ids);
         let ast = match parser.parse() {
             Ok(a) => a,
             Err(_) => {

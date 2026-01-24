@@ -3,17 +3,24 @@ use crate::ast::statement::{IndexKeyType, PropertySignature};
 use crate::ast::types::{MappedType, ObjectType, ObjectTypeMember, PrimitiveType, Type, TypeKind};
 use crate::ast::Ident;
 use crate::span::Span;
+use crate::string_interner::StringInterner;
 use rustc_hash::FxHashMap;
 
 /// Apply a utility type transformation
-pub fn apply_utility_type(name: &str, type_args: &[Type], span: Span) -> Result<Type, String> {
+pub fn apply_utility_type(
+    name: &str,
+    type_args: &[Type],
+    span: Span,
+    interner: &StringInterner,
+    common_ids: &crate::string_interner::CommonIdentifiers,
+) -> Result<Type, String> {
     match name {
         "Partial" => partial(type_args, span),
         "Required" => required(type_args, span),
         "Readonly" => readonly(type_args, span),
-        "Record" => record(type_args, span),
-        "Pick" => pick(type_args, span),
-        "Omit" => omit(type_args, span),
+        "Record" => record(type_args, span, interner, common_ids),
+        "Pick" => pick(type_args, span, interner),
+        "Omit" => omit(type_args, span, interner),
         "Exclude" => exclude(type_args, span),
         "Extract" => extract(type_args, span),
         "NonNilable" => non_nilable(type_args, span),
@@ -160,7 +167,12 @@ fn readonly(type_args: &[Type], span: Span) -> Result<Type, String> {
 }
 
 /// Record<K, V> - Constructs an object type with keys of type K and values of type V
-fn record(type_args: &[Type], span: Span) -> Result<Type, String> {
+fn record(
+    type_args: &[Type],
+    span: Span,
+    _interner: &StringInterner,
+    common_ids: &crate::string_interner::CommonIdentifiers,
+) -> Result<Type, String> {
     if type_args.len() != 2 {
         return Err(format!(
             "Record<K, V> expects 2 type arguments, got {}",
@@ -205,8 +217,9 @@ fn record(type_args: &[Type], span: Span) -> Result<Type, String> {
     use crate::ast::statement::IndexSignature;
     use crate::ast::Ident;
 
+    let key_id = common_ids.key;
     let index_sig = IndexSignature {
-        key_name: Ident::new("key".to_string(), span),
+        key_name: Ident::new(key_id, span),
         key_type: index_key_type,
         value_type: value_type.clone(),
         span,
@@ -222,7 +235,7 @@ fn record(type_args: &[Type], span: Span) -> Result<Type, String> {
 }
 
 /// Pick<T, K> - Picks a subset of properties from T
-fn pick(type_args: &[Type], span: Span) -> Result<Type, String> {
+fn pick(type_args: &[Type], span: Span, _interner: &StringInterner) -> Result<Type, String> {
     if type_args.len() != 2 {
         return Err(format!(
             "Pick<T, K> expects 2 type arguments, got {}",
@@ -244,7 +257,8 @@ fn pick(type_args: &[Type], span: Span) -> Result<Type, String> {
                 .filter_map(|member| {
                     match member {
                         ObjectTypeMember::Property(prop) => {
-                            if keys_to_pick.contains(&prop.name.node.as_str()) {
+                            let prop_name = prop.name.node.to_string();
+                            if keys_to_pick.contains(&prop_name) {
                                 Some(member.clone())
                             } else {
                                 None
@@ -269,7 +283,7 @@ fn pick(type_args: &[Type], span: Span) -> Result<Type, String> {
 }
 
 /// Omit<T, K> - Omits properties from T
-fn omit(type_args: &[Type], span: Span) -> Result<Type, String> {
+fn omit(type_args: &[Type], span: Span, _interner: &StringInterner) -> Result<Type, String> {
     if type_args.len() != 2 {
         return Err(format!(
             "Omit<T, K> expects 2 type arguments, got {}",
@@ -291,7 +305,8 @@ fn omit(type_args: &[Type], span: Span) -> Result<Type, String> {
                 .filter_map(|member| {
                     match member {
                         ObjectTypeMember::Property(prop) => {
-                            if !keys_to_omit.contains(&prop.name.node.as_str()) {
+                            let prop_name = prop.name.node.to_string();
+                            if !keys_to_omit.contains(&prop_name) {
                                 Some(member.clone())
                             } else {
                                 None
@@ -519,6 +534,7 @@ fn parameters(type_args: &[Type], span: Span) -> Result<Type, String> {
 pub fn evaluate_mapped_type(
     mapped: &MappedType,
     type_env: &super::TypeEnvironment,
+    interner: &StringInterner,
 ) -> Result<Type, String> {
     // Resolve the 'in' type if it's a KeyOf expression
     let in_type_resolved = match &mapped.in_type.kind {
@@ -535,9 +551,10 @@ pub fn evaluate_mapped_type(
     let mut members = Vec::new();
 
     for key in keys {
+        let key_id = interner.intern(key);
         let prop = PropertySignature {
             is_readonly: mapped.is_readonly,
-            name: Ident::new(key.to_string(), mapped.span),
+            name: Ident::new(key_id, mapped.span),
             is_optional: mapped.is_optional,
             type_annotation: (*mapped.value_type).clone(),
             span: mapped.span,
@@ -558,10 +575,13 @@ pub fn evaluate_mapped_type(
 pub fn evaluate_keyof(typ: &Type, type_env: &super::TypeEnvironment) -> Result<Type, String> {
     // Resolve type reference first
     let resolved_type = match &typ.kind {
-        TypeKind::Reference(type_ref) => match type_env.lookup_type(&type_ref.name.node) {
-            Some(t) => t.clone(),
-            None => return Err(format!("Type '{}' not found", type_ref.name.node)),
-        },
+        TypeKind::Reference(type_ref) => {
+            let type_name = type_ref.name.node.to_string();
+            match type_env.lookup_type(&type_name) {
+                Some(t) => t.clone(),
+                None => return Err(format!("Type '{}' not found", type_ref.name.node)),
+            }
+        }
         _ => typ.clone(),
     };
 
@@ -573,13 +593,13 @@ pub fn evaluate_keyof(typ: &Type, type_env: &super::TypeEnvironment) -> Result<T
                 match member {
                     ObjectTypeMember::Property(prop) => {
                         keys.push(Type::new(
-                            TypeKind::Literal(Literal::String(prop.name.node.clone())),
+                            TypeKind::Literal(Literal::String(prop.name.node.to_string())),
                             prop.span,
                         ));
                     }
                     ObjectTypeMember::Method(method) => {
                         keys.push(Type::new(
-                            TypeKind::Literal(Literal::String(method.name.node.clone())),
+                            TypeKind::Literal(Literal::String(method.name.node.to_string())),
                             method.span,
                         ));
                     }
@@ -687,7 +707,8 @@ pub fn evaluate_conditional_type(
 fn resolve_type_reference(typ: &Type, type_env: &super::TypeEnvironment) -> Type {
     match &typ.kind {
         TypeKind::Reference(type_ref) => {
-            match type_env.lookup_type(&type_ref.name.node) {
+            let type_name = type_ref.name.node.to_string();
+            match type_env.lookup_type(&type_name) {
                 Some(t) => t.clone(),
                 None => typ.clone(), // Can't resolve, use as-is
             }
@@ -739,7 +760,7 @@ fn try_match_and_infer(
     match &pattern.kind {
         // If pattern is `infer R`, capture the check_type as R
         TypeKind::Infer(name) => {
-            inferred.insert(name.node.clone(), check_type.clone());
+            inferred.insert(name.node.to_string(), check_type.clone());
             true
         }
 
@@ -846,7 +867,8 @@ fn substitute_inferred_types(
     match &typ.kind {
         // If it's a reference to an inferred type variable, substitute it
         TypeKind::Reference(type_ref) if type_ref.type_arguments.is_none() => {
-            if let Some(inferred_type) = inferred.get(&type_ref.name.node) {
+            let type_name = type_ref.name.node.to_string();
+            if let Some(inferred_type) = inferred.get(&type_name) {
                 Ok(inferred_type.clone())
             } else {
                 Ok(typ.clone())
@@ -923,14 +945,14 @@ fn extract_keys_from_type(typ: &Type) -> Result<Vec<&str>, String> {
 // Helper functions
 
 /// Extract string literal keys from a type (for Pick/Omit)
-fn extract_string_literal_keys(typ: &Type) -> Result<Vec<&str>, String> {
+fn extract_string_literal_keys(typ: &Type) -> Result<Vec<String>, String> {
     match &typ.kind {
-        TypeKind::Literal(Literal::String(s)) => Ok(vec![s.as_str()]),
+        TypeKind::Literal(Literal::String(s)) => Ok(vec![s.clone()]),
         TypeKind::Union(types) => {
             let mut keys = Vec::new();
             for t in types {
                 match &t.kind {
-                    TypeKind::Literal(Literal::String(s)) => keys.push(s.as_str()),
+                    TypeKind::Literal(Literal::String(s)) => keys.push(s.clone()),
                     _ => {
                         return Err(
                             "Pick/Omit key type must be string literal or union of string literals"
@@ -1032,7 +1054,8 @@ fn expand_type_to_strings(
     // First resolve any type references
     let resolved = match &ty.kind {
         TypeKind::Reference(type_ref) => {
-            if let Some(resolved) = type_env.lookup_type(&type_ref.name.node) {
+            let type_name = type_ref.name.node.to_string();
+            if let Some(resolved) = type_env.lookup_type(&type_name) {
                 resolved
             } else {
                 ty
@@ -1105,12 +1128,14 @@ mod tests {
     }
 
     fn make_object_type(properties: Vec<(&str, Type, bool, bool)>) -> Type {
+        let interner = crate::string_interner::StringInterner::new();
         let members = properties
             .into_iter()
             .map(|(name, typ, optional, readonly)| {
+                let name_id = interner.intern(name);
                 ObjectTypeMember::Property(PropertySignature {
                     is_readonly: readonly,
-                    name: Ident::new(name.to_string(), make_span()),
+                    name: Ident::new(name_id, make_span()),
                     is_optional: optional,
                     type_annotation: typ,
                     span: make_span(),
@@ -1237,7 +1262,9 @@ mod tests {
         let key_type = Type::new(TypeKind::Primitive(PrimitiveType::String), make_span());
         let value_type = Type::new(TypeKind::Primitive(PrimitiveType::Number), make_span());
 
-        let result = record(&[key_type, value_type], make_span()).unwrap();
+        let (interner, common_ids) =
+            crate::string_interner::StringInterner::new_with_common_identifiers();
+        let result = record(&[key_type, value_type], make_span(), &interner, &common_ids).unwrap();
 
         if let TypeKind::Object(obj_type) = &result.kind {
             assert_eq!(obj_type.members.len(), 1);

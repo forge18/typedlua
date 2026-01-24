@@ -1,12 +1,14 @@
+use typedlua_core::string_interner::StringInterner;
 // Simplified stress tests - tests parser/lexer don't panic on large inputs
 use std::sync::Arc;
 use typedlua_core::{diagnostics::CollectingDiagnosticHandler, lexer::Lexer, parser::Parser};
 
 fn lex_and_parse(input: &str) -> bool {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
-    let mut lexer = Lexer::new(input, handler.clone());
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let mut lexer = Lexer::new(input, handler.clone(), &interner);
     if let Ok(tokens) = lexer.tokenize() {
-        let mut parser = Parser::new(tokens, handler);
+        let mut parser = Parser::new(tokens, handler, &interner, &common_ids);
         parser.parse().is_ok()
     } else {
         false
@@ -166,7 +168,8 @@ fn test_lexer_with_very_long_identifier() {
     let input = format!("const {}: number = 42", long_name);
 
     let handler = Arc::new(CollectingDiagnosticHandler::new());
-    let mut lexer = Lexer::new(&input, handler);
+    let (interner, _common_ids) = StringInterner::new_with_common_identifiers();
+    let mut lexer = Lexer::new(&input, handler, &interner);
     assert!(
         lexer.tokenize().is_ok(),
         "Should tokenize very long identifier"
@@ -179,7 +182,8 @@ fn test_lexer_with_very_long_string() {
     let input = format!("const msg: string = \"{}\"", long_string);
 
     let handler = Arc::new(CollectingDiagnosticHandler::new());
-    let mut lexer = Lexer::new(&input, handler);
+    let (interner, _common_ids) = StringInterner::new_with_common_identifiers();
+    let mut lexer = Lexer::new(&input, handler, &interner);
     assert!(lexer.tokenize().is_ok(), "Should tokenize very long string");
 }
 
@@ -189,7 +193,8 @@ fn test_extremely_long_comment() {
     let input = format!("-- {}\nconst x: number = 42", long_comment);
 
     let handler = Arc::new(CollectingDiagnosticHandler::new());
-    let mut lexer = Lexer::new(&input, handler);
+    let (interner, _common_ids) = StringInterner::new_with_common_identifiers();
+    let mut lexer = Lexer::new(&input, handler, &interner);
     assert!(lexer.tokenize().is_ok(), "Should handle very long comment");
 }
 

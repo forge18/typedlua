@@ -238,7 +238,7 @@ fn test_strict_mode_with_config() {
 
     let config = r#"
 compilerOptions:
-  strict: true
+  strictNullChecks: true
   noEmit: true
 "#;
     fs::write(temp_dir.path().join("tlconfig.yaml"), config).unwrap();

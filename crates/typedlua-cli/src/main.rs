@@ -310,8 +310,12 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
             // Create diagnostic handler
             let handler = Arc::new(CollectingDiagnosticHandler::new());
 
+            // Create string interner with common identifiers
+            let (interner, common_ids) =
+                typedlua_core::string_interner::StringInterner::new_with_common_identifiers();
+
             // Lex the source
-            let mut lexer = Lexer::new(&source, handler.clone());
+            let mut lexer = Lexer::new(&source, handler.clone(), &interner);
             let tokens = match lexer.tokenize() {
                 Ok(tokens) => tokens,
                 Err(_) => {
@@ -326,7 +330,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
             };
 
             // Parse the tokens
-            let mut parser = Parser::new(tokens, handler.clone());
+            let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
             let program = match parser.parse() {
                 Ok(program) => program,
                 Err(_) => {
@@ -354,7 +358,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
             // Type check the program
             use typedlua_core::typechecker::TypeChecker;
 
-            let mut type_checker = TypeChecker::new(handler.clone());
+            let mut type_checker = TypeChecker::new(handler.clone(), &interner, common_ids);
 
             if type_checker.check_program(&program).is_err() {
                 return CompilationResult {
@@ -389,7 +393,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
                 };
             }
 
-            let mut generator = CodeGenerator::new().with_target(target);
+            let mut generator = CodeGenerator::new(&interner).with_target(target);
 
             if cli.source_map || cli.inline_source_map {
                 generator = generator.with_source_map(file_path.to_string_lossy().to_string());

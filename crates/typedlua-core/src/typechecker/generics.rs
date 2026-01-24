@@ -1,5 +1,6 @@
 use crate::ast::statement::TypeParameter;
 use crate::ast::types::{Type, TypeKind, TypeReference};
+use crate::string_interner::StringId;
 use rustc_hash::FxHashMap;
 
 #[cfg(test)]
@@ -20,30 +21,30 @@ pub fn instantiate_type(
     }
 
     // Build substitution map
-    let mut substitutions: FxHashMap<String, Type> = FxHashMap::default();
+    let mut substitutions: FxHashMap<StringId, Type> = FxHashMap::default();
     for (param, arg) in type_params.iter().zip(type_args.iter()) {
-        substitutions.insert(param.name.node.clone(), arg.clone());
+        substitutions.insert(param.name.node, arg.clone());
     }
 
     substitute_type(typ, &substitutions)
 }
 
 /// Recursively substitute type parameters in a type
-fn substitute_type(typ: &Type, substitutions: &FxHashMap<String, Type>) -> Result<Type, String> {
+fn substitute_type(typ: &Type, substitutions: &FxHashMap<StringId, Type>) -> Result<Type, String> {
     match &typ.kind {
         // If this is a type reference that matches a type parameter, substitute it
         TypeKind::Reference(type_ref) => {
-            let name = &type_ref.name.node;
+            let name = type_ref.name.node;
 
             // Check if this is a type parameter
-            if let Some(substituted) = substitutions.get(name) {
+            if let Some(substituted) = substitutions.get(&name) {
                 // Apply type arguments if present (e.g., for higher-kinded types)
                 if let Some(ref args) = type_ref.type_arguments {
                     // This would be a higher-kinded type - not common, but we should handle it
                     // For now, just return an error
                     if !args.is_empty() {
                         return Err(format!(
-                            "Type parameter '{}' cannot have type arguments",
+                            "Type parameter {:?} cannot have type arguments",
                             name
                         ));
                     }
@@ -226,7 +227,7 @@ pub fn infer_type_arguments(
         ));
     }
 
-    let mut inferred: FxHashMap<String, Type> = FxHashMap::default();
+    let mut inferred: FxHashMap<StringId, Type> = FxHashMap::default();
 
     // For each parameter-argument pair, try to infer type arguments
     for (param, arg_type) in function_params.iter().zip(arg_types.iter()) {
@@ -245,7 +246,7 @@ pub fn infer_type_arguments(
             result.push((**default).clone());
         } else {
             return Err(format!(
-                "Could not infer type argument for parameter '{}'",
+                "Could not infer type argument for parameter '{:?}'",
                 type_param.name.node
             ));
         }
@@ -258,20 +259,20 @@ pub fn infer_type_arguments(
 fn infer_from_types(
     param_type: &Type,
     arg_type: &Type,
-    inferred: &mut FxHashMap<String, Type>,
+    inferred: &mut FxHashMap<StringId, Type>,
 ) -> Result<(), String> {
     match &param_type.kind {
         // If parameter is a type reference (e.g., T), and it's a type parameter
         TypeKind::Reference(type_ref) if type_ref.type_arguments.is_none() => {
             // This might be a type parameter - record the inference
-            let param_name = type_ref.name.node.clone();
+            let param_name = type_ref.name.node;
 
             // Check if we already inferred this type parameter
             if let Some(existing) = inferred.get(&param_name) {
                 // Verify they match (simplified - should use proper type equality)
                 if !types_equal(existing, arg_type) {
                     return Err(format!(
-                        "Conflicting type inference for parameter '{}'",
+                        "Conflicting type inference for parameter '{:?}'",
                         param_name
                     ));
                 }
@@ -332,10 +333,12 @@ mod tests {
     #[test]
     fn test_instantiate_simple_type() {
         let span = Span::new(0, 0, 0, 0);
+        let interner = crate::string_interner::StringInterner::new();
+        let t_id = interner.intern("T");
 
         // Type parameter T
         let type_param = TypeParameter {
-            name: Spanned::new("T".to_string(), span),
+            name: Spanned::new(t_id, span),
             constraint: None,
             default: None,
             span,
@@ -344,7 +347,7 @@ mod tests {
         // Type reference T
         let type_ref_t = Type::new(
             TypeKind::Reference(TypeReference {
-                name: Spanned::new("T".to_string(), span),
+                name: Spanned::new(t_id, span),
                 type_arguments: None,
                 span,
             }),
@@ -367,10 +370,12 @@ mod tests {
     #[test]
     fn test_instantiate_array_type() {
         let span = Span::new(0, 0, 0, 0);
+        let interner = crate::string_interner::StringInterner::new();
+        let t_id = interner.intern("T");
 
         // Type parameter T
         let type_param = TypeParameter {
-            name: Spanned::new("T".to_string(), span),
+            name: Spanned::new(t_id, span),
             constraint: None,
             default: None,
             span,
@@ -380,7 +385,7 @@ mod tests {
         let array_t = Type::new(
             TypeKind::Array(Box::new(Type::new(
                 TypeKind::Reference(TypeReference {
-                    name: Spanned::new("T".to_string(), span),
+                    name: Spanned::new(t_id, span),
                     type_arguments: None,
                     span,
                 }),
@@ -410,10 +415,12 @@ mod tests {
     #[test]
     fn test_wrong_number_of_type_args() {
         let span = Span::new(0, 0, 0, 0);
+        let interner = crate::string_interner::StringInterner::new();
+        let t_id = interner.intern("T");
 
         // Type parameter T
         let type_param = TypeParameter {
-            name: Spanned::new("T".to_string(), span),
+            name: Spanned::new(t_id, span),
             constraint: None,
             default: None,
             span,
@@ -421,7 +428,7 @@ mod tests {
 
         let type_ref_t = Type::new(
             TypeKind::Reference(TypeReference {
-                name: Spanned::new("T".to_string(), span),
+                name: Spanned::new(t_id, span),
                 type_arguments: None,
                 span,
             }),
@@ -444,21 +451,25 @@ mod tests {
         use crate::ast::statement::Parameter;
 
         let span = Span::new(0, 0, 0, 0);
+        let interner = crate::string_interner::StringInterner::new();
+        let t_id = interner.intern("T");
+        let _x_id = interner.intern("x");
 
         // Type parameter T
         let type_param = TypeParameter {
-            name: Spanned::new("T".to_string(), span),
+            name: Spanned::new(t_id, span),
             constraint: None,
             default: None,
             span,
         };
 
         // Function parameter: (value: T)
+        let value_id = interner.intern("value");
         let func_param = Parameter {
-            pattern: Pattern::Identifier(Spanned::new("value".to_string(), span)),
+            pattern: Pattern::Identifier(Spanned::new(value_id, span)),
             type_annotation: Some(Type::new(
                 TypeKind::Reference(TypeReference {
-                    name: Spanned::new("T".to_string(), span),
+                    name: Spanned::new(t_id, span),
                     type_arguments: None,
                     span,
                 }),
@@ -491,10 +502,13 @@ mod tests {
         use crate::ast::statement::Parameter;
 
         let span = Span::new(0, 0, 0, 0);
+        let interner = crate::string_interner::StringInterner::new();
+        let t_id = interner.intern("T");
+        let values_id = interner.intern("values");
 
         // Type parameter T
         let type_param = TypeParameter {
-            name: Spanned::new("T".to_string(), span),
+            name: Spanned::new(t_id, span),
             constraint: None,
             default: None,
             span,
@@ -502,11 +516,11 @@ mod tests {
 
         // Function parameter: (values: Array<T>)
         let func_param = Parameter {
-            pattern: Pattern::Identifier(Spanned::new("values".to_string(), span)),
+            pattern: Pattern::Identifier(Spanned::new(values_id, span)),
             type_annotation: Some(Type::new(
                 TypeKind::Array(Box::new(Type::new(
                     TypeKind::Reference(TypeReference {
-                        name: Spanned::new("T".to_string(), span),
+                        name: Spanned::new(t_id, span),
                         type_arguments: None,
                         span,
                     }),
@@ -544,10 +558,12 @@ mod tests {
     #[test]
     fn test_check_constraints_pass() {
         let span = Span::new(0, 0, 0, 0);
+        let interner = crate::string_interner::StringInterner::new();
+        let t_id = interner.intern("T");
 
         // Type parameter T extends number
         let type_param = TypeParameter {
-            name: Spanned::new("T".to_string(), span),
+            name: Spanned::new(t_id, span),
             constraint: Some(Box::new(Type::new(
                 TypeKind::Primitive(PrimitiveType::Number),
                 span,
@@ -566,10 +582,12 @@ mod tests {
     #[test]
     fn test_check_constraints_fail() {
         let span = Span::new(0, 0, 0, 0);
+        let interner = crate::string_interner::StringInterner::new();
+        let t_id = interner.intern("T");
 
         // Type parameter T extends number
         let type_param = TypeParameter {
-            name: Spanned::new("T".to_string(), span),
+            name: Spanned::new(t_id, span),
             constraint: Some(Box::new(Type::new(
                 TypeKind::Primitive(PrimitiveType::Number),
                 span,

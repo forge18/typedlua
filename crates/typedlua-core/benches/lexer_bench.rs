@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use typedlua_core::Lexer;
 
 fn bench_lexer_simple(c: &mut Criterion) {
@@ -65,5 +65,10 @@ fn bench_lexer_size_scaling(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_lexer_simple, bench_lexer_class, bench_lexer_size_scaling);
+criterion_group!(
+    benches,
+    bench_lexer_simple,
+    bench_lexer_class,
+    bench_lexer_size_scaling
+);
 criterion_main!(benches);

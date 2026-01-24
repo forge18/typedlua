@@ -49,7 +49,7 @@ struct ClassContext {
 }
 
 /// Type checker for TypedLua programs
-pub struct TypeChecker {
+pub struct TypeChecker<'a> {
     symbol_table: SymbolTable,
     type_env: TypeEnvironment,
     current_function_return_type: Option<Type>,
@@ -67,10 +67,16 @@ pub struct TypeChecker {
     /// Module resolver for imports
     module_resolver: Option<Arc<crate::module_resolver::ModuleResolver>>,
     diagnostic_handler: Arc<dyn DiagnosticHandler>,
+    interner: &'a crate::string_interner::StringInterner,
+    common: &'a crate::string_interner::CommonIdentifiers,
 }
 
-impl TypeChecker {
-    pub fn new(diagnostic_handler: Arc<dyn DiagnosticHandler>) -> Self {
+impl<'a> TypeChecker<'a> {
+    pub fn new(
+        diagnostic_handler: Arc<dyn DiagnosticHandler>,
+        interner: &'a crate::string_interner::StringInterner,
+        common: &'a crate::string_interner::CommonIdentifiers,
+    ) -> Self {
         let mut checker = Self {
             symbol_table: SymbolTable::new(),
             type_env: TypeEnvironment::new(),
@@ -84,6 +90,8 @@ impl TypeChecker {
             current_module_id: None,
             module_resolver: None,
             diagnostic_handler,
+            interner,
+            common,
         };
 
         // Load standard library with default Lua version
@@ -122,11 +130,13 @@ impl TypeChecker {
     /// Create a TypeChecker with module support for multi-module compilation
     pub fn new_with_module_support(
         diagnostic_handler: Arc<dyn DiagnosticHandler>,
+    interner: &'a crate::string_interner::StringInterner,
+    common: &'a crate::string_interner::CommonIdentifiers,
         registry: Arc<crate::module_resolver::ModuleRegistry>,
         module_id: crate::module_resolver::ModuleId,
         resolver: Arc<crate::module_resolver::ModuleResolver>,
     ) -> Self {
-        let mut checker = Self::new(diagnostic_handler);
+        let mut checker = Self::new(diagnostic_handler, interner, common);
         checker.module_registry = Some(registry);
         checker.current_module_id = Some(module_id);
         checker.module_resolver = Some(resolver);
@@ -145,12 +155,12 @@ impl TypeChecker {
         for (filename, source) in stdlib_files {
             // Parse the stdlib file
             let handler = Arc::new(crate::diagnostics::CollectingDiagnosticHandler::new());
-            let mut lexer = Lexer::new(source, handler.clone());
+            let mut lexer = Lexer::new(source, handler.clone(), &self.interner);
             let tokens = lexer
                 .tokenize()
                 .map_err(|e| format!("Failed to lex {}: {:?}", filename, e))?;
 
-            let mut parser = Parser::new(tokens, handler.clone());
+            let mut parser = Parser::new(tokens, handler.clone(), &self.interner, &self.common);
             let program = parser.parse();
 
             if let Err(ref e) = program {
@@ -256,7 +266,7 @@ impl TypeChecker {
     ) -> Result<(), TypeCheckError> {
         match pattern {
             Pattern::Identifier(ident) => {
-                let symbol = Symbol::new(ident.node.clone(), kind, typ, span);
+                let symbol = Symbol::new(self.interner.resolve(ident.node).to_string(), kind, typ, span);
                 self.symbol_table
                     .declare(symbol)
                     .map_err(|e| TypeCheckError::new(e, span))?;
@@ -275,7 +285,7 @@ impl TypeChecker {
                                 let array_type =
                                     Type::new(TypeKind::Array(elem_type.clone()), span);
                                 let symbol =
-                                    Symbol::new(ident.node.clone(), kind, array_type, span);
+                                    Symbol::new(self.interner.resolve(ident.node).to_string(), kind, array_type, span);
                                 self.symbol_table
                                     .declare(symbol)
                                     .map_err(|e| TypeCheckError::new(e, span))?;
@@ -325,7 +335,7 @@ impl TypeChecker {
                         } else {
                             // Shorthand: { x } means { x: x }
                             let symbol =
-                                Symbol::new(prop_pattern.key.node.clone(), kind, prop_type, span);
+                                Symbol::new(self.interner.resolve(prop_pattern.key.node).to_string(), kind, prop_type, span);
                             self.symbol_table
                                 .declare(symbol)
                                 .map_err(|e| TypeCheckError::new(e, span))?;
@@ -394,7 +404,7 @@ impl TypeChecker {
         // Declare function in symbol table
 
         let symbol = Symbol::new(
-            decl.name.node.clone(),
+            self.interner.resolve(decl.name.node).to_string(),
             SymbolKind::Function,
             func_type,
             decl.span,
@@ -423,7 +433,7 @@ impl TypeChecker {
                 // Type parameters are treated as local types in the function scope
                 // We register them as type aliases for now
                 self.type_env
-                    .register_type_alias(type_param.name.node.clone(), param_type)
+                    .register_type_alias(self.interner.resolve(type_param.name.node).to_string(), param_type)
                     .map_err(|e| TypeCheckError::new(e, type_param.span))?;
             }
         }
@@ -485,7 +495,8 @@ impl TypeChecker {
         // This includes both variables and functions so type predicates can be checked
         let mut variable_types = FxHashMap::default();
         for (name, symbol) in self.symbol_table.all_visible_symbols() {
-            variable_types.insert(name.clone(), symbol.typ.clone());
+            let name_id = self.interner.intern(&name);
+            variable_types.insert(name_id, symbol.typ.clone());
         }
 
         // Apply type narrowing based on the condition
@@ -493,6 +504,7 @@ impl TypeChecker {
             &if_stmt.condition,
             &self.narrowing_context,
             &variable_types,
+            &self.interner,
         );
 
         // Check then block with narrowed context
@@ -512,6 +524,7 @@ impl TypeChecker {
                 &else_if.condition,
                 &self.narrowing_context,
                 &variable_types,
+                &self.interner,
             );
 
             self.narrowing_context = elseif_then;
@@ -547,7 +560,7 @@ impl TypeChecker {
                 let number_type =
                     Type::new(TypeKind::Primitive(PrimitiveType::Number), numeric.span);
                 let symbol = Symbol::new(
-                    numeric.variable.node.clone(),
+                    self.interner.resolve(numeric.variable.node).to_string(),
                     SymbolKind::Variable,
                     number_type,
                     numeric.span,
@@ -575,7 +588,7 @@ impl TypeChecker {
                     Type::new(TypeKind::Primitive(PrimitiveType::Unknown), generic.span);
                 for var in &generic.variables {
                     let symbol = Symbol::new(
-                        var.node.clone(),
+                        self.interner.resolve(var.node).to_string(),
                         SymbolKind::Variable,
                         unknown_type.clone(),
                         generic.span,
@@ -712,7 +725,7 @@ impl TypeChecker {
             );
 
             self.type_env
-                .register_interface(iface.name.node.clone(), obj_type)
+                .register_interface(self.interner.resolve(iface.name.node).to_string(), obj_type)
                 .map_err(|e| TypeCheckError::new(e, iface.span))?;
 
             return Ok(());
@@ -735,7 +748,8 @@ impl TypeChecker {
             match &parent_type.kind {
                 TypeKind::Reference(type_ref) => {
                     // Look up parent interface
-                    if let Some(parent_iface) = self.type_env.get_interface(&type_ref.name.node) {
+                    let type_name = self.interner.resolve(type_ref.name.node);
+                    if let Some(parent_iface) = self.type_env.get_interface(&type_name) {
                         if let TypeKind::Object(parent_obj) = &parent_iface.kind {
                             // Add parent members first (so they can be overridden)
                             for parent_member in &parent_obj.members {
@@ -790,7 +804,7 @@ impl TypeChecker {
         );
 
         self.type_env
-            .register_interface(iface.name.node.clone(), obj_type)
+            .register_interface(self.interner.resolve(iface.name.node).to_string(), obj_type)
             .map_err(|e| TypeCheckError::new(e, iface.span))?;
 
         Ok(())
@@ -836,18 +850,19 @@ impl TypeChecker {
         if let Some(type_params) = &alias.type_parameters {
             self.type_env
                 .register_generic_type_alias(
-                    alias.name.node.clone(),
+                    self.interner.resolve(alias.name.node).to_string(),
                     type_params.clone(),
                     typ_to_register,
                 )
                 .map_err(|e| TypeCheckError::new(e, alias.span))?;
         } else {
             // Check for recursive type aliases
-            match self.type_env.resolve_type_reference(&alias.name.node) {
+            let alias_name = self.interner.resolve(alias.name.node);
+            match self.type_env.resolve_type_reference(&alias_name) {
                 Ok(_) => {
                     // No cycle, register the alias
                     self.type_env
-                        .register_type_alias(alias.name.node.clone(), typ_to_register)
+                        .register_type_alias(alias_name, typ_to_register)
                         .map_err(|e| TypeCheckError::new(e, alias.span))?;
                 }
                 Err(e) => {
@@ -888,7 +903,7 @@ impl TypeChecker {
         };
 
         self.type_env
-            .register_type_alias(enum_decl.name.node.clone(), enum_type)
+            .register_type_alias(self.interner.resolve(enum_decl.name.node).to_string(), enum_type)
             .map_err(|e| TypeCheckError::new(e, enum_decl.span))?;
 
         Ok(())
@@ -897,20 +912,20 @@ impl TypeChecker {
     /// Resolve a type reference, handling utility types and generic type application
     #[allow(dead_code)]
     fn resolve_type_reference(&self, type_ref: &TypeReference) -> Result<Type, TypeCheckError> {
-        let name = &type_ref.name.node;
+        let name = self.interner.resolve(type_ref.name.node);
         let span = type_ref.span;
 
         // Check if it's a utility type
         if let Some(type_args) = &type_ref.type_arguments {
-            if TypeEnvironment::is_utility_type(name) {
+            if TypeEnvironment::is_utility_type(&name) {
                 return self
                     .type_env
-                    .resolve_utility_type(name, type_args, span)
+                    .resolve_utility_type(&name, type_args, span, &self.interner, &self.common)
                     .map_err(|e| TypeCheckError::new(e, span));
             }
 
             // Check for generic type alias
-            if let Some(generic_alias) = self.type_env.get_generic_type_alias(name) {
+            if let Some(generic_alias) = self.type_env.get_generic_type_alias(&name) {
                 use super::generics::instantiate_type;
                 return instantiate_type(
                     &generic_alias.typ,
@@ -922,7 +937,7 @@ impl TypeChecker {
         }
 
         // Regular type lookup
-        match self.type_env.lookup_type(name) {
+        match self.type_env.lookup_type(&name) {
             Some(typ) => Ok(typ.clone()),
             None => Err(TypeCheckError::new(
                 format!("Type '{}' not found", name),
@@ -955,7 +970,7 @@ impl TypeChecker {
                 );
 
                 self.type_env
-                    .register_type_alias(type_param.name.node.clone(), param_type)
+                    .register_type_alias(self.interner.resolve(type_param.name.node).to_string(), param_type)
                     .map_err(|e| TypeCheckError::new(e, type_param.span))?;
             }
         }
@@ -964,10 +979,11 @@ impl TypeChecker {
         if let Some(extends_type) = &class_decl.extends {
             if let TypeKind::Reference(_type_ref) = &extends_type.kind {
                 // Check if parent class is final
-                if let Some(&is_final) = self.final_classes.get(&_type_ref.name.node) {
+                let parent_name = self.interner.resolve(_type_ref.name.node);
+                if let Some(&is_final) = self.final_classes.get(&parent_name) {
                     if is_final {
                         return Err(TypeCheckError::new(
-                            format!("Cannot extend final class {}", _type_ref.name.node),
+                            format!("Cannot extend final class {}", parent_name),
                             class_decl.span,
                         ));
                     }
@@ -985,11 +1001,12 @@ impl TypeChecker {
         // Check interface implementation
         for interface_type in &class_decl.implements {
             if let TypeKind::Reference(type_ref) = &interface_type.kind {
-                if let Some(interface) = self.type_env.get_interface(&type_ref.name.node) {
+                let interface_name = self.interner.resolve(type_ref.name.node);
+                if let Some(interface) = self.type_env.get_interface(&interface_name) {
                     self.check_class_implements_interface(class_decl, interface)?;
                 } else {
                     return Err(TypeCheckError::new(
-                        format!("Interface '{}' not found", type_ref.name.node),
+                        format!("Interface '{}' not found", interface_name),
                         class_decl.span,
                     ));
                 }
@@ -1044,7 +1061,7 @@ impl TypeChecker {
         // Add primary constructor parameters as properties
         for param in &primary_constructor_properties {
             member_infos.push(ClassMemberInfo {
-                name: param.name.node.clone(),
+                name: self.interner.resolve(param.name.node).to_string(),
                 access: param.access.unwrap_or(AccessModifier::Public),
                 _is_static: false,
                 kind: ClassMemberKind::Property {
@@ -1058,7 +1075,7 @@ impl TypeChecker {
             match member {
                 ClassMember::Property(prop) => {
                     member_infos.push(ClassMemberInfo {
-                        name: prop.name.node.clone(),
+                        name: self.interner.resolve(prop.name.node).to_string(),
                         access: prop.access.unwrap_or(AccessModifier::Public),
                         _is_static: prop.is_static,
                         kind: ClassMemberKind::Property {
@@ -1069,7 +1086,7 @@ impl TypeChecker {
                 }
                 ClassMember::Method(method) => {
                     member_infos.push(ClassMemberInfo {
-                        name: method.name.node.clone(),
+                        name: self.interner.resolve(method.name.node).to_string(),
                         access: method.access.unwrap_or(AccessModifier::Public),
                         _is_static: method.is_static,
                         kind: ClassMemberKind::Method {
@@ -1081,7 +1098,7 @@ impl TypeChecker {
                 }
                 ClassMember::Getter(getter) => {
                     member_infos.push(ClassMemberInfo {
-                        name: getter.name.node.clone(),
+                        name: self.interner.resolve(getter.name.node).to_string(),
                         access: getter.access.unwrap_or(AccessModifier::Public),
                         _is_static: getter.is_static,
                         kind: ClassMemberKind::Getter {
@@ -1092,7 +1109,7 @@ impl TypeChecker {
                 }
                 ClassMember::Setter(setter) => {
                     member_infos.push(ClassMemberInfo {
-                        name: setter.name.node.clone(),
+                        name: self.interner.resolve(setter.name.node).to_string(),
                         access: setter.access.unwrap_or(AccessModifier::Public),
                         _is_static: setter.is_static,
                         kind: ClassMemberKind::Setter {
@@ -1118,16 +1135,16 @@ impl TypeChecker {
 
         // Store class members for access checking
         self.class_members
-            .insert(class_decl.name.node.clone(), member_infos);
+            .insert(self.interner.resolve(class_decl.name.node).to_string(), member_infos);
 
         // Store whether the class is final
         self.final_classes
-            .insert(class_decl.name.node.clone(), class_decl.is_final);
+            .insert(self.interner.resolve(class_decl.name.node).to_string(), class_decl.is_final);
 
         // Set current class context
         let parent = class_decl.extends.as_ref().and_then(|ext| {
             if let TypeKind::Reference(type_ref) = &ext.kind {
-                Some(type_ref.name.node.clone())
+                Some(self.interner.resolve(type_ref.name.node).to_string())
             } else {
                 None
             }
@@ -1135,7 +1152,7 @@ impl TypeChecker {
 
         let old_class = self.current_class.clone();
         self.current_class = Some(ClassContext {
-            name: class_decl.name.node.clone(),
+            name: self.interner.resolve(class_decl.name.node).to_string(),
             parent,
         });
 
@@ -1169,7 +1186,7 @@ impl TypeChecker {
                                 method.span,
                             ));
                         }
-                        abstract_methods.push(method.name.node.clone());
+                        abstract_methods.push(self.interner.resolve(method.name.node).to_string());
                     }
                     self.check_class_method(method)?;
                 }
@@ -1354,7 +1371,8 @@ impl TypeChecker {
             DecoratorExpression::Identifier(name) => {
                 // Verify the decorator identifier exists (could be a function or imported decorator)
                 // For now, we allow any identifier - full validation would check it's a valid decorator function
-                if self.symbol_table.lookup(&name.node).is_none() {
+                let name_str = self.interner.resolve(name.node);
+                if self.symbol_table.lookup(&name_str).is_none() {
                     // It's okay if it doesn't exist - it might be a built-in decorator like @readonly, @sealed
                     // We'll allow it through for now
                 }
@@ -1445,12 +1463,13 @@ impl TypeChecker {
             // Check if method shadows a parent method without override keyword
             if let Some(parent_name) = &class_context.parent {
                 if let Some(parent_members) = self.class_members.get(parent_name) {
-                    if parent_members.iter().any(|m| m.name == method.name.node) {
+                    let method_name = self.interner.resolve(method.name.node);
+                    if parent_members.iter().any(|m| m.name == method_name) {
                         self.diagnostic_handler.warning(
                             method.span,
                             &format!(
                                 "Method '{}' overrides a method from parent class '{}' but is missing the 'override' keyword",
-                                method.name.node,
+                                method_name,
                                 parent_name
                             ),
                         );
@@ -1497,7 +1516,7 @@ impl TypeChecker {
                 );
 
                 self.type_env
-                    .register_type_alias(type_param.name.node.clone(), param_type)
+                    .register_type_alias(self.interner.resolve(type_param.name.node).to_string(), param_type)
                     .map_err(|e| TypeCheckError::new(e, type_param.span))?;
             }
         }
@@ -1623,12 +1642,13 @@ impl TypeChecker {
         })?;
 
         // Find the method in parent class
-        let parent_method = parent_members.iter().find(|m| m.name == method.name.node);
+        let method_name = self.interner.resolve(method.name.node);
+        let parent_method = parent_members.iter().find(|m| m.name == method_name);
 
         let parent_method = parent_method.ok_or_else(|| {
             TypeCheckError::new(
                 format!("Method '{}' marked as override but parent class '{}' does not have this method",
-                    method.name.node, parent_name),
+                    method_name, parent_name),
                 method.span,
             )
         })?;
@@ -1738,7 +1758,7 @@ impl TypeChecker {
     fn type_to_string(&self, typ: &Type) -> String {
         match &typ.kind {
             TypeKind::Primitive(prim) => format!("{:?}", prim).to_lowercase(),
-            TypeKind::Reference(type_ref) => type_ref.name.node.clone(),
+            TypeKind::Reference(type_ref) => self.interner.resolve(type_ref.name.node).to_string(),
             TypeKind::Array(elem) => format!("{}[]", self.type_to_string(elem)),
             TypeKind::Union(types) => {
                 let type_strings: Vec<String> =
@@ -1759,17 +1779,18 @@ impl TypeChecker {
             ExpressionKind::Literal(lit) => Ok(Type::new(TypeKind::Literal(lit.clone()), span)),
 
             ExpressionKind::Identifier(name) => {
+                let name_str = self.interner.resolve(*name);
                 // Check for narrowed type first
-                if let Some(narrowed_type) = self.narrowing_context.get_narrowed_type(name) {
+                if let Some(narrowed_type) = self.narrowing_context.get_narrowed_type(*name) {
                     return Ok(narrowed_type.clone());
                 }
 
                 // Fall back to symbol table
-                if let Some(symbol) = self.symbol_table.lookup(name) {
+                if let Some(symbol) = self.symbol_table.lookup(&name_str) {
                     Ok(symbol.typ.clone())
                 } else {
                     Err(TypeCheckError::new(
-                        format!("Undefined variable '{}'", name),
+                        format!("Undefined variable '{}'", name_str),
                         span,
                     ))
                 }
@@ -1793,7 +1814,8 @@ impl TypeChecker {
 
             ExpressionKind::Member(object, member) => {
                 let obj_type = self.infer_expression_type(object)?;
-                self.infer_member_type(&obj_type, &member.node, span)
+                let member_name = self.interner.resolve(member.node);
+                self.infer_member_type(&obj_type, &member_name, span)
             }
 
             ExpressionKind::Index(object, index) => {
@@ -2196,10 +2218,11 @@ impl TypeChecker {
         match &obj_type.kind {
             TypeKind::Reference(type_ref) => {
                 // Check access modifiers for class members
-                self.check_member_access(&type_ref.name.node, member, span)?;
+                let type_name = self.interner.resolve(type_ref.name.node);
+                self.check_member_access(&type_name, member, span)?;
 
                 // Try to resolve the type reference to get the actual type
-                if let Some(resolved) = self.type_env.lookup_type_alias(&type_ref.name.node) {
+                if let Some(resolved) = self.type_env.lookup_type_alias(&type_name) {
                     return self.infer_member_type(resolved, member, span);
                 }
 
@@ -2208,15 +2231,16 @@ impl TypeChecker {
             }
             TypeKind::Object(obj) => {
                 // Find member in object type
+                let member_id = self.interner.intern(member);
                 for obj_member in &obj.members {
                     match obj_member {
                         ObjectTypeMember::Property(prop) => {
-                            if prop.name.node == member {
+                            if prop.name.node == member_id {
                                 return Ok(prop.type_annotation.clone());
                             }
                         }
                         ObjectTypeMember::Method(method) => {
-                            if method.name.node == member {
+                            if method.name.node == member_id {
                                 return Ok(Type::new(
                                     TypeKind::Primitive(PrimitiveType::Unknown),
                                     span,
@@ -2368,7 +2392,7 @@ impl TypeChecker {
             Pattern::Identifier(ident) => {
                 // Bind the identifier to the expected type
                 let symbol = Symbol::new(
-                    ident.node.clone(),
+                    self.interner.resolve(ident.node).to_string(),
                     SymbolKind::Variable,
                     expected_type.clone(),
                     ident.span,
@@ -2401,7 +2425,7 @@ impl TypeChecker {
                                 ArrayPatternElement::Rest(ident) => {
                                     // Rest pattern gets the array type
                                     let symbol = Symbol::new(
-                                        ident.node.clone(),
+                                        self.interner.resolve(ident.node).to_string(),
                                         SymbolKind::Variable,
                                         expected_type.clone(),
                                         ident.span,
@@ -2455,7 +2479,7 @@ impl TypeChecker {
                             } else {
                                 // Shorthand: bind the key as a variable
                                 let symbol = Symbol::new(
-                                    prop.key.node.clone(),
+                                    self.interner.resolve(prop.key.node).to_string(),
                                     SymbolKind::Variable,
                                     prop_type,
                                     prop.key.span,
@@ -2478,7 +2502,7 @@ impl TypeChecker {
                                 self.check_pattern(value_pattern, &prop_type)?;
                             } else {
                                 let symbol = Symbol::new(
-                                    prop.key.node.clone(),
+                                    self.interner.resolve(prop.key.node).to_string(),
                                     SymbolKind::Variable,
                                     prop_type,
                                     prop.key.span,
@@ -2675,7 +2699,7 @@ impl TypeChecker {
             }
             TypeKind::Mapped(mapped) => {
                 use super::evaluate_mapped_type;
-                evaluate_mapped_type(mapped, &self.type_env)
+                evaluate_mapped_type(mapped, &self.type_env, &self.interner)
             }
             TypeKind::Conditional(conditional) => {
                 use super::evaluate_conditional_type;
@@ -2726,7 +2750,7 @@ impl TypeChecker {
 
         // Declare function in symbol table
         let symbol = Symbol::new(
-            func.name.node.clone(),
+            self.interner.resolve(func.name.node).to_string(),
             SymbolKind::Function,
             func_type,
             func.span,
@@ -2743,7 +2767,7 @@ impl TypeChecker {
     ) -> Result<(), TypeCheckError> {
         // Declare constant in symbol table
         let symbol = Symbol::new(
-            const_decl.name.node.clone(),
+            self.interner.resolve(const_decl.name.node).to_string(),
             SymbolKind::Const,
             const_decl.type_annotation.clone(),
             const_decl.span,
@@ -2802,7 +2826,7 @@ impl TypeChecker {
 
         // Register namespace as a constant in the symbol table
         let symbol = Symbol::new(
-            ns.name.node.clone(),
+            self.interner.resolve(ns.name.node).to_string(),
             SymbolKind::Const,
             namespace_type,
             ns.span,
@@ -2825,10 +2849,10 @@ impl TypeChecker {
         // Register string namespace
         let string_members = vec![
             ObjectTypeMember::Method(MethodSignature {
-                name: Spanned::new("upper".to_string(), span),
+                name: Spanned::new(self.interner.intern("upper"), span),
                 type_parameters: None,
                 parameters: vec![Parameter {
-                    pattern: Pattern::Identifier(Spanned::new("s".to_string(), span)),
+                    pattern: Pattern::Identifier(Spanned::new(self.interner.intern("s"), span)),
                     type_annotation: Some(Type::new(
                         TypeKind::Primitive(PrimitiveType::String),
                         span,
@@ -2842,10 +2866,10 @@ impl TypeChecker {
                 span,
             }),
             ObjectTypeMember::Method(MethodSignature {
-                name: Spanned::new("lower".to_string(), span),
+                name: Spanned::new(self.interner.intern("lower"), span),
                 type_parameters: None,
                 parameters: vec![Parameter {
-                    pattern: Pattern::Identifier(Spanned::new("s".to_string(), span)),
+                    pattern: Pattern::Identifier(Spanned::new(self.interner.intern("s"), span)),
                     type_annotation: Some(Type::new(
                         TypeKind::Primitive(PrimitiveType::String),
                         span,
@@ -2879,16 +2903,16 @@ impl TypeChecker {
         let math_members = vec![
             ObjectTypeMember::Property(PropertySignature {
                 is_readonly: true,
-                name: Spanned::new("pi".to_string(), span),
+                name: Spanned::new(self.interner.intern("pi"), span),
                 is_optional: false,
                 type_annotation: Type::new(TypeKind::Primitive(PrimitiveType::Number), span),
                 span,
             }),
             ObjectTypeMember::Method(MethodSignature {
-                name: Spanned::new("abs".to_string(), span),
+                name: Spanned::new(self.interner.intern("abs"), span),
                 type_parameters: None,
                 parameters: vec![Parameter {
-                    pattern: Pattern::Identifier(Spanned::new("x".to_string(), span)),
+                    pattern: Pattern::Identifier(Spanned::new(self.interner.intern("x"), span)),
                     type_annotation: Some(Type::new(
                         TypeKind::Primitive(PrimitiveType::Number),
                         span,
@@ -2954,49 +2978,54 @@ impl TypeChecker {
                             Statement::Variable(var_decl) => {
                                 // Extract identifier from pattern
                                 if let Pattern::Identifier(ident) = &var_decl.pattern {
-                                    if let Some(symbol) = self.symbol_table.lookup(&ident.node) {
+                                    let ident_name = self.interner.resolve(ident.node);
+                                    if let Some(symbol) = self.symbol_table.lookup(&ident_name) {
                                         exports.add_named(
-                                            ident.node.clone(),
+                                            ident_name,
                                             ExportedSymbol::new(symbol.clone(), false),
                                         );
                                     }
                                 }
                             }
                             Statement::Function(func_decl) => {
-                                if let Some(symbol) = self.symbol_table.lookup(&func_decl.name.node)
+                                let func_name = self.interner.resolve(func_decl.name.node);
+                                if let Some(symbol) = self.symbol_table.lookup(&func_name)
                                 {
                                     exports.add_named(
-                                        func_decl.name.node.clone(),
+                                        func_name,
                                         ExportedSymbol::new(symbol.clone(), false),
                                     );
                                 }
                             }
                             Statement::Class(class_decl) => {
+                                let class_name = self.interner.resolve(class_decl.name.node);
                                 if let Some(symbol) =
-                                    self.symbol_table.lookup(&class_decl.name.node)
+                                    self.symbol_table.lookup(&class_name)
                                 {
                                     exports.add_named(
-                                        class_decl.name.node.clone(),
+                                        class_name,
                                         ExportedSymbol::new(symbol.clone(), false),
                                     );
                                 }
                             }
                             Statement::TypeAlias(type_alias) => {
+                                let alias_name = self.interner.resolve(type_alias.name.node);
                                 if let Some(symbol) =
-                                    self.symbol_table.lookup(&type_alias.name.node)
+                                    self.symbol_table.lookup(&alias_name)
                                 {
                                     exports.add_named(
-                                        type_alias.name.node.clone(),
+                                        alias_name,
                                         ExportedSymbol::new(symbol.clone(), true),
                                     );
                                 }
                             }
                             Statement::Interface(interface_decl) => {
+                                let interface_name = self.interner.resolve(interface_decl.name.node);
                                 if let Some(symbol) =
-                                    self.symbol_table.lookup(&interface_decl.name.node)
+                                    self.symbol_table.lookup(&interface_name)
                                 {
                                     exports.add_named(
-                                        interface_decl.name.node.clone(),
+                                        interface_name,
                                         ExportedSymbol::new(symbol.clone(), true),
                                     );
                                 }
@@ -3007,12 +3036,13 @@ impl TypeChecker {
                     ExportKind::Named { specifiers, .. } => {
                         // Export existing symbols: export { foo, bar as baz }
                         for spec in specifiers {
-                            if let Some(symbol) = self.symbol_table.lookup(&spec.local.node) {
+                            let local_name = self.interner.resolve(spec.local.node);
+                            if let Some(symbol) = self.symbol_table.lookup(&local_name) {
                                 let export_name = spec
                                     .exported
                                     .as_ref()
-                                    .map(|e| e.node.clone())
-                                    .unwrap_or_else(|| spec.local.node.clone());
+                                    .map(|e| self.interner.resolve(e.node))
+                                    .unwrap_or_else(|| local_name.clone());
 
                                 // Check if it's a type-only export
                                 let is_type_only = matches!(
@@ -3060,12 +3090,14 @@ mod tests {
 
     fn type_check_source(source: &str) -> Result<(), TypeCheckError> {
         let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let mut lexer = Lexer::new(source, handler.clone());
+        let (interner, common) =
+            crate::string_interner::StringInterner::new_with_common_identifiers();
+        let mut lexer = Lexer::new(source, handler.clone(), &interner);
         let tokens = lexer.tokenize().expect("Lexing failed");
-        let mut parser = Parser::new(tokens, handler.clone());
+        let mut parser = Parser::new(tokens, handler.clone(), &interner, &common);
         let program = parser.parse().expect("Parsing failed");
 
-        let mut type_checker = TypeChecker::new(handler);
+        let mut type_checker = TypeChecker::new(handler, &interner, &common);
         type_checker.check_program(&program)
     }
 

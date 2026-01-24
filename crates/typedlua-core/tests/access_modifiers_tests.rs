@@ -2,17 +2,19 @@ use std::sync::Arc;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::lexer::Lexer;
 use typedlua_core::parser::Parser;
+use typedlua_core::string_interner::StringInterner;
 use typedlua_core::typechecker::TypeChecker;
 
 fn type_check(source: &str) -> Result<(), String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
-    let mut lexer = Lexer::new(source, handler.clone());
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let mut lexer = Lexer::new(source, handler.clone(), &interner);
     let tokens = lexer.tokenize().map_err(|e| format!("{:?}", e))?;
 
-    let mut parser = Parser::new(tokens, handler.clone());
+    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
     let program = parser.parse().map_err(|e| format!("{:?}", e))?;
 
-    let mut checker = TypeChecker::new(handler);
+    let mut checker = TypeChecker::new(handler, &interner, common_ids);
     checker.check_program(&program).map_err(|e| e.message)?;
 
     Ok(())

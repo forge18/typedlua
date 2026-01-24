@@ -4,6 +4,7 @@ use crate::ast::expression::*;
 use crate::ast::pattern::{ArrayPattern, ArrayPatternElement, ObjectPattern, Pattern};
 use crate::ast::statement::*;
 use crate::ast::Program;
+use crate::string_interner::StringInterner;
 pub use sourcemap::{SourceMap, SourceMapBuilder};
 
 /// Target Lua version for code generation
@@ -65,13 +66,13 @@ pub enum CodeGenMode {
 }
 
 /// Code generator for TypedLua to Lua
-pub struct CodeGenerator {
+pub struct CodeGenerator<'a> {
     output: String,
     indent_level: usize,
     indent_str: String,
     source_map: Option<SourceMapBuilder>,
     target: LuaTarget,
-    current_class_parent: Option<String>,
+    current_class_parent: Option<crate::string_interner::StringId>,
     uses_built_in_decorators: bool,
     /// Module generation mode
     mode: CodeGenMode,
@@ -83,10 +84,12 @@ pub struct CodeGenerator {
     import_map: std::collections::HashMap<String, String>,
     /// Current source index for multi-source source maps (bundle mode)
     current_source_index: usize,
+    /// String interner for resolving identifiers
+    interner: &'a StringInterner,
 }
 
-impl CodeGenerator {
-    pub fn new() -> Self {
+impl<'a> CodeGenerator<'a> {
+    pub fn new(interner: &'a StringInterner) -> Self {
         Self {
             output: String::new(),
             indent_level: 0,
@@ -100,7 +103,13 @@ impl CodeGenerator {
             has_default_export: false,
             import_map: std::collections::HashMap::new(),
             current_source_index: 0,
+            interner,
         }
+    }
+
+    /// Resolve a StringId to a String
+    fn resolve(&self, id: crate::string_interner::StringId) -> String {
+        self.interner.resolve(id).to_string()
     }
 
     pub fn with_target(mut self, target: LuaTarget) -> Self {
@@ -248,8 +257,10 @@ impl CodeGenerator {
             }
 
             // Generate module code with source map support
+            // Create a new interner for this module (bundles can have multiple independent modules)
+            let interner = StringInterner::new();
             let mut generator =
-                CodeGenerator::new()
+                CodeGenerator::new(&interner)
                     .with_target(target)
                     .with_mode(CodeGenMode::Bundle {
                         module_id: (*module_id).clone(),
@@ -434,7 +445,8 @@ impl CodeGenerator {
     fn generate_pattern(&mut self, pattern: &Pattern) {
         match pattern {
             Pattern::Identifier(ident) => {
-                self.write(&ident.node);
+                let resolved = self.resolve(ident.node);
+                self.write(&resolved);
             }
             Pattern::Wildcard(_) => {
                 self.write("_");
@@ -457,7 +469,8 @@ impl CodeGenerator {
                         Pattern::Identifier(ident) => {
                             self.write_indent();
                             self.write("local ");
-                            self.write(&ident.node);
+                            let resolved = self.resolve(ident.node);
+                            self.write(&resolved);
                             self.write(&format!(" = {}[{}]", source, index));
                             self.writeln("");
                         }
@@ -491,7 +504,8 @@ impl CodeGenerator {
                     // Rest element: collect remaining elements
                     self.write_indent();
                     self.write("local ");
-                    self.write(&ident.node);
+                    let resolved = self.resolve(ident.node);
+                    self.write(&resolved);
                     self.write(" = {");
                     self.write(&format!("table.unpack({}, {})", source, index));
                     self.write("}");
@@ -509,7 +523,7 @@ impl CodeGenerator {
     /// Generate object destructuring assignments
     fn generate_object_destructuring(&mut self, pattern: &ObjectPattern, source: &str) {
         for prop in &pattern.properties {
-            let key = &prop.key.node;
+            let key_str = self.resolve(prop.key.node);
 
             if let Some(value_pattern) = &prop.value {
                 // { key: pattern }
@@ -517,27 +531,28 @@ impl CodeGenerator {
                     Pattern::Identifier(ident) => {
                         self.write_indent();
                         self.write("local ");
-                        self.write(&ident.node);
-                        self.write(&format!(" = {}.{}", source, key));
+                        let resolved = self.resolve(ident.node);
+                        self.write(&resolved);
+                        self.write(&format!(" = {}.{}", source, key_str));
                         self.writeln("");
                     }
                     Pattern::Array(nested_array) => {
                         // Nested array destructuring
-                        let temp_var = format!("__temp_{}", key);
+                        let temp_var = format!("__temp_{}", key_str);
                         self.write_indent();
                         self.write("local ");
                         self.write(&temp_var);
-                        self.write(&format!(" = {}.{}", source, key));
+                        self.write(&format!(" = {}.{}", source, key_str));
                         self.writeln("");
                         self.generate_array_destructuring(nested_array, &temp_var);
                     }
                     Pattern::Object(nested_obj) => {
                         // Nested object destructuring
-                        let temp_var = format!("__temp_{}", key);
+                        let temp_var = format!("__temp_{}", key_str);
                         self.write_indent();
                         self.write("local ");
                         self.write(&temp_var);
-                        self.write(&format!(" = {}.{}", source, key));
+                        self.write(&format!(" = {}.{}", source, key_str));
                         self.writeln("");
                         self.generate_object_destructuring(nested_obj, &temp_var);
                     }
@@ -549,8 +564,8 @@ impl CodeGenerator {
                 // Shorthand: { key } means { key: key }
                 self.write_indent();
                 self.write("local ");
-                self.write(key);
-                self.write(&format!(" = {}.{}", source, key));
+                self.write(&key_str);
+                self.write(&format!(" = {}.{}", source, key_str));
                 self.writeln("");
             }
         }
@@ -559,10 +574,11 @@ impl CodeGenerator {
     fn generate_function_declaration(&mut self, decl: &FunctionDeclaration) {
         self.write_indent();
         self.write("local function ");
-        self.write(&decl.name.node);
+        let fn_name = self.resolve(decl.name.node);
+        self.write(&fn_name);
         self.write("(");
 
-        let mut rest_param_name: Option<String> = None;
+        let mut rest_param_name: Option<crate::string_interner::StringId> = None;
 
         for (i, param) in decl.parameters.iter().enumerate() {
             if param.is_rest {
@@ -573,7 +589,7 @@ impl CodeGenerator {
                 self.write("...");
                 // Save the parameter name to initialize it in the function body
                 if let Pattern::Identifier(ident) = &param.pattern {
-                    rest_param_name = Some(ident.node.clone());
+                    rest_param_name = Some(ident.node);
                 }
             } else {
                 if i > 0 {
@@ -590,7 +606,8 @@ impl CodeGenerator {
         if let Some(rest_name) = rest_param_name {
             self.write_indent();
             self.write("local ");
-            self.write(&rest_name);
+            let rest_name_str = self.resolve(rest_name);
+            self.write(&rest_name_str);
             self.writeln(" = {...}");
         }
 
@@ -648,7 +665,8 @@ impl CodeGenerator {
             ForStatement::Numeric(numeric) => {
                 self.write_indent();
                 self.write("for ");
-                self.write(&numeric.variable.node);
+                let var_name = self.resolve(numeric.variable.node);
+                self.write(&var_name);
                 self.write(" = ");
                 self.generate_expression(&numeric.start);
                 self.write(", ");
@@ -671,7 +689,8 @@ impl CodeGenerator {
                     if i > 0 {
                         self.write(", ");
                     }
-                    self.write(&var.node);
+                    let var_name = self.resolve(var.node);
+                    self.write(&var_name);
                 }
                 self.write(" in ");
                 for (i, iter) in generic.iterators.iter().enumerate() {
@@ -724,7 +743,7 @@ impl CodeGenerator {
     }
 
     fn generate_class_declaration(&mut self, class_decl: &ClassDeclaration) {
-        let class_name = &class_decl.name.node;
+        let class_name = self.resolve(class_decl.name.node).to_string();
 
         // Save previous parent class context and set new one
         let prev_parent = self.current_class_parent.take();
@@ -733,7 +752,7 @@ impl CodeGenerator {
         let base_class_name = if let Some(extends) = &class_decl.extends {
             // Extract base class name from Type
             if let crate::ast::types::TypeKind::Reference(type_ref) = &extends.kind {
-                Some(type_ref.name.node.clone())
+                Some(type_ref.name.node)
             } else {
                 None
             }
@@ -742,19 +761,19 @@ impl CodeGenerator {
         };
 
         // Set current parent for super calls
-        self.current_class_parent = base_class_name.clone();
+        self.current_class_parent = base_class_name;
 
         // Create the class table
         self.write_indent();
         self.write("local ");
-        self.write(class_name);
+        self.write(&class_name);
         self.writeln(" = {}");
 
         // Set up __index for method lookup
         self.write_indent();
-        self.write(class_name);
+        self.write(&class_name);
         self.write(".__index = ");
-        self.write(class_name);
+        self.write(&class_name);
         self.writeln("");
 
         if let Some(base_name) = &base_class_name {
@@ -762,9 +781,10 @@ impl CodeGenerator {
             self.writeln("");
             self.write_indent();
             self.write("setmetatable(");
-            self.write(class_name);
+            self.write(&class_name);
             self.write(", { __index = ");
-            self.write(base_name);
+            let base_name_str = self.resolve(*base_name);
+            self.write(&base_name_str);
             self.writeln(" })");
         }
 
@@ -778,11 +798,11 @@ impl CodeGenerator {
 
         if has_primary_constructor {
             // Generate constructor from primary constructor parameters
-            self.generate_primary_constructor(class_decl, class_name, &base_class_name);
+            self.generate_primary_constructor(class_decl, &class_name, base_class_name);
         } else if has_constructor {
             for member in &class_decl.members {
                 if let ClassMember::Constructor(ctor) = member {
-                    self.generate_class_constructor(class_name, ctor);
+                    self.generate_class_constructor(&class_name, ctor);
                 }
             }
         } else {
@@ -790,12 +810,12 @@ impl CodeGenerator {
             self.writeln("");
             self.write_indent();
             self.write("function ");
-            self.write(class_name);
+            self.write(&class_name);
             self.writeln(".new()");
             self.indent();
             self.write_indent();
             self.write("local self = setmetatable({}, ");
-            self.write(class_name);
+            self.write(&class_name);
             self.writeln(")");
             self.write_indent();
             self.writeln("return self");
@@ -811,13 +831,13 @@ impl CodeGenerator {
         for member in &class_decl.members {
             match member {
                 ClassMember::Method(method) => {
-                    self.generate_class_method(class_name, method);
+                    self.generate_class_method(&class_name, method);
                 }
                 ClassMember::Getter(getter) => {
-                    self.generate_class_getter(class_name, getter);
+                    self.generate_class_getter(&class_name, getter);
                 }
                 ClassMember::Setter(setter) => {
-                    self.generate_class_setter(class_name, setter);
+                    self.generate_class_setter(&class_name, setter);
                 }
                 ClassMember::Property(_) | ClassMember::Constructor(_) => {
                     // Already handled
@@ -830,9 +850,9 @@ impl CodeGenerator {
             self.writeln("");
             for decorator in &class_decl.decorators {
                 self.write_indent();
-                self.write(class_name);
+                self.write(&class_name);
                 self.write(" = ");
-                self.generate_decorator_call(decorator, class_name);
+                self.generate_decorator_call(decorator, &class_name);
                 self.writeln("");
             }
         }
@@ -954,7 +974,7 @@ impl CodeGenerator {
         &mut self,
         class_decl: &ClassDeclaration,
         class_name: &str,
-        base_class_name: &Option<String>,
+        base_class_name: Option<crate::string_interner::StringId>,
     ) {
         let primary_params = class_decl.primary_constructor.as_ref().unwrap();
 
@@ -968,7 +988,8 @@ impl CodeGenerator {
         // Generate parameters
         for param in primary_params {
             self.write(", ");
-            self.write(&param.name.node);
+            let param_name = self.resolve(param.name.node);
+            self.write(&param_name);
         }
         self.writeln(")");
 
@@ -978,7 +999,8 @@ impl CodeGenerator {
         if let Some(parent_args) = &class_decl.parent_constructor_args {
             if let Some(parent_name) = base_class_name {
                 self.write_indent();
-                self.write(parent_name);
+                let parent_name_str = self.resolve(parent_name);
+                self.write(&parent_name_str);
                 self.write("._init(self");
                 for arg in parent_args {
                     self.write(", ");
@@ -993,24 +1015,17 @@ impl CodeGenerator {
             self.write_indent();
 
             // Apply access modifier naming (private → _name)
-            if let Some(access) = &param.access {
-                match access {
-                    crate::ast::statement::AccessModifier::Private => {
-                        self.write("self._");
-                        self.write(&param.name.node);
-                    }
-                    _ => {
-                        self.write("self.");
-                        self.write(&param.name.node);
-                    }
-                }
+            if param.access.as_ref() == Some(&crate::ast::statement::AccessModifier::Private) {
+                self.write("self._");
             } else {
                 self.write("self.");
-                self.write(&param.name.node);
             }
+            let param_name = self.resolve(param.name.node);
+            self.write(&param_name);
 
             self.write(" = ");
-            self.write(&param.name.node);
+            let param_name = self.resolve(param.name.node);
+            self.write(&param_name);
             self.writeln("");
         }
 
@@ -1030,7 +1045,8 @@ impl CodeGenerator {
             if i > 0 {
                 self.write(", ");
             }
-            self.write(&param.name.node);
+            let param_name = self.resolve(param.name.node);
+            self.write(&param_name);
         }
         self.writeln(")");
 
@@ -1048,7 +1064,8 @@ impl CodeGenerator {
         self.write("._init(self");
         for param in primary_params {
             self.write(", ");
-            self.write(&param.name.node);
+            let param_name = self.resolve(param.name.node);
+            self.write(&param_name);
         }
         self.writeln(")");
 
@@ -1078,7 +1095,8 @@ impl CodeGenerator {
             self.write(":");
         }
 
-        self.write(&method.name.node);
+        let method_name = self.resolve(method.name.node);
+        self.write(&method_name);
         self.write("(");
 
         // Generate parameters (for instance methods, 'self' is implicit with :)
@@ -1106,7 +1124,8 @@ impl CodeGenerator {
                 self.write_indent();
                 self.write(class_name);
                 self.write(".");
-                self.write(&method.name.node);
+                let method_name = self.resolve(method.name.node);
+                self.write(&method_name);
                 self.write(" = ");
 
                 let method_ref = format!("{}.{}", class_name, method.name.node);
@@ -1129,7 +1148,8 @@ impl CodeGenerator {
         }
 
         self.write("get_");
-        self.write(&getter.name.node);
+        let getter_name = self.resolve(getter.name.node);
+        self.write(&getter_name);
         self.writeln("()");
 
         self.indent();
@@ -1153,7 +1173,8 @@ impl CodeGenerator {
         }
 
         self.write("set_");
-        self.write(&setter.name.node);
+        let setter_name = self.resolve(setter.name.node);
+        self.write(&setter_name);
         self.write("(");
         self.generate_pattern(&setter.parameter.pattern);
         self.writeln(")");
@@ -1179,7 +1200,8 @@ impl CodeGenerator {
         match &decorator.expression {
             DecoratorExpression::Identifier(name) => {
                 // Simple decorator: @decorator -> target = decorator(target)
-                self.write(&name.node);
+                let decorator_name = self.resolve(name.node);
+                self.write(&decorator_name);
                 self.write("(");
                 self.write(target);
                 self.write(")");
@@ -1206,7 +1228,8 @@ impl CodeGenerator {
                 // Member decorator: @namespace.decorator -> target = namespace.decorator(target)
                 self.generate_decorator_expression(object);
                 self.write(".");
-                self.write(&property.node);
+                let prop_name = self.resolve(property.node);
+                self.write(&prop_name);
                 self.write("(");
                 self.write(target);
                 self.write(")");
@@ -1220,7 +1243,8 @@ impl CodeGenerator {
 
         match expr {
             DecoratorExpression::Identifier(name) => {
-                self.write(&name.node);
+                let name_str = self.resolve(name.node);
+                self.write(&name_str);
             }
             DecoratorExpression::Call {
                 callee, arguments, ..
@@ -1240,7 +1264,8 @@ impl CodeGenerator {
             } => {
                 self.generate_decorator_expression(object);
                 self.write(".");
-                self.write(&property.node);
+                let prop_str = self.resolve(property.node);
+                self.write(&prop_str);
             }
         }
     }
@@ -1298,10 +1323,14 @@ impl CodeGenerator {
         use crate::ast::statement::DecoratorExpression;
 
         match expr {
-            DecoratorExpression::Identifier(name) => self.is_built_in_decorator(&name.node),
+            DecoratorExpression::Identifier(name) => {
+                let name_str = self.resolve(name.node);
+                self.is_built_in_decorator(&name_str)
+            }
             DecoratorExpression::Call { callee, .. } => {
                 if let DecoratorExpression::Identifier(name) = &**callee {
-                    self.is_built_in_decorator(&name.node)
+                    let name_str = self.resolve(name.node);
+                    self.is_built_in_decorator(&name_str)
                 } else {
                     false
                 }
@@ -1311,7 +1340,9 @@ impl CodeGenerator {
             } => {
                 // Check if it's TypedLua.readonly, TypedLua.sealed, or TypedLua.deprecated
                 if let DecoratorExpression::Identifier(obj_name) = &**object {
-                    obj_name.node == "TypedLua" && self.is_built_in_decorator(&property.node)
+                    let obj_str = self.resolve(obj_name.node);
+                    let prop_str = self.resolve(property.node);
+                    obj_str == "TypedLua" && self.is_built_in_decorator(&prop_str)
                 } else {
                     false
                 }
@@ -1404,7 +1435,10 @@ impl CodeGenerator {
     fn generate_expression(&mut self, expr: &Expression) {
         match &expr.kind {
             ExpressionKind::Literal(lit) => self.generate_literal(lit),
-            ExpressionKind::Identifier(name) => self.write(name),
+            ExpressionKind::Identifier(name) => {
+                let name_str = self.resolve(*name);
+                self.write(&name_str);
+            }
             ExpressionKind::Binary(op, left, right) => {
                 self.generate_binary_expression(*op, left, right);
             }
@@ -1511,8 +1545,9 @@ impl CodeGenerator {
                 // Check for super() constructor call
                 if matches!(&callee.kind, ExpressionKind::SuperKeyword) {
                     // super() in constructor - call Parent._init(self, args)
-                    if let Some(parent) = self.current_class_parent.clone() {
-                        self.write(&parent);
+                    if let Some(parent) = self.current_class_parent {
+                        let parent_str = self.resolve(parent);
+                        self.write(&parent_str);
                         self.write("._init(self");
                         if !args.is_empty() {
                             self.write(", ");
@@ -1570,10 +1605,12 @@ impl CodeGenerator {
             ExpressionKind::Member(object, member) => {
                 // Check if this is super.method - translate to ParentClass.method
                 if matches!(object.kind, ExpressionKind::SuperKeyword) {
-                    if let Some(parent) = self.current_class_parent.clone() {
-                        self.write(&parent);
+                    if let Some(parent) = self.current_class_parent {
+                        let parent_str = self.resolve(parent);
+                        self.write(&parent_str);
                         self.write(".");
-                        self.write(&member.node);
+                        let member_str = self.resolve(member.node);
+                        self.write(&member_str);
                     } else {
                         // No parent class - this is an error, but generate something
                         self.write("nil -- super used without parent class");
@@ -1581,7 +1618,8 @@ impl CodeGenerator {
                 } else {
                     self.generate_expression(object);
                     self.write(".");
-                    self.write(&member.node);
+                    let member_str = self.resolve(member.node);
+                    self.write(&member_str);
                 }
             }
             ExpressionKind::Index(object, index) => {
@@ -1655,7 +1693,8 @@ impl CodeGenerator {
                         match prop {
                             ObjectProperty::Property { key, value, .. } => {
                                 self.write("__obj.");
-                                self.write(&key.node);
+                                let key_str = self.resolve(key.node);
+                                self.write(&key_str);
                                 self.write(" = ");
                                 self.generate_expression(value);
                                 self.write(" ");
@@ -1770,7 +1809,8 @@ impl CodeGenerator {
             ExpressionKind::MethodCall(object, method, args) => {
                 self.generate_expression(object);
                 self.write(":");
-                self.write(&method.node);
+                let method_str = self.resolve(method.node);
+                self.write(&method_str);
                 self.write("(");
                 for (i, arg) in args.iter().enumerate() {
                     if i > 0 {
@@ -1791,8 +1831,9 @@ impl CodeGenerator {
             ExpressionKind::SuperKeyword => {
                 // Super keyword on its own (not in member access or call)
                 // This is likely an error, but generate something reasonable
-                if let Some(parent) = self.current_class_parent.clone() {
-                    self.write(&parent);
+                if let Some(parent) = self.current_class_parent {
+                    let parent_str = self.resolve(parent);
+                    self.write(&parent_str);
                 } else {
                     self.write("nil --[[super without parent class]]");
                 }
@@ -1854,7 +1895,8 @@ impl CodeGenerator {
     fn generate_object_property(&mut self, prop: &ObjectProperty) {
         match prop {
             ObjectProperty::Property { key, value, .. } => {
-                self.write(&key.node);
+                let key_str = self.resolve(key.node);
+                self.write(&key_str);
                 self.write(" = ");
                 self.generate_expression(value);
             }
@@ -2146,7 +2188,8 @@ impl CodeGenerator {
                 // Bind the identifier to the value
                 self.write_indent();
                 self.write("local ");
-                self.write(&ident.node);
+                let ident_str = self.resolve(ident.node);
+                self.write(&ident_str);
                 self.write(" = ");
                 self.write(value_var);
                 self.writeln("");
@@ -2163,7 +2206,8 @@ impl CodeGenerator {
                             // Create a slice of the rest
                             self.write_indent();
                             self.write("local ");
-                            self.write(&ident.node);
+                            let ident_str = self.resolve(ident.node);
+                            self.write(&ident_str);
                             self.write(" = {table.unpack(");
                             self.write(value_var);
                             self.write(", ");
@@ -2181,17 +2225,19 @@ impl CodeGenerator {
                 // Bind each property
                 for prop in &object_pattern.properties {
                     if let Some(value_pattern) = &prop.value {
-                        let prop_expr = format!("{}.{}", value_var, prop.key.node);
+                        let key_str = self.resolve(prop.key.node);
+                        let prop_expr = format!("{}.{}", value_var, key_str);
                         self.generate_pattern_bindings(value_pattern, &prop_expr);
                     } else {
                         // Shorthand: bind the key directly
                         self.write_indent();
                         self.write("local ");
-                        self.write(&prop.key.node);
+                        let key_str = self.resolve(prop.key.node);
+                        self.write(&key_str);
                         self.write(" = ");
                         self.write(value_var);
                         self.write(".");
-                        self.write(&prop.key.node);
+                        self.write(&key_str);
                         self.writeln("");
                     }
                 }
@@ -2243,7 +2289,8 @@ impl CodeGenerator {
                         self.write(", ");
                     }
                     let local_name = spec.local.as_ref().unwrap_or(&spec.imported);
-                    self.write(&local_name.node);
+                    let name_str = self.resolve(local_name.node);
+                    self.write(&name_str);
                 }
                 self.write(" = ");
                 for (i, spec) in specs.iter().enumerate() {
@@ -2251,7 +2298,8 @@ impl CodeGenerator {
                         self.write(", ");
                     }
                     self.write("_mod.");
-                    self.write(&spec.imported.node);
+                    let imported_str = self.resolve(spec.imported.node);
+                    self.write(&imported_str);
                 }
                 self.writeln("");
             }
@@ -2259,7 +2307,8 @@ impl CodeGenerator {
                 // Generate: local foo = require("source") or __require("module_id")
                 self.write_indent();
                 self.write("local ");
-                self.write(&ident.node);
+                let ident_str = self.resolve(ident.node);
+                self.write(&ident_str);
                 self.write(" = ");
                 self.write(require_fn);
                 self.write("(\"");
@@ -2270,7 +2319,8 @@ impl CodeGenerator {
                 // Generate: local foo = require("source") or __require("module_id")
                 self.write_indent();
                 self.write("local ");
-                self.write(&ident.node);
+                let ident_str = self.resolve(ident.node);
+                self.write(&ident_str);
                 self.write(" = ");
                 self.write(require_fn);
                 self.write("(\"");
@@ -2288,7 +2338,7 @@ impl CodeGenerator {
 
                 // Track the exported symbol name
                 if let Some(name) = self.get_declaration_name(stmt) {
-                    self.exports.push(name);
+                    self.exports.push(self.resolve(name).to_string());
                 }
             }
             ExportKind::Named { specifiers, source } => {
@@ -2301,7 +2351,7 @@ impl CodeGenerator {
                     // Regular named export
                     // Track exported symbols
                     for spec in specifiers {
-                        self.exports.push(spec.local.node.clone());
+                        self.exports.push(self.resolve(spec.local.node).to_string());
                     }
                 }
             }
@@ -2347,13 +2397,14 @@ impl CodeGenerator {
             // Generate: local foo = _mod.foo
             self.write_indent();
             self.write("local ");
-            self.write(&spec.local.node);
+            let local_str = self.resolve(spec.local.node);
+            self.write(&local_str);
             self.write(" = _mod.");
-            self.write(&spec.local.node);
+            self.write(&local_str);
             self.writeln("");
 
             // Track the symbol for export
-            self.exports.push(spec.local.node.clone());
+            self.exports.push(local_str);
         }
     }
 
@@ -2381,28 +2432,22 @@ impl CodeGenerator {
         }
     }
 
-    fn get_declaration_name(&self, stmt: &Statement) -> Option<String> {
+    fn get_declaration_name(&self, stmt: &Statement) -> Option<crate::string_interner::StringId> {
         match stmt {
             Statement::Variable(decl) => {
                 if let Pattern::Identifier(ident) = &decl.pattern {
-                    Some(ident.node.clone())
+                    Some(ident.node)
                 } else {
                     None
                 }
             }
-            Statement::Function(decl) => Some(decl.name.node.clone()),
-            Statement::Class(decl) => Some(decl.name.node.clone()),
-            Statement::Interface(decl) => Some(decl.name.node.clone()),
-            Statement::TypeAlias(decl) => Some(decl.name.node.clone()),
-            Statement::Enum(decl) => Some(decl.name.node.clone()),
+            Statement::Function(decl) => Some(decl.name.node),
+            Statement::Class(decl) => Some(decl.name.node),
+            Statement::Interface(decl) => Some(decl.name.node),
+            Statement::TypeAlias(decl) => Some(decl.name.node),
+            Statement::Enum(decl) => Some(decl.name.node),
             _ => None,
         }
-    }
-}
-
-impl Default for CodeGenerator {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -2412,16 +2457,18 @@ mod tests {
     use crate::diagnostics::CollectingDiagnosticHandler;
     use crate::lexer::Lexer;
     use crate::parser::Parser;
+    use crate::string_interner::StringInterner;
     use std::sync::Arc;
 
     fn generate_code(source: &str) -> String {
         let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let mut lexer = Lexer::new(source, handler.clone());
+        let (mut interner, common) = StringInterner::new_with_common_identifiers();
+        let mut lexer = Lexer::new(source, handler.clone(), &mut interner);
         let tokens = lexer.tokenize().expect("Lexing failed");
-        let mut parser = Parser::new(tokens, handler);
+        let mut parser = Parser::new(tokens, handler, &mut interner, &common);
         let program = parser.parse().expect("Parsing failed");
 
-        let mut generator = CodeGenerator::new();
+        let mut generator = CodeGenerator::new(&interner);
         generator.generate(&program)
     }
 
@@ -2469,12 +2516,13 @@ mod tests {
 
     fn generate_code_with_target(source: &str, target: LuaTarget) -> String {
         let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let mut lexer = Lexer::new(source, handler.clone());
+        let (mut interner, common) = StringInterner::new_with_common_identifiers();
+        let mut lexer = Lexer::new(source, handler.clone(), &mut interner);
         let tokens = lexer.tokenize().expect("Lexing failed");
-        let mut parser = Parser::new(tokens, handler);
+        let mut parser = Parser::new(tokens, handler, &mut interner, &common);
         let program = parser.parse().expect("Parsing failed");
 
-        let mut generator = CodeGenerator::new().with_target(target);
+        let mut generator = CodeGenerator::new(&interner).with_target(target);
         generator.generate(&program)
     }
 
@@ -2703,22 +2751,28 @@ const withBackslash = "path\\to\\file"
 
         // Parse the generated code again - should not panic
         let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let mut lexer = Lexer::new(&generated, handler.clone());
+        let (mut interner, common) = StringInterner::new_with_common_identifiers();
+        let mut lexer = Lexer::new(&generated, handler.clone(), &mut interner);
         let tokens = lexer.tokenize().expect("Roundtrip lexing failed");
-        let mut parser = Parser::new(tokens, handler);
+        let mut parser = Parser::new(tokens, handler, &mut interner, &common);
+        let _program = parser.parse().expect("Roundtrip parsing failed");
+    }
+
+    fn parse_roundtrip(source: &str) {
+        let generated = generate_code(source);
+
+        let handler = Arc::new(CollectingDiagnosticHandler::new());
+        let (mut interner, common) = StringInterner::new_with_common_identifiers();
+        let mut lexer = Lexer::new(&generated, handler.clone(), &mut interner);
+        let tokens = lexer.tokenize().expect("Roundtrip lexing failed");
+        let mut parser = Parser::new(tokens, handler, &mut interner, &common);
         let _program = parser.parse().expect("Roundtrip parsing failed");
     }
 
     #[test]
     fn test_roundtrip_function_declaration() {
         let source = "function add(a, b) return a + b end";
-        let generated = generate_code(source);
-
-        let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let mut lexer = Lexer::new(&generated, handler.clone());
-        let tokens = lexer.tokenize().expect("Roundtrip lexing failed");
-        let mut parser = Parser::new(tokens, handler);
-        let _program = parser.parse().expect("Roundtrip parsing failed");
+        parse_roundtrip(source);
     }
 
     #[test]
@@ -2736,25 +2790,13 @@ for i = 1, 10 do
     print(i)
 end
 "#;
-        let generated = generate_code(source);
-
-        let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let mut lexer = Lexer::new(&generated, handler.clone());
-        let tokens = lexer.tokenize().expect("Roundtrip lexing failed");
-        let mut parser = Parser::new(tokens, handler);
-        let _program = parser.parse().expect("Roundtrip parsing failed");
+        parse_roundtrip(source);
     }
 
     #[test]
     fn test_roundtrip_binary_expressions() {
         let source = "const x = (a + b) * (c - d) / e";
-        let generated = generate_code(source);
-
-        let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let mut lexer = Lexer::new(&generated, handler.clone());
-        let tokens = lexer.tokenize().expect("Roundtrip lexing failed");
-        let mut parser = Parser::new(tokens, handler);
-        let _program = parser.parse().expect("Roundtrip parsing failed");
+        parse_roundtrip(source);
     }
 
     #[test]
@@ -2763,32 +2805,44 @@ end
 const arr = [1, 2, 3, 4, 5]
 const obj = { name = "John", age = 30 }
 "#;
-        let generated = generate_code(source);
-
-        let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let mut lexer = Lexer::new(&generated, handler.clone());
-        let tokens = lexer.tokenize().expect("Roundtrip lexing failed");
-        let mut parser = Parser::new(tokens, handler);
-        let _program = parser.parse().expect("Roundtrip parsing failed");
+        parse_roundtrip(source);
     }
 
     #[test]
     fn test_roundtrip_bitwise_lua53() {
-        let source = r#"
-const a = x & y
-const b = x | y
-const c = x ~ y
-const d = x << 2
-const e = x >> 3
-const f = x // y
-"#;
-        let generated = generate_code_with_target(source, LuaTarget::Lua53);
+        let source = "const x = a & b | c ^ d << 2 >> 1";
+        let output = generate_code_with_target(source, LuaTarget::Lua53);
 
         let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let mut lexer = Lexer::new(&generated, handler.clone());
+        let (mut interner, common) = StringInterner::new_with_common_identifiers();
+        let mut lexer = Lexer::new(&output, handler.clone(), &mut interner);
         let tokens = lexer.tokenize().expect("Roundtrip lexing failed");
-        let mut parser = Parser::new(tokens, handler);
+        let mut parser = Parser::new(tokens, handler, &mut interner, &common);
         let _program = parser.parse().expect("Roundtrip parsing failed");
+    }
+
+    #[test]
+    fn test_roundtrip_parent_class() {
+        let source = r#"
+class Animal {
+    var name: string
+
+    function constructor(name: string)
+        self.name = name
+    end
+
+    function speak()
+        print("...")
+    end
+end
+
+class Dog < Animal
+    function speak()
+        print("woof!")
+    end
+end
+"#;
+        parse_roundtrip(source);
     }
 
     // ========== Class Code Generation Tests ==========

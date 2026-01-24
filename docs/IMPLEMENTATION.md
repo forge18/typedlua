@@ -32,7 +32,7 @@ This document provides practical guidance for working with the TypedLua codebase
 
 ### Project Structure
 
-```
+```text
 typed-lua/
 ├── crates/
 │   ├── typedlua-core/          # Core compiler logic
@@ -108,20 +108,20 @@ typed-lua/
 
 ### Module Responsibilities
 
-| Module | Purpose | Key Types |
-|--------|---------|-----------|
-| `arena` | Bump allocator for AST nodes | `Arena<'ast>` |
-| `ast` | AST node definitions | `Expression`, `Statement`, `Type` |
-| `codegen` | Lua code emission | `CodeGenerator` |
-| `config` | Configuration management | `CompilerConfig`, `CompilerOptions` |
-| `di` | Dependency injection | `Container` |
-| `diagnostics` | Error/warning reporting | `DiagnosticHandler`, `Diagnostic` |
-| `fs` | File system abstraction | `FileSystem` trait |
-| `lexer` | Tokenization | `Lexer`, `Token`, `TokenKind` |
-| `parser` | AST construction | `Parser`, `Program` |
-| `span` | Source location tracking | `Span` |
-| `string_interner` | String deduplication | `StringInterner`, `StringId` |
-| `typechecker` | Type analysis | `TypeChecker`, `Type`, `TypeEnvironment` |
+| Module            | Purpose                      | Key Types                                |
+|-------------------|------------------------------|------------------------------------------|
+| `arena`           | Bump allocator for AST nodes | `Arena<'ast>`                            |
+| `ast`             | AST node definitions         | `Expression`, `Statement`, `Type`        |
+| `codegen`         | Lua code emission            | `CodeGenerator`                          |
+| `config`          | Configuration management     | `CompilerConfig`, `CompilerOptions`      |
+| `di`              | Dependency injection         | `Container`                              |
+| `diagnostics`     | Error/warning reporting      | `DiagnosticHandler`, `Diagnostic`        |
+| `fs`              | File system abstraction      | `FileSystem` trait                       |
+| `lexer`           | Tokenization                 | `Lexer`, `Token`, `TokenKind`            |
+| `parser`          | AST construction             | `Parser`, `Program`                      |
+| `span`            | Source location tracking     | `Span`                                   |
+| `string_interner` | String deduplication         | `StringInterner`, `StringId`             |
+| `typechecker`     | Type analysis                | `TypeChecker`, `Type`, `TypeEnvironment` |
 
 ---
 
@@ -200,11 +200,13 @@ fn parse_expression(&mut self) -> &'ast Expression<'ast> {
 ```
 
 **Benefits:**
+
 - Fast allocation (bump pointer)
 - Automatic cleanup (drop entire arena)
 - Cache-friendly (sequential allocation)
 
 **Drawbacks:**
+
 - Cannot free individual nodes
 - Lifetime annotations required
 
@@ -276,6 +278,47 @@ assert_eq!(interner.resolve(id1), "foo");
 struct Identifier {
     name: StringId, // Not String!
     span: Span,
+}
+```
+
+**Important: Always use a single shared StringInterner across all components:**
+
+```rust
+// WRONG: Each component creates its own interner
+let (mut interner1, _) = StringInterner::new_with_common_identifiers();
+let (mut interner2, _) = StringInterner::new_with_common_identifiers();
+// AST contains StringIds from interner1, but TypeChecker uses interner2
+// This will cause "index out of bounds" panics!
+
+// CORRECT: Single shared interner
+let (mut interner, common_ids) = StringInterner::new_with_common_identifiers();
+
+let mut lexer = Lexer::new(source, handler.clone(), &mut interner);
+let mut parser = Parser::new(tokens, handler.clone(), &mut interner, &common_ids);
+let program = parser.parse().unwrap();
+
+// TypeChecker receives a reference to the SAME interner
+let mut type_checker = TypeChecker::new(handler.clone(), &interner);
+```
+
+**Why StringId is important:**
+
+- `StringId` is a `u32` under the hood - tiny compared to `String`
+- Comparison is O(1) instead of O(n) for string comparison
+- Enables efficient hashing in HashMap/FxHashMap
+
+**Pattern for identifier comparison:**
+
+```rust
+// Get string from AST (already a StringId)
+if let ExpressionKind::Identifier(name_id) = &expr.kind {
+    // Resolve to &str for display/debugging
+    let name = interner.resolve(*name_id);
+
+    // Compare StringIds directly (O(1))
+    if *name_id == some_known_id {
+        // ...
+    }
 }
 ```
 
@@ -785,7 +828,7 @@ pub enum Expression<'ast> {
 }
 ```
 
-2. **Update the parser:**
+1. **Update the parser:**
 
 ```rust
 // parser/expression.rs
@@ -802,7 +845,7 @@ fn parse_primary_expression(&mut self) -> &'ast Expression<'ast> {
 }
 ```
 
-3. **Update the type checker:**
+1. **Update the type checker:**
 
 ```rust
 // typechecker/type_checker.rs
@@ -816,7 +859,7 @@ fn check_expression(&mut self, expr: &Expression) -> Type {
 }
 ```
 
-4. **Update the code generator:**
+1. **Update the code generator:**
 
 ```rust
 // codegen/mod.rs
@@ -831,7 +874,7 @@ fn generate_expression(&mut self, expr: &Expression) {
 }
 ```
 
-5. **Add tests:**
+1. **Add tests:**
 
 ```rust
 #[test]
@@ -857,7 +900,7 @@ pub struct CompilerOptions {
 }
 ```
 
-2. **Use in relevant component:**
+1. **Use in relevant component:**
 
 ```rust
 if self.config.compiler_options.enable_async {
@@ -867,7 +910,7 @@ if self.config.compiler_options.enable_async {
 }
 ```
 
-3. **Document in README and config schema**
+1. **Document in README and config schema**
 
 ### Adding a New Diagnostic Error
 
@@ -881,7 +924,7 @@ pub mod error_codes {
 }
 ```
 
-2. **Report the error:**
+1. **Report the error:**
 
 ```rust
 self.diagnostics.error_with_code(
@@ -891,13 +934,14 @@ self.diagnostics.error_with_code(
 );
 ```
 
-3. **Add to documentation in `docs/ERROR_CODES.md`**
+1. **Add to documentation in `docs/ERROR_CODES.md`**
 
 ---
 
 ## Best Practices
 
-### DO:
+### DO
+
 - ✅ Use dependency injection
 - ✅ Allocate AST nodes in arena
 - ✅ Intern strings for identifiers
@@ -907,10 +951,12 @@ self.diagnostics.error_with_code(
 - ✅ Document public APIs with doc comments
 - ✅ Run `cargo fmt` and `cargo clippy` before committing
 
-### DON'T:
+### DON'T
+
 - ❌ Use global mutable state
 - ❌ Heap-allocate AST nodes with `Box`
 - ❌ Store `String` in AST (use `StringId`)
+- ❌ Create separate StringInterners for different components
 - ❌ Panic in library code (use `Result`)
 - ❌ Ignore clippy warnings
 - ❌ Skip tests for new features
@@ -937,6 +983,25 @@ self.diagnostics.error_with_code(
 - Ensure tests don't depend on filesystem state
 - Use mocks for all external dependencies
 - Avoid global state
+
+### "index out of bounds" panic when resolving StringId
+
+**Cause:** You're trying to use a `StringId` from one `StringInterner` with a different `StringInterner`.
+
+**Solution:** Use a single shared `StringInterner`:
+
+```rust
+// Create one interner at the top level
+let (mut interner, common_ids) = StringInterner::new_with_common_identifiers();
+
+// Pass reference to all components
+let mut lexer = Lexer::new(source, handler.clone(), &mut interner);
+let mut parser = Parser::new(tokens, handler.clone(), &mut interner, &common_ids);
+let program = parser.parse().unwrap();
+
+// TypeChecker receives a reference
+let mut type_checker = TypeChecker::new(handler.clone(), &interner);
+```
 
 ---
 

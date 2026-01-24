@@ -3,31 +3,33 @@ use typedlua_core::codegen::CodeGenerator;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::lexer::Lexer;
 use typedlua_core::parser::Parser;
+use typedlua_core::string_interner::StringInterner;
 use typedlua_core::typechecker::TypeChecker;
 
 fn compile_and_check(source: &str) -> Result<String, String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
 
     // Lex
-    let mut lexer = Lexer::new(source, handler.clone());
+    let mut lexer = Lexer::new(source, handler.clone(), &interner);
     let tokens = lexer
         .tokenize()
         .map_err(|e| format!("Lexing failed: {:?}", e))?;
 
     // Parse
-    let mut parser = Parser::new(tokens, handler.clone());
+    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
     let program = parser
         .parse()
         .map_err(|e| format!("Parsing failed: {:?}", e))?;
 
     // Type check
-    let mut type_checker = TypeChecker::new(handler.clone());
+    let mut type_checker = TypeChecker::new(handler.clone(), &interner, common_ids);
     type_checker
         .check_program(&program)
         .map_err(|e| e.message)?;
 
     // Generate code
-    let mut codegen = CodeGenerator::new();
+    let mut codegen = CodeGenerator::new(&interner);
     let output = codegen.generate(&program);
 
     Ok(output)

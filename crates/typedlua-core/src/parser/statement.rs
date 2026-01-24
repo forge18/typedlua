@@ -11,7 +11,7 @@ pub trait StatementParser {
     fn parse_block(&mut self) -> Result<Block, ParserError>;
 }
 
-impl StatementParser for Parser {
+impl StatementParser for Parser<'_> {
     fn parse_statement(&mut self) -> Result<Statement, ParserError> {
         // Check for decorators first
         if self.check(&TokenKind::At) {
@@ -86,7 +86,7 @@ impl StatementParser for Parser {
 }
 
 // Statement implementations
-impl Parser {
+impl Parser<'_> {
     fn parse_variable_declaration(&mut self) -> Result<Statement, ParserError> {
         let start_span = self.current_span();
         let kind = if matches!(self.current().kind, TokenKind::Const) {
@@ -448,11 +448,11 @@ impl Parser {
         self.consume(TokenKind::Colon, "Expected ':' after index key name")?;
 
         let key_type = match &self.current().kind {
-            TokenKind::Identifier(s) if s == "string" => {
+            TokenKind::Identifier(s) if self.resolve(*s) == "string" => {
                 self.advance();
                 IndexKeyType::String
             }
-            TokenKind::Identifier(s) if s == "number" => {
+            TokenKind::Identifier(s) if self.resolve(*s) == "number" => {
                 self.advance();
                 IndexKeyType::Number
             }
@@ -673,7 +673,7 @@ impl Parser {
         self.consume(TokenKind::Export, "Expected 'export'")?;
 
         let is_default = match &self.current().kind {
-            TokenKind::Identifier(s) if s == "default" => {
+            TokenKind::Identifier(s) if self.resolve(*s) == "default" => {
                 self.advance();
                 true
             }
@@ -1361,7 +1361,7 @@ impl Parser {
         match &self.current().kind {
             TokenKind::Identifier(name) => {
                 let span = self.current_span();
-                let ident = Spanned::new(name.clone(), span);
+                let ident = Spanned::new(*name, span);
                 self.advance();
                 Ok(ident)
             }
@@ -1376,12 +1376,12 @@ impl Parser {
     fn parse_identifier_or_keyword(&mut self) -> Result<Ident, ParserError> {
         let span = self.current_span();
         let name = match &self.current().kind {
-            TokenKind::Identifier(name) => name.clone(),
+            TokenKind::Identifier(name) => *name,
             // Allow keywords as identifiers in certain contexts
             kind if kind.is_keyword() => {
-                // Get the keyword string representation
+                // Get the keyword string representation and intern it
                 match kind.to_keyword_str() {
-                    Some(s) => s.to_string(),
+                    Some(s) => self.interner.intern(s),
                     None => {
                         return Err(ParserError {
                             message: format!(

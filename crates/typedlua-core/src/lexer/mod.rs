@@ -1,24 +1,30 @@
-mod token;
+mod lexeme;
 
-pub use token::{TemplatePart, Token, TokenKind};
+pub use lexeme::{TemplatePart, Token, TokenKind};
 
 use crate::diagnostics::{Diagnostic, DiagnosticHandler};
 use crate::errors::LexerError;
 use crate::span::Span;
+use crate::string_interner::StringInterner;
 use std::sync::Arc;
 use tracing::{debug, instrument};
 
 /// Lexer for TypedLua source code
-pub struct Lexer {
+pub struct Lexer<'a> {
     source: Vec<char>,
     position: u32,
     line: u32,
     column: u32,
     diagnostic_handler: Arc<dyn DiagnosticHandler>,
+    interner: &'a StringInterner,
 }
 
-impl Lexer {
-    pub fn new(source: &str, diagnostic_handler: Arc<dyn DiagnosticHandler>) -> Self {
+impl<'a> Lexer<'a> {
+    pub fn new(
+        source: &str,
+        diagnostic_handler: Arc<dyn DiagnosticHandler>,
+        interner: &'a StringInterner,
+    ) -> Self {
         // Pre-allocate Vec<char> to reduce reallocation overhead
         // Most UTF-8 text averages ~1.5 bytes per char, so divide by 2 as estimate
         let estimated_capacity = source.len() / 2 + 10;
@@ -31,6 +37,7 @@ impl Lexer {
             line: 1,
             column: 1,
             diagnostic_handler,
+            interner,
         }
     }
 
@@ -331,7 +338,8 @@ impl Lexer {
             self.advance();
         }
 
-        TokenKind::from_keyword(&ident).unwrap_or(TokenKind::Identifier(ident))
+        TokenKind::from_keyword(&ident)
+            .unwrap_or_else(|| TokenKind::Identifier(self.interner.intern(&ident)))
     }
 
     fn read_number(&mut self) -> Result<TokenKind, LexerError> {
@@ -633,11 +641,20 @@ impl Lexer {
 mod tests {
     use super::*;
     use crate::diagnostics::CollectingDiagnosticHandler;
+    use crate::string_interner::StringInterner;
 
     fn lex(source: &str) -> Vec<Token> {
         let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let mut lexer = Lexer::new(source, handler);
+        let interner = StringInterner::new();
+        let mut lexer = Lexer::new(source, handler, &interner);
         lexer.tokenize().unwrap()
+    }
+
+    fn lex_with_interner(source: &str) -> (Vec<Token>, StringInterner) {
+        let handler = Arc::new(CollectingDiagnosticHandler::new());
+        let interner = StringInterner::new();
+        let mut lexer = Lexer::new(source, handler, &interner);
+        (lexer.tokenize().unwrap(), interner)
     }
 
     #[test]
@@ -754,21 +771,40 @@ mod tests {
 
     #[test]
     fn test_single_line_comment() {
-        let tokens = lex("const x = 5 -- this is a comment\nlocal y = 10");
+        let (tokens, _) = lex_with_interner("const x = 5 -- this is a comment\nlocal y = 10");
         assert_eq!(tokens[0].kind, TokenKind::Const);
-        assert!(matches!(&tokens[1].kind, TokenKind::Identifier(s) if s == "x"));
+        let (tokens, interner) = lex_with_interner("const x = 5");
+        if let TokenKind::Identifier(id) = tokens[1].kind {
+            assert_eq!(interner.resolve(id), "x");
+        } else {
+            panic!("Expected Identifier, got {:?}", tokens[1].kind);
+        }
         assert_eq!(tokens[2].kind, TokenKind::Equal);
-        assert!(matches!(&tokens[3].kind, TokenKind::Number(n) if n == "5"));
-        assert_eq!(tokens[4].kind, TokenKind::Local);
+        if let TokenKind::Number(n) = &tokens[3].kind {
+            assert_eq!(n, "5");
+        } else {
+            panic!("Expected Number, got {:?}", tokens[3].kind);
+        }
+        assert_eq!(tokens[4].kind, TokenKind::Eof);
     }
 
     #[test]
     fn test_multi_line_comment() {
-        let tokens = lex("const x = 5 --[[ this is\n a multi-line\n comment ]]-- local y = 10");
+        let (tokens, interner) = lex_with_interner(
+            "const x = 5 --[[ this is\n a multi-line\n comment ]]-- local y = 10",
+        );
         assert_eq!(tokens[0].kind, TokenKind::Const);
-        assert!(matches!(&tokens[1].kind, TokenKind::Identifier(s) if s == "x"));
+        if let TokenKind::Identifier(id) = tokens[1].kind {
+            assert_eq!(interner.resolve(id), "x");
+        } else {
+            panic!("Expected Identifier, got {:?}", tokens[1].kind);
+        }
         assert_eq!(tokens[2].kind, TokenKind::Equal);
-        assert!(matches!(&tokens[3].kind, TokenKind::Number(n) if n == "5"));
+        if let TokenKind::Number(n) = &tokens[3].kind {
+            assert_eq!(n, "5");
+        } else {
+            panic!("Expected Number, got {:?}", tokens[3].kind);
+        }
         assert_eq!(tokens[4].kind, TokenKind::Local);
     }
 

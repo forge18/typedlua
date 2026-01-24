@@ -4,6 +4,7 @@ pub mod statement;
 pub mod types;
 
 use crate::span::Span;
+use crate::string_interner::StringId;
 use serde::{Deserialize, Serialize};
 
 /// Wrapper for AST nodes with span information
@@ -20,7 +21,7 @@ impl<T> Spanned<T> {
 }
 
 /// Identifier
-pub type Ident = Spanned<String>;
+pub type Ident = Spanned<StringId>;
 
 /// Top-level program
 #[derive(Debug, Clone, Serialize, Deserialize)]

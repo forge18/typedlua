@@ -2,6 +2,7 @@ use crate::document::Document;
 use lsp_types::*;
 use std::sync::Arc;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
+use typedlua_core::string_interner::StringInterner;
 use typedlua_core::typechecker::TypeChecker;
 use typedlua_core::{Lexer, Parser};
 
@@ -20,20 +21,21 @@ impl SignatureHelpProvider {
 
         // Parse and type check the document to get function signature
         let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let mut lexer = Lexer::new(&document.text, handler.clone());
+        let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+        let mut lexer = Lexer::new(&document.text, handler.clone(), &interner);
         let tokens = lexer.tokenize().ok()?;
 
-        let mut parser = Parser::new(tokens, handler.clone());
+        let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
         let ast = parser.parse().ok()?;
 
-        let mut type_checker = TypeChecker::new(handler);
+        let mut type_checker = TypeChecker::new(handler, &interner, common_ids);
         type_checker.check_program(&ast).ok()?;
 
         // Look up the function symbol
         let symbol = type_checker.lookup_symbol(&function_name)?;
 
         // Format the signature
-        let signature = self.format_signature(&function_name, symbol)?;
+        let signature = self.format_signature(&function_name, symbol, &interner)?;
 
         Some(SignatureHelp {
             signatures: vec![signature],
@@ -134,6 +136,7 @@ impl SignatureHelpProvider {
         &self,
         name: &str,
         symbol: &typedlua_core::typechecker::Symbol,
+        interner: &StringInterner,
     ) -> Option<SignatureInformation> {
         use typedlua_core::ast::pattern::Pattern;
         use typedlua_core::ast::types::TypeKind;
@@ -144,13 +147,13 @@ impl SignatureHelpProvider {
 
             for (i, param) in func_type.parameters.iter().enumerate() {
                 let param_name = if let Pattern::Identifier(ident) = &param.pattern {
-                    ident.node.clone()
+                    interner.resolve(ident.node).to_string()
                 } else {
                     format!("param{}", i)
                 };
 
                 let param_type = if let Some(ref type_ann) = param.type_annotation {
-                    self.format_type_simple(type_ann)
+                    self.format_type_simple(type_ann, interner)
                 } else {
                     "unknown".to_string()
                 };
@@ -161,7 +164,7 @@ impl SignatureHelpProvider {
                 });
             }
 
-            let return_type = self.format_type_simple(&func_type.return_type);
+            let return_type = self.format_type_simple(&func_type.return_type, interner);
 
             let label = format!("function {}(...): {}", name, return_type);
 
@@ -177,7 +180,11 @@ impl SignatureHelpProvider {
     }
 
     /// Simple type formatting
-    fn format_type_simple(&self, typ: &typedlua_core::ast::types::Type) -> String {
+    fn format_type_simple(
+        &self,
+        typ: &typedlua_core::ast::types::Type,
+        interner: &StringInterner,
+    ) -> String {
         use typedlua_core::ast::types::{PrimitiveType, TypeKind};
 
         match &typ.kind {
@@ -189,7 +196,7 @@ impl SignatureHelpProvider {
             TypeKind::Primitive(PrimitiveType::Unknown) => "unknown".to_string(),
             TypeKind::Primitive(PrimitiveType::Never) => "never".to_string(),
             TypeKind::Primitive(PrimitiveType::Void) => "void".to_string(),
-            TypeKind::Reference(type_ref) => type_ref.name.node.clone(),
+            TypeKind::Reference(type_ref) => interner.resolve(type_ref.name.node).to_string(),
             TypeKind::Function(_) => "function".to_string(),
             _ => "unknown".to_string(),
         }

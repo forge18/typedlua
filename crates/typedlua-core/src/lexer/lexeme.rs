@@ -1,4 +1,5 @@
 use crate::span::Span;
+use crate::string_interner::StringId;
 
 /// Token kind representing different types of lexical elements
 #[derive(Debug, Clone, PartialEq)]
@@ -58,9 +59,16 @@ pub enum TokenKind {
     Get,
     Set,
     New,
+    Operator,
+    Throw,
+    Try,
+    Catch,
+    Finally,
+    Rethrow,
+    Throws,
 
     // Identifiers and Literals
-    Identifier(String),
+    Identifier(StringId),
     Number(String),
     String(String),
     TemplateString(Vec<TemplatePart>),
@@ -106,9 +114,12 @@ pub enum TokenKind {
     FatArrow,            // =>
     PipeOp,              // |>
     Question,            // ?
+    QuestionQuestion,    // ??
+    QuestionDot,         // ?.
     Colon,               // :
     ColonColon,          // ::
     Bang,                // !
+    BangBang,            // !!
     At,                  // @
 
     // Delimiters
@@ -297,6 +308,7 @@ impl TokenKind {
                 "get" => Some(TokenKind::Get),
                 "set" => Some(TokenKind::Set),
                 "new" => Some(TokenKind::New),
+                "try" => Some(TokenKind::Try),
                 _ => None,
             },
             4 => match s {
@@ -322,6 +334,8 @@ impl TokenKind {
                 "keyof" => Some(TokenKind::Keyof),
                 "infer" => Some(TokenKind::Infer),
                 "final" => Some(TokenKind::Final),
+                "throw" => Some(TokenKind::Throw),
+                "catch" => Some(TokenKind::Catch),
                 _ => None,
             },
             6 => match s {
@@ -332,18 +346,22 @@ impl TokenKind {
                 "export" => Some(TokenKind::Export),
                 "public" => Some(TokenKind::Public),
                 "static" => Some(TokenKind::Static),
+                "throws" => Some(TokenKind::Throws),
                 _ => None,
             },
             7 => match s {
                 "private" => Some(TokenKind::Private),
                 "extends" => Some(TokenKind::Extends),
                 "declare" => Some(TokenKind::Declare),
+                "finally" => Some(TokenKind::Finally),
+                "rethrow" => Some(TokenKind::Rethrow),
                 _ => None,
             },
             8 => match s {
                 "function" => Some(TokenKind::Function),
                 "continue" => Some(TokenKind::Continue),
                 "abstract" => Some(TokenKind::Abstract),
+                "operator" => Some(TokenKind::Operator),
                 "readonly" => Some(TokenKind::Readonly),
                 "override" => Some(TokenKind::Override),
                 _ => None,
@@ -377,7 +395,7 @@ mod tests {
         assert!(TokenKind::Const.is_keyword());
         assert!(TokenKind::Function.is_keyword());
         assert!(!TokenKind::Plus.is_keyword());
-        assert!(!TokenKind::Identifier("test".to_string()).is_keyword());
+        assert!(!TokenKind::Identifier(StringId::from_u32(0)).is_keyword());
     }
 
     #[test]

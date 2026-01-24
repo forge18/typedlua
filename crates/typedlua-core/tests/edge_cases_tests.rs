@@ -1,18 +1,20 @@
-// Edge case tests for TypedLua compiler - simplified version
 use std::sync::Arc;
+use typedlua_core::string_interner::StringInterner;
 use typedlua_core::{diagnostics::CollectingDiagnosticHandler, lexer::Lexer, parser::Parser};
 
 fn lex_only(input: &str) -> bool {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
-    let mut lexer = Lexer::new(input, handler);
+    let (interner, _common_ids) = StringInterner::new_with_common_identifiers();
+    let mut lexer = Lexer::new(input, handler, &interner);
     lexer.tokenize().is_ok()
 }
 
 fn lex_and_parse(input: &str) -> bool {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
-    let mut lexer = Lexer::new(input, handler.clone());
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let mut lexer = Lexer::new(input, handler.clone(), &interner);
     if let Ok(tokens) = lexer.tokenize() {
-        let mut parser = Parser::new(tokens, handler);
+        let mut parser = Parser::new(tokens, handler, &interner, &common_ids);
         parser.parse().is_ok()
     } else {
         false

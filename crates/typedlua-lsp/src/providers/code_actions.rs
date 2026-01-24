@@ -1,10 +1,12 @@
 use crate::document::Document;
 use lsp_types::*;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use typedlua_core::ast::pattern::Pattern;
 use typedlua_core::ast::statement::Statement;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
+use typedlua_core::string_interner::StringInterner;
 use typedlua_core::{Lexer, Parser};
 
 /// Provides code actions (quick fixes, refactorings, source actions)
@@ -27,13 +29,14 @@ impl CodeActionsProvider {
 
         // Parse the document
         let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let mut lexer = Lexer::new(&document.text, handler.clone());
+        let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+        let mut lexer = Lexer::new(&document.text, handler.clone(), &interner);
         let tokens = match lexer.tokenize() {
             Ok(t) => t,
             Err(_) => return actions,
         };
 
-        let mut parser = Parser::new(tokens, handler.clone());
+        let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
         let ast = match parser.parse() {
             Ok(a) => a,
             Err(_) => return actions,

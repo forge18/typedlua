@@ -1,0 +1,117 @@
+use crate::ast::Program;
+use crate::config::OptimizationLevel;
+use crate::diagnostics::DiagnosticHandler;
+use crate::errors::CompilationError;
+use std::sync::Arc;
+
+mod passes;
+use passes::*;
+
+/// Trait for optimization passes that transform the AST
+pub trait OptimizationPass {
+    /// Get the name of this optimization pass
+    fn name(&self) -> &'static str;
+
+    /// Run this optimization pass on the program
+    /// Returns true if the pass made changes to the AST
+    fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError>;
+
+    /// Get the minimum optimization level required for this pass
+    fn min_level(&self) -> OptimizationLevel;
+}
+
+/// Optimizer for AST transformations
+pub struct Optimizer {
+    level: OptimizationLevel,
+    #[allow(dead_code)]
+    handler: Arc<dyn DiagnosticHandler>,
+    passes: Vec<Box<dyn OptimizationPass>>,
+}
+
+impl Optimizer {
+    /// Create a new optimizer with the given optimization level
+    pub fn new(level: OptimizationLevel, handler: Arc<dyn DiagnosticHandler>) -> Self {
+        let mut optimizer = Self {
+            level,
+            handler,
+            passes: Vec::new(),
+        };
+
+        // Register optimization passes based on level
+        optimizer.register_passes();
+        optimizer
+    }
+
+    /// Register optimization passes based on the optimization level
+    fn register_passes(&mut self) {
+        // O1 passes - Basic optimizations (5 passes)
+        self.passes.push(Box::new(ConstantFoldingPass));
+        self.passes.push(Box::new(DeadCodeEliminationPass));
+        self.passes.push(Box::new(AlgebraicSimplificationPass));
+        self.passes.push(Box::new(TablePreallocationPass));
+        self.passes.push(Box::new(GlobalLocalizationPass));
+
+        // O2 passes - Standard optimizations (5 passes)
+        self.passes.push(Box::new(FunctionInliningPass::default()));
+        self.passes.push(Box::new(LoopOptimizationPass));
+        self.passes.push(Box::new(StringConcatOptimizationPass));
+        self.passes.push(Box::new(DeadStoreEliminationPass));
+        self.passes.push(Box::new(TailCallOptimizationPass));
+
+        // O3 passes - Aggressive optimizations (5 passes)
+        self.passes.push(Box::new(AggressiveInliningPass::default()));
+        self.passes.push(Box::new(OperatorInliningPass));
+        self.passes.push(Box::new(InterfaceMethodInliningPass));
+        self.passes.push(Box::new(DevirtualizationPass));
+        self.passes.push(Box::new(GenericSpecializationPass));
+    }
+
+    /// Returns the number of registered passes
+    pub fn pass_count(&self) -> usize {
+        self.passes.len()
+    }
+
+    /// Returns the names of all registered passes
+    pub fn pass_names(&self) -> Vec<&'static str> {
+        self.passes.iter().map(|p| p.name()).collect()
+    }
+
+    /// Optimize the program AST
+    /// Runs all registered optimization passes until no more changes are made
+    pub fn optimize(&mut self, program: &mut Program) -> Result<(), CompilationError> {
+        if self.level == OptimizationLevel::O0 {
+            // No optimizations at O0
+            return Ok(());
+        }
+
+        // Run passes in a loop until no changes are made (fixed-point iteration)
+        let mut iteration = 0;
+        let max_iterations = 10; // Prevent infinite loops
+
+        loop {
+            let mut changed = false;
+            iteration += 1;
+
+            if iteration > max_iterations {
+                // Safety limit reached - stop optimizing
+                break;
+            }
+
+            // Run all passes that are eligible for the current optimization level
+            for pass in &mut self.passes {
+                // Only run passes that are at or below the current optimization level
+                if pass.min_level() <= self.level {
+                    let pass_changed = pass.run(program)?;
+                    changed |= pass_changed;
+                }
+            }
+
+            // If no pass made changes, we've reached a fixed point
+            if !changed {
+                break;
+            }
+        }
+
+        Ok(())
+    }
+}

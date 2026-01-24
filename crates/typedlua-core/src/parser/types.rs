@@ -8,7 +8,7 @@ pub trait TypeParser {
     fn parse_type(&mut self) -> Result<Type, ParserError>;
 }
 
-impl TypeParser for Parser {
+impl TypeParser for Parser<'_> {
     fn parse_type(&mut self) -> Result<Type, ParserError> {
         // Check for type predicate: identifier is Type
         // We need to look ahead to see if this is a type predicate
@@ -42,7 +42,7 @@ impl TypeParser for Parser {
     }
 }
 
-impl Parser {
+impl Parser<'_> {
     fn parse_union_type(&mut self) -> Result<Type, ParserError> {
         let mut types = vec![self.parse_intersection_type()?];
 
@@ -131,17 +131,17 @@ impl Parser {
         match &self.current().kind.clone() {
             // Primitive types
             TokenKind::Identifier(name) => {
-                let primitive = match name.as_str() {
-                    "nil" => Some(PrimitiveType::Nil),
-                    "boolean" => Some(PrimitiveType::Boolean),
-                    "number" => Some(PrimitiveType::Number),
-                    "integer" => Some(PrimitiveType::Integer),
-                    "string" => Some(PrimitiveType::String),
-                    "unknown" => Some(PrimitiveType::Unknown),
-                    "never" => Some(PrimitiveType::Never),
-                    "void" => Some(PrimitiveType::Void),
-                    "table" => Some(PrimitiveType::Table),
-                    "coroutine" => Some(PrimitiveType::Coroutine),
+                let primitive = match self.resolve(*name) {
+                    s if s == "nil" => Some(PrimitiveType::Nil),
+                    s if s == "boolean" => Some(PrimitiveType::Boolean),
+                    s if s == "number" => Some(PrimitiveType::Number),
+                    s if s == "integer" => Some(PrimitiveType::Integer),
+                    s if s == "string" => Some(PrimitiveType::String),
+                    s if s == "unknown" => Some(PrimitiveType::Unknown),
+                    s if s == "never" => Some(PrimitiveType::Never),
+                    s if s == "void" => Some(PrimitiveType::Void),
+                    s if s == "table" => Some(PrimitiveType::Table),
+                    s if s == "coroutine" => Some(PrimitiveType::Coroutine),
                     _ => None,
                 };
 
@@ -154,7 +154,7 @@ impl Parser {
                 }
 
                 // Type reference
-                let name_ident = Spanned::new(name.clone(), start_span);
+                let name_ident = Spanned::new(*name, start_span);
                 self.advance();
 
                 let type_arguments = if self.match_token(&[TokenKind::LessThan]) {

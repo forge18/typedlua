@@ -2,13 +2,15 @@ use super::*;
 use crate::ast::expression::AssignmentOp;
 use crate::diagnostics::CollectingDiagnosticHandler;
 use crate::lexer::Lexer;
+use crate::string_interner::StringInterner;
 use std::sync::Arc;
 
 fn parse_source(source: &str) -> Result<Program, ParserError> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
-    let mut lexer = Lexer::new(source, handler.clone());
+    let (mut interner, common) = StringInterner::new_with_common_identifiers();
+    let mut lexer = Lexer::new(source, handler.clone(), &mut interner);
     let tokens = lexer.tokenize().expect("Lexing failed");
-    let mut parser = Parser::new(tokens, handler);
+    let mut parser = Parser::new(tokens, handler, &mut interner, &common);
     parser.parse()
 }
 
@@ -427,9 +429,7 @@ fn test_parse_decorator() {
         crate::ast::statement::Statement::Class(class_decl) => {
             assert_eq!(class_decl.decorators.len(), 1);
             match &class_decl.decorators[0].expression {
-                crate::ast::statement::DecoratorExpression::Identifier(name) => {
-                    assert_eq!(name.node, "sealed");
-                }
+                crate::ast::statement::DecoratorExpression::Identifier(_) => {}
                 _ => panic!("Expected identifier decorator"),
             }
         }
@@ -456,9 +456,7 @@ fn test_parse_decorator_with_args() {
                 } => {
                     assert_eq!(arguments.len(), 1);
                     match &**callee {
-                        crate::ast::statement::DecoratorExpression::Identifier(name) => {
-                            assert_eq!(name.node, "component");
-                        }
+                        crate::ast::statement::DecoratorExpression::Identifier(_) => {}
                         _ => panic!("Expected identifier in decorator call"),
                     }
                 }

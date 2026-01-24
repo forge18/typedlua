@@ -3,6 +3,7 @@ use lsp_types::{GotoDefinitionResponse, Location, Position, Range, Uri};
 use std::sync::Arc;
 use typedlua_core::ast::statement::Statement;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
+use typedlua_core::string_interner::StringInterner;
 use typedlua_core::{Lexer, Parser, Span};
 
 /// Provides go-to-definition functionality
@@ -26,21 +27,26 @@ impl DefinitionProvider {
 
         // Parse the document to find declarations
         let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let mut lexer = Lexer::new(&document.text, handler.clone());
+        let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+        let mut lexer = Lexer::new(&document.text, handler.clone(), &interner);
         let tokens = lexer.tokenize().ok()?;
 
-        let mut parser = Parser::new(tokens, handler);
+        let mut parser = Parser::new(tokens, handler, &interner, &common_ids);
         let ast = parser.parse().ok()?;
 
         // First, check if the symbol is from an import statement
-        if let Some(import_location) =
-            self.find_import_definition(&ast.statements, &word, document, document_manager)
-        {
+        if let Some(import_location) = self.find_import_definition(
+            &ast.statements,
+            &word,
+            document,
+            document_manager,
+            &interner,
+        ) {
             return Some(GotoDefinitionResponse::Scalar(import_location));
         }
 
         // Otherwise, search for local declaration
-        let def_span = self.find_declaration(&ast.statements, &word)?;
+        let def_span = self.find_declaration(&ast.statements, &word, &interner)?;
 
         // Convert span to LSP Location
         let location = Location {
@@ -58,6 +64,7 @@ impl DefinitionProvider {
         symbol_name: &str,
         current_document: &Document,
         document_manager: &DocumentManager,
+        interner: &StringInterner,
     ) -> Option<Location> {
         use typedlua_core::ast::statement::ImportClause;
 
@@ -72,22 +79,22 @@ impl DefinitionProvider {
                         // Find the import spec that matches our symbol
                         specs.iter().find_map(|spec| {
                             let local_name = spec.local.as_ref().unwrap_or(&spec.imported);
-                            if local_name.node == symbol_name {
-                                Some(spec.imported.node.clone())
+                            if interner.resolve(local_name.node) == symbol_name {
+                                Some(interner.resolve(spec.imported.node))
                             } else {
                                 None
                             }
                         })
                     }
                     ImportClause::Default(ident) => {
-                        if ident.node == symbol_name {
+                        if interner.resolve(ident.node) == symbol_name {
                             Some("default".to_string())
                         } else {
                             None
                         }
                     }
                     ImportClause::Namespace(ident) => {
-                        if ident.node == symbol_name {
+                        if interner.resolve(ident.node) == symbol_name {
                             // For namespace imports, we'd need to handle property access
                             // For now, just return None
                             None
@@ -156,10 +163,11 @@ impl DefinitionProvider {
     ) -> Option<Location> {
         // Parse the target document
         let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let mut lexer = Lexer::new(&document.text, handler.clone());
+        let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+        let mut lexer = Lexer::new(&document.text, handler.clone(), &interner);
         let tokens = lexer.tokenize().ok()?;
 
-        let mut parser = Parser::new(tokens, handler);
+        let mut parser = Parser::new(tokens, handler, &interner, &common_ids);
         let ast = parser.parse().ok()?;
 
         // Search for the exported declaration
@@ -170,7 +178,9 @@ impl DefinitionProvider {
                 match &export_decl.kind {
                     ExportKind::Declaration(decl) => {
                         // Check if this declaration exports our symbol
-                        if let Some(span) = self.get_declaration_name_span(decl, symbol_name) {
+                        if let Some(span) =
+                            self.get_declaration_name_span(decl, symbol_name, &interner)
+                        {
                             return Some(Location {
                                 uri: uri.clone(),
                                 range: span_to_range(&span),
@@ -183,11 +193,15 @@ impl DefinitionProvider {
                     } => {
                         // Check if this is a named export of our symbol
                         for spec in specifiers {
-                            if spec.exported.as_ref().unwrap_or(&spec.local).node == symbol_name {
+                            if interner.resolve(spec.exported.as_ref().unwrap_or(&spec.local).node)
+                                == symbol_name
+                            {
                                 // Find the local declaration
-                                if let Some(local_span) =
-                                    self.find_declaration(&ast.statements, &spec.local.node)
-                                {
+                                if let Some(local_span) = self.find_declaration(
+                                    &ast.statements,
+                                    &interner.resolve(spec.local.node),
+                                    &interner,
+                                ) {
                                     return Some(Location {
                                         uri: uri.clone(),
                                         range: span_to_range(&local_span),
@@ -212,39 +226,44 @@ impl DefinitionProvider {
     }
 
     /// Get the name span from a declaration statement
-    fn get_declaration_name_span(&self, stmt: &Statement, name: &str) -> Option<Span> {
+    fn get_declaration_name_span(
+        &self,
+        stmt: &Statement,
+        name: &str,
+        interner: &StringInterner,
+    ) -> Option<Span> {
         use typedlua_core::ast::pattern::Pattern;
 
         match stmt {
             Statement::Variable(var_decl) => {
                 if let Pattern::Identifier(ident) = &var_decl.pattern {
-                    if ident.node == name {
+                    if interner.resolve(ident.node) == name {
                         return Some(ident.span);
                     }
                 }
             }
             Statement::Function(func_decl) => {
-                if func_decl.name.node == name {
+                if interner.resolve(func_decl.name.node) == name {
                     return Some(func_decl.name.span);
                 }
             }
             Statement::Class(class_decl) => {
-                if class_decl.name.node == name {
+                if interner.resolve(class_decl.name.node) == name {
                     return Some(class_decl.name.span);
                 }
             }
             Statement::Interface(interface_decl) => {
-                if interface_decl.name.node == name {
+                if interner.resolve(interface_decl.name.node) == name {
                     return Some(interface_decl.name.span);
                 }
             }
             Statement::TypeAlias(type_decl) => {
-                if type_decl.name.node == name {
+                if interner.resolve(type_decl.name.node) == name {
                     return Some(type_decl.name.span);
                 }
             }
             Statement::Enum(enum_decl) => {
-                if enum_decl.name.node == name {
+                if interner.resolve(enum_decl.name.node) == name {
                     return Some(enum_decl.name.span);
                 }
             }
@@ -254,7 +273,12 @@ impl DefinitionProvider {
     }
 
     /// Find the declaration span for a given symbol name
-    fn find_declaration(&self, statements: &[Statement], name: &str) -> Option<Span> {
+    fn find_declaration(
+        &self,
+        statements: &[Statement],
+        name: &str,
+        interner: &StringInterner,
+    ) -> Option<Span> {
         use typedlua_core::ast::pattern::Pattern;
 
         for stmt in statements {
@@ -262,33 +286,33 @@ impl DefinitionProvider {
                 Statement::Variable(var_decl) => {
                     // Check if the pattern contains this identifier
                     if let Pattern::Identifier(ident) = &var_decl.pattern {
-                        if ident.node == name {
+                        if interner.resolve(ident.node) == name {
                             return Some(ident.span);
                         }
                     }
                 }
                 Statement::Function(func_decl) => {
-                    if func_decl.name.node == name {
+                    if interner.resolve(func_decl.name.node) == name {
                         return Some(func_decl.name.span);
                     }
                 }
                 Statement::Class(class_decl) => {
-                    if class_decl.name.node == name {
+                    if interner.resolve(class_decl.name.node) == name {
                         return Some(class_decl.name.span);
                     }
                 }
                 Statement::Interface(interface_decl) => {
-                    if interface_decl.name.node == name {
+                    if interner.resolve(interface_decl.name.node) == name {
                         return Some(interface_decl.name.span);
                     }
                 }
                 Statement::TypeAlias(type_decl) => {
-                    if type_decl.name.node == name {
+                    if interner.resolve(type_decl.name.node) == name {
                         return Some(type_decl.name.span);
                     }
                 }
                 Statement::Enum(enum_decl) => {
-                    if enum_decl.name.node == name {
+                    if interner.resolve(enum_decl.name.node) == name {
                         return Some(enum_decl.name.span);
                     }
                 }

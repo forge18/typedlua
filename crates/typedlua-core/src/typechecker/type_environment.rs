@@ -201,9 +201,11 @@ impl TypeEnvironment {
         name: &str,
         type_args: &[Type],
         span: Span,
+        interner: &crate::string_interner::StringInterner,
+        common_ids: &crate::string_interner::CommonIdentifiers,
     ) -> Result<Type, String> {
         use super::utility_types::apply_utility_type;
-        apply_utility_type(name, type_args, span)
+        apply_utility_type(name, type_args, span, interner, common_ids)
     }
 }
 

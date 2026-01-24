@@ -2,6 +2,7 @@ use crate::document::Document;
 use lsp_types::*;
 use std::sync::Arc;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
+use typedlua_core::string_interner::StringInterner;
 use typedlua_core::typechecker::{SymbolKind, TypeChecker};
 use typedlua_core::{Lexer, Parser};
 
@@ -39,20 +40,21 @@ impl HoverProvider {
     fn hover_for_symbol(&self, document: &Document, word: &str) -> Option<Hover> {
         // Parse and type check the document
         let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let mut lexer = Lexer::new(&document.text, handler.clone());
+        let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+        let mut lexer = Lexer::new(&document.text, handler.clone(), &interner);
         let tokens = lexer.tokenize().ok()?;
 
-        let mut parser = Parser::new(tokens, handler.clone());
+        let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
         let ast = parser.parse().ok()?;
 
-        let mut type_checker = TypeChecker::new(handler);
+        let mut type_checker = TypeChecker::new(handler, &interner, common_ids);
         type_checker.check_program(&ast).ok()?;
 
         // Look up the symbol
-        let symbol = type_checker.lookup_symbol(word)?;
+        let symbol = type_checker.lookup_symbol(word)?.clone();
 
         // Format the type information
-        let type_str = Self::format_type(&symbol.typ);
+        let type_str = Self::format_type(&symbol.typ, &interner);
         let kind_str = match symbol.kind {
             SymbolKind::Const => "const",
             SymbolKind::Variable => "let",
@@ -74,7 +76,7 @@ impl HoverProvider {
     }
 
     /// Format a type for display
-    fn format_type(typ: &typedlua_core::ast::types::Type) -> String {
+    fn format_type(typ: &typedlua_core::ast::types::Type, interner: &StringInterner) -> String {
         use typedlua_core::ast::types::{PrimitiveType, TypeKind};
 
         match &typ.kind {
@@ -96,7 +98,7 @@ impl HoverProvider {
             TypeKind::Array(_) => "array".to_string(),
             TypeKind::Tuple(_) => "tuple".to_string(),
             TypeKind::TypeQuery(_) => "typeof".to_string(),
-            TypeKind::Reference(type_ref) => type_ref.name.node.clone(),
+            TypeKind::Reference(type_ref) => interner.resolve(type_ref.name.node).to_string(),
             TypeKind::Nullable(_) => "nullable".to_string(),
             TypeKind::IndexAccess(_, _) => "indexed access".to_string(),
             TypeKind::Conditional(_) => "conditional type".to_string(),
@@ -104,7 +106,7 @@ impl HoverProvider {
             TypeKind::KeyOf(_) => "keyof".to_string(),
             TypeKind::Mapped(_) => "mapped type".to_string(),
             TypeKind::TemplateLiteral(_) => "template literal type".to_string(),
-            TypeKind::Parenthesized(inner) => Self::format_type(inner),
+            TypeKind::Parenthesized(inner) => Self::format_type(inner, interner),
             TypeKind::TypePredicate(_) => "type predicate".to_string(),
             TypeKind::Variadic(_) => "variadic".to_string(),
         }

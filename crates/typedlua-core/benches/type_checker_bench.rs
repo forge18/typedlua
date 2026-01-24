@@ -1,5 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
-use typedlua_core::{Parser, TypeChecker, TypeEnvironment, DiagnosticHandler};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use typedlua_core::{DiagnosticHandler, Parser, TypeChecker, TypeEnvironment};
 
 fn bench_type_checker_simple(c: &mut Criterion) {
     let source = r#"

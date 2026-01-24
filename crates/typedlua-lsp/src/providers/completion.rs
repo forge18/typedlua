@@ -2,6 +2,7 @@ use crate::document::Document;
 use lsp_types::*;
 use std::sync::Arc;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
+use typedlua_core::string_interner::StringInterner;
 use typedlua_core::typechecker::{Symbol, SymbolKind, TypeChecker};
 use typedlua_core::{Lexer, Parser};
 
@@ -197,19 +198,20 @@ impl CompletionProvider {
     fn complete_symbols(&self, document: &Document) -> Vec<CompletionItem> {
         // Parse and type check the document
         let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let mut lexer = Lexer::new(&document.text, handler.clone());
+        let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+        let mut lexer = Lexer::new(&document.text, handler.clone(), &interner);
         let tokens = match lexer.tokenize() {
             Ok(t) => t,
             Err(_) => return Vec::new(),
         };
 
-        let mut parser = Parser::new(tokens, handler.clone());
+        let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
         let ast = match parser.parse() {
             Ok(a) => a,
             Err(_) => return Vec::new(),
         };
 
-        let mut type_checker = TypeChecker::new(handler);
+        let mut type_checker = TypeChecker::new(handler, &interner, common_ids);
         if type_checker.check_program(&ast).is_err() {
             // Even with errors, the symbol table may have useful information
         }

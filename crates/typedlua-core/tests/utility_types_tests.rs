@@ -1,19 +1,23 @@
+use typedlua_core::string_interner::StringInterner;
 // Integration tests for utility types
 // These test that utility types work end-to-end through the compiler
 
+use std::sync::Arc;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::{Lexer, Parser};
 
 /// Helper to parse and type-check source code
 fn compile_and_check(source: &str) -> Result<(), String> {
-    let handler = std::sync::Arc::new(CollectingDiagnosticHandler::new());
-    let mut lexer = Lexer::new(source, handler.clone());
+    let handler = Arc::new(CollectingDiagnosticHandler::new());
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let mut lexer = Lexer::new(source, handler.clone(), &interner);
     let tokens = lexer.tokenize().map_err(|e| e.to_string())?;
 
-    let mut parser = Parser::new(tokens, handler.clone());
+    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
     let ast = parser.parse().map_err(|e| e.to_string())?;
 
-    let mut type_checker = typedlua_core::typechecker::TypeChecker::new(handler.clone());
+    let mut type_checker =
+        typedlua_core::typechecker::TypeChecker::new(handler.clone(), &interner, common_ids);
     type_checker
         .check_program(&ast)
         .map_err(|e| format!("{:?}", e))?;

@@ -3,14 +3,16 @@ use typedlua_core::codegen::CodeGenerator;
 use typedlua_core::diagnostics::{CollectingDiagnosticHandler, DiagnosticHandler};
 use typedlua_core::lexer::Lexer;
 use typedlua_core::parser::Parser;
+use typedlua_core::string_interner::StringInterner;
 use typedlua_core::typechecker::TypeChecker;
 
 fn parse(source: &str) -> Result<(), String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
-    let mut lexer = Lexer::new(source, handler.clone());
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let mut lexer = Lexer::new(source, handler.clone(), &interner);
     let tokens = lexer.tokenize().map_err(|e| format!("{:?}", e))?;
 
-    let mut parser = Parser::new(tokens, handler.clone());
+    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
     let result = parser.parse();
 
     // Check both parser errors and diagnostic errors
@@ -30,13 +32,14 @@ fn parse(source: &str) -> Result<(), String> {
 
 fn type_check(source: &str) -> Result<(), String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
-    let mut lexer = Lexer::new(source, handler.clone());
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let mut lexer = Lexer::new(source, handler.clone(), &interner);
     let tokens = lexer.tokenize().map_err(|e| format!("{:?}", e))?;
 
-    let mut parser = Parser::new(tokens, handler.clone());
+    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
     let program = parser.parse().map_err(|e| e.message)?;
 
-    let mut checker = TypeChecker::new(handler.clone());
+    let mut checker = TypeChecker::new(handler.clone(), &interner, common_ids);
     let result = checker.check_program(&program);
 
     // Check both type checker errors and diagnostic errors
@@ -56,16 +59,17 @@ fn type_check(source: &str) -> Result<(), String> {
 
 fn compile_to_lua(source: &str) -> Result<String, String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
-    let mut lexer = Lexer::new(source, handler.clone());
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let mut lexer = Lexer::new(source, handler.clone(), &interner);
     let tokens = lexer.tokenize().map_err(|e| format!("{:?}", e))?;
 
-    let mut parser = Parser::new(tokens, handler.clone());
+    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
     let program = parser.parse().map_err(|e| e.message)?;
 
-    let mut checker = TypeChecker::new(handler.clone());
+    let mut checker = TypeChecker::new(handler.clone(), &interner, common_ids);
     checker.check_program(&program).map_err(|e| e.message)?;
 
-    let mut codegen = CodeGenerator::new();
+    let mut codegen = CodeGenerator::new(&interner);
     let lua_code = codegen.generate(&program);
 
     Ok(lua_code)
@@ -235,7 +239,10 @@ fn test_typecheck_primary_constructor_creates_properties() {
 
     match type_check(source) {
         Ok(_) => (),
-        Err(e) => panic!("Primary constructor should type check successfully. Error: {}", e),
+        Err(e) => panic!(
+            "Primary constructor should type check successfully. Error: {}",
+            e
+        ),
     }
 }
 
@@ -253,7 +260,9 @@ fn test_typecheck_error_duplicate_property_name() {
         "Should error when primary constructor parameter conflicts with property"
     );
     assert!(
-        result.unwrap_err().contains("conflicts with existing class member"),
+        result
+            .unwrap_err()
+            .contains("conflicts with existing class member"),
         "Error should mention the conflict"
     );
 }
@@ -323,11 +332,26 @@ fn test_codegen_basic_primary_constructor() {
     let lua_code = compile_to_lua(source).expect("Should compile successfully");
 
     // Should generate both _init and new methods
-    assert!(lua_code.contains("function Point._init(self, x, y)"), "Should generate _init method");
-    assert!(lua_code.contains("function Point.new(x, y)"), "Should generate new method");
-    assert!(lua_code.contains("self.x = x"), "Should initialize x property");
-    assert!(lua_code.contains("self.y = y"), "Should initialize y property");
-    assert!(lua_code.contains("Point._init(self, x, y)"), "new method should call _init");
+    assert!(
+        lua_code.contains("function Point._init(self, x, y)"),
+        "Should generate _init method"
+    );
+    assert!(
+        lua_code.contains("function Point.new(x, y)"),
+        "Should generate new method"
+    );
+    assert!(
+        lua_code.contains("self.x = x"),
+        "Should initialize x property"
+    );
+    assert!(
+        lua_code.contains("self.y = y"),
+        "Should initialize y property"
+    );
+    assert!(
+        lua_code.contains("Point._init(self, x, y)"),
+        "new method should call _init"
+    );
 }
 
 #[test]
@@ -340,9 +364,18 @@ fn test_codegen_private_access_modifier() {
     let lua_code = compile_to_lua(source).expect("Should compile successfully");
 
     // Private properties should be prefixed with _
-    assert!(lua_code.contains("self.name = name"), "Public property should not have prefix");
-    assert!(lua_code.contains("self._age = age"), "Private property should have _ prefix");
-    assert!(lua_code.contains("self.id = id"), "Protected property should not have prefix");
+    assert!(
+        lua_code.contains("self.name = name"),
+        "Public property should not have prefix"
+    );
+    assert!(
+        lua_code.contains("self._age = age"),
+        "Private property should have _ prefix"
+    );
+    assert!(
+        lua_code.contains("self.id = id"),
+        "Protected property should not have prefix"
+    );
 }
 
 #[test]
@@ -358,8 +391,14 @@ fn test_codegen_parent_constructor_forwarding() {
     let lua_code = compile_to_lua(source).expect("Should compile successfully");
 
     // Circle should call Shape._init with parent args
-    assert!(lua_code.contains("Shape._init(self, \"red\")"), "Should forward to parent constructor");
-    assert!(lua_code.contains("self.radius = radius"), "Should initialize own property after parent call");
+    assert!(
+        lua_code.contains("Shape._init(self, \"red\")"),
+        "Should forward to parent constructor"
+    );
+    assert!(
+        lua_code.contains("self.radius = radius"),
+        "Should initialize own property after parent call"
+    );
 }
 
 #[test]
@@ -375,8 +414,14 @@ fn test_codegen_inheritance_with_parameter_forwarding() {
     let lua_code = compile_to_lua(source).expect("Should compile successfully");
 
     // Point3D should forward literal args to Point
-    assert!(lua_code.contains("Point._init(self, 0, 0)"), "Should forward arguments to parent");
-    assert!(lua_code.contains("self.z = z"), "Should initialize own property");
+    assert!(
+        lua_code.contains("Point._init(self, 0, 0)"),
+        "Should forward arguments to parent"
+    );
+    assert!(
+        lua_code.contains("self.z = z"),
+        "Should initialize own property"
+    );
 }
 
 #[test]
@@ -392,10 +437,23 @@ fn test_codegen_primary_constructor_with_methods() {
     let lua_code = compile_to_lua(source).expect("Should compile successfully");
 
     // Should generate constructor and method
-    assert!(lua_code.contains("function Rectangle._init(self, width, height)"), "Should generate constructor");
-    assert!(lua_code.contains("function Rectangle:area()") || lua_code.contains("function Rectangle.area(self)"), "Should generate method");
-    assert!(lua_code.contains("self.width = width"), "Should initialize width");
-    assert!(lua_code.contains("self.height = height"), "Should initialize height");
+    assert!(
+        lua_code.contains("function Rectangle._init(self, width, height)"),
+        "Should generate constructor"
+    );
+    assert!(
+        lua_code.contains("function Rectangle:area()")
+            || lua_code.contains("function Rectangle.area(self)"),
+        "Should generate method"
+    );
+    assert!(
+        lua_code.contains("self.width = width"),
+        "Should initialize width"
+    );
+    assert!(
+        lua_code.contains("self.height = height"),
+        "Should initialize height"
+    );
 }
 
 #[test]
@@ -408,8 +466,14 @@ fn test_codegen_empty_primary_constructor() {
     let lua_code = compile_to_lua(source).expect("Should compile successfully");
 
     // Should still generate constructor methods even with no parameters
-    assert!(lua_code.contains("function Empty._init(self)"), "Should generate _init with just self");
-    assert!(lua_code.contains("function Empty.new()"), "Should generate new with no parameters");
+    assert!(
+        lua_code.contains("function Empty._init(self)"),
+        "Should generate _init with just self"
+    );
+    assert!(
+        lua_code.contains("function Empty.new()"),
+        "Should generate new with no parameters"
+    );
 }
 
 #[test]
@@ -422,6 +486,9 @@ fn test_codegen_metatable_setup() {
     let lua_code = compile_to_lua(source).expect("Should compile successfully");
 
     // Verify proper metatable setup in new method
-    assert!(lua_code.contains("local self = setmetatable({}, Point)"), "Should create instance with metatable");
+    assert!(
+        lua_code.contains("local self = setmetatable({}, Point)"),
+        "Should create instance with metatable"
+    );
     assert!(lua_code.contains("return self"), "Should return instance");
 }

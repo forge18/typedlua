@@ -1,10 +1,12 @@
 use crate::document::{Document, DocumentManager};
 use lsp_types::{Uri, *};
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use typedlua_core::ast::expression::{Expression, ExpressionKind};
 use typedlua_core::ast::statement::Statement;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
+use typedlua_core::string_interner::StringInterner;
 use typedlua_core::{Lexer, Parser, Span};
 
 /// Provides rename functionality
@@ -53,10 +55,11 @@ impl RenameProvider {
 
         // Parse the document
         let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let mut lexer = Lexer::new(&document.text, handler.clone());
+        let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+        let mut lexer = Lexer::new(&document.text, handler.clone(), &interner);
         let tokens = lexer.tokenize().ok()?;
 
-        let mut parser = Parser::new(tokens, handler);
+        let mut parser = Parser::new(tokens, handler, &interner, &common_ids);
         let ast = parser.parse().ok()?;
 
         // Create a map to store edits for each file
@@ -64,10 +67,15 @@ impl RenameProvider {
 
         // Find all occurrences in the current file (including declaration)
         let mut current_file_occurrences = Vec::new();
-        self.find_all_occurrences(&ast.statements, &word, &mut current_file_occurrences);
+        self.find_all_occurrences(
+            &ast.statements,
+            &word,
+            &mut current_file_occurrences,
+            &interner,
+        );
 
         // Find the declaration to include it
-        if let Some(decl_span) = self.find_declaration(&ast.statements, &word) {
+        if let Some(decl_span) = self.find_declaration(&ast.statements, &word, &interner) {
             current_file_occurrences.push(decl_span);
         }
 
@@ -83,7 +91,7 @@ impl RenameProvider {
         all_edits.insert(uri.clone(), current_edits);
 
         // Check if this symbol is exported - if so, rename in all importing files
-        if self.is_symbol_exported(&ast.statements, &word) {
+        if self.is_symbol_exported(&ast.statements, &word, &interner) {
             if let Some(module_id) = &document.module_id {
                 self.collect_renames_in_importing_files(
                     module_id,
@@ -96,26 +104,31 @@ impl RenameProvider {
         }
 
         // Check if this symbol is imported - if so, rename in the source file
-        if let Some((source_uri, exported_name)) =
-            self.find_import_source(&ast.statements, &word, document, document_manager)
-        {
+        if let Some((source_uri, exported_name)) = self.find_import_source(
+            &ast.statements,
+            &word,
+            document,
+            document_manager,
+            &interner,
+        ) {
             if let Some(source_doc) = document_manager.get(&source_uri) {
                 // Parse source document
                 let handler = Arc::new(CollectingDiagnosticHandler::new());
-                let mut lexer = Lexer::new(&source_doc.text, handler.clone());
+                let mut lexer = Lexer::new(&source_doc.text, handler.clone(), &interner);
                 if let Ok(tokens) = lexer.tokenize() {
-                    let mut parser = Parser::new(tokens, handler);
+                    let mut parser = Parser::new(tokens, handler, &interner, &common_ids);
                     if let Ok(ast) = parser.parse() {
                         let mut source_occurrences = Vec::new();
                         self.find_all_occurrences(
                             &ast.statements,
                             &exported_name,
                             &mut source_occurrences,
+                            &interner,
                         );
 
                         // Include declaration in source file
                         if let Some(decl_span) =
-                            self.find_declaration(&ast.statements, &exported_name)
+                            self.find_declaration(&ast.statements, &exported_name, &interner)
                         {
                             source_occurrences.push(decl_span);
                         }
@@ -144,14 +157,22 @@ impl RenameProvider {
     }
 
     /// Check if a symbol is exported from the file
-    fn is_symbol_exported(&self, statements: &[Statement], symbol_name: &str) -> bool {
+    fn is_symbol_exported(
+        &self,
+        statements: &[Statement],
+        symbol_name: &str,
+        interner: &StringInterner,
+    ) -> bool {
         use typedlua_core::ast::statement::ExportKind;
 
         for stmt in statements {
             if let Statement::Export(export_decl) = stmt {
                 match &export_decl.kind {
                     ExportKind::Declaration(decl) => {
-                        if self.get_declaration_name_span(decl, symbol_name).is_some() {
+                        if self
+                            .get_declaration_name_span(decl, symbol_name, interner)
+                            .is_some()
+                        {
                             return true;
                         }
                     }
@@ -161,7 +182,9 @@ impl RenameProvider {
                     } => {
                         for spec in specifiers {
                             let exported_name = spec.exported.as_ref().unwrap_or(&spec.local);
-                            if exported_name.node == symbol_name || spec.local.node == symbol_name {
+                            if interner.resolve(exported_name.node) == symbol_name
+                                || interner.resolve(spec.local.node) == symbol_name
+                            {
                                 return true;
                             }
                         }
@@ -177,39 +200,44 @@ impl RenameProvider {
     }
 
     /// Get the declaration name span from a statement
-    fn get_declaration_name_span(&self, stmt: &Statement, name: &str) -> Option<Span> {
+    fn get_declaration_name_span(
+        &self,
+        stmt: &Statement,
+        name: &str,
+        interner: &StringInterner,
+    ) -> Option<Span> {
         use typedlua_core::ast::pattern::Pattern;
 
         match stmt {
             Statement::Variable(var_decl) => {
                 if let Pattern::Identifier(ident) = &var_decl.pattern {
-                    if ident.node == name {
+                    if interner.resolve(ident.node) == name {
                         return Some(ident.span);
                     }
                 }
             }
             Statement::Function(func_decl) => {
-                if func_decl.name.node == name {
+                if interner.resolve(func_decl.name.node) == name {
                     return Some(func_decl.name.span);
                 }
             }
             Statement::Class(class_decl) => {
-                if class_decl.name.node == name {
+                if interner.resolve(class_decl.name.node) == name {
                     return Some(class_decl.name.span);
                 }
             }
             Statement::Interface(interface_decl) => {
-                if interface_decl.name.node == name {
+                if interner.resolve(interface_decl.name.node) == name {
                     return Some(interface_decl.name.span);
                 }
             }
             Statement::TypeAlias(type_decl) => {
-                if type_decl.name.node == name {
+                if interner.resolve(type_decl.name.node) == name {
                     return Some(type_decl.name.span);
                 }
             }
             Statement::Enum(enum_decl) => {
-                if enum_decl.name.node == name {
+                if interner.resolve(enum_decl.name.node) == name {
                     return Some(enum_decl.name.span);
                 }
             }
@@ -251,12 +279,13 @@ impl RenameProvider {
                                     && import_info.imported_name == symbol_name
                                 {
                                     // Parse the document to find all occurrences
-                                    if let Some(ast) = doc.get_or_parse_ast() {
+                                    if let Some((ast, interner, _)) = doc.get_or_parse_ast() {
                                         let mut occurrences = Vec::new();
                                         self.find_all_occurrences(
                                             &ast.statements,
                                             &import_info.local_name,
                                             &mut occurrences,
+                                            &*interner,
                                         );
 
                                         // Convert to text edits
@@ -288,6 +317,7 @@ impl RenameProvider {
         symbol_name: &str,
         current_document: &Document,
         document_manager: &DocumentManager,
+        interner: &StringInterner,
     ) -> Option<(Uri, String)> {
         use typedlua_core::ast::statement::ImportClause;
 
@@ -299,21 +329,21 @@ impl RenameProvider {
                 let exported_name = match &import_decl.clause {
                     ImportClause::Named(specs) => specs.iter().find_map(|spec| {
                         let local_name = spec.local.as_ref().unwrap_or(&spec.imported);
-                        if local_name.node == symbol_name {
-                            Some(spec.imported.node.clone())
+                        if interner.resolve(local_name.node) == symbol_name {
+                            Some(interner.resolve(spec.imported.node).to_string())
                         } else {
                             None
                         }
                     }),
                     ImportClause::Default(ident) => {
-                        if ident.node == symbol_name {
+                        if interner.resolve(ident.node) == symbol_name {
                             Some("default".to_string())
                         } else {
                             None
                         }
                     }
                     ImportClause::Namespace(ident) => {
-                        if ident.node == symbol_name {
+                        if interner.resolve(ident.node) == symbol_name {
                             None // Skip namespace imports for now
                         } else {
                             None
@@ -508,40 +538,45 @@ impl RenameProvider {
     }
 
     /// Find the declaration span for a given symbol name
-    fn find_declaration(&self, statements: &[Statement], name: &str) -> Option<Span> {
+    fn find_declaration(
+        &self,
+        statements: &[Statement],
+        name: &str,
+        interner: &StringInterner,
+    ) -> Option<Span> {
         use typedlua_core::ast::pattern::Pattern;
 
         for stmt in statements {
             match stmt {
                 Statement::Variable(var_decl) => {
                     if let Pattern::Identifier(ident) = &var_decl.pattern {
-                        if ident.node == name {
+                        if interner.resolve(ident.node) == name {
                             return Some(ident.span);
                         }
                     }
                 }
                 Statement::Function(func_decl) => {
-                    if func_decl.name.node == name {
+                    if interner.resolve(func_decl.name.node) == name {
                         return Some(func_decl.name.span);
                     }
                 }
                 Statement::Class(class_decl) => {
-                    if class_decl.name.node == name {
+                    if interner.resolve(class_decl.name.node) == name {
                         return Some(class_decl.name.span);
                     }
                 }
                 Statement::Interface(interface_decl) => {
-                    if interface_decl.name.node == name {
+                    if interner.resolve(interface_decl.name.node) == name {
                         return Some(interface_decl.name.span);
                     }
                 }
                 Statement::TypeAlias(type_decl) => {
-                    if type_decl.name.node == name {
+                    if interner.resolve(type_decl.name.node) == name {
                         return Some(type_decl.name.span);
                     }
                 }
                 Statement::Enum(enum_decl) => {
-                    if enum_decl.name.node == name {
+                    if interner.resolve(enum_decl.name.node) == name {
                         return Some(enum_decl.name.span);
                     }
                 }
@@ -552,90 +587,108 @@ impl RenameProvider {
     }
 
     /// Find all occurrences of a symbol
-    fn find_all_occurrences(&self, statements: &[Statement], name: &str, refs: &mut Vec<Span>) {
+    fn find_all_occurrences(
+        &self,
+        statements: &[Statement],
+        name: &str,
+        refs: &mut Vec<Span>,
+        interner: &StringInterner,
+    ) {
         for stmt in statements {
-            self.find_occurrences_in_statement(stmt, name, refs);
+            self.find_occurrences_in_statement(stmt, name, refs, interner);
         }
     }
 
-    fn find_occurrences_in_statement(&self, stmt: &Statement, name: &str, refs: &mut Vec<Span>) {
+    fn find_occurrences_in_statement(
+        &self,
+        stmt: &Statement,
+        name: &str,
+        refs: &mut Vec<Span>,
+        interner: &StringInterner,
+    ) {
         match stmt {
             Statement::Expression(expr) => {
-                self.find_occurrences_in_expression(expr, name, refs);
+                self.find_occurrences_in_expression(expr, name, refs, interner);
             }
             Statement::Variable(var_decl) => {
-                self.find_occurrences_in_expression(&var_decl.initializer, name, refs);
+                self.find_occurrences_in_expression(&var_decl.initializer, name, refs, interner);
             }
             Statement::Function(func_decl) => {
                 for stmt in &func_decl.body.statements {
-                    self.find_occurrences_in_statement(stmt, name, refs);
+                    self.find_occurrences_in_statement(stmt, name, refs, interner);
                 }
             }
             Statement::If(if_stmt) => {
-                self.find_occurrences_in_expression(&if_stmt.condition, name, refs);
-                self.find_all_occurrences(&if_stmt.then_block.statements, name, refs);
+                self.find_occurrences_in_expression(&if_stmt.condition, name, refs, interner);
+                self.find_all_occurrences(&if_stmt.then_block.statements, name, refs, interner);
                 for else_if in &if_stmt.else_ifs {
-                    self.find_occurrences_in_expression(&else_if.condition, name, refs);
-                    self.find_all_occurrences(&else_if.block.statements, name, refs);
+                    self.find_occurrences_in_expression(&else_if.condition, name, refs, interner);
+                    self.find_all_occurrences(&else_if.block.statements, name, refs, interner);
                 }
                 if let Some(else_block) = &if_stmt.else_block {
-                    self.find_all_occurrences(&else_block.statements, name, refs);
+                    self.find_all_occurrences(&else_block.statements, name, refs, interner);
                 }
             }
             Statement::While(while_stmt) => {
-                self.find_occurrences_in_expression(&while_stmt.condition, name, refs);
-                self.find_all_occurrences(&while_stmt.body.statements, name, refs);
+                self.find_occurrences_in_expression(&while_stmt.condition, name, refs, interner);
+                self.find_all_occurrences(&while_stmt.body.statements, name, refs, interner);
             }
             Statement::Return(ret) => {
                 for expr in &ret.values {
-                    self.find_occurrences_in_expression(expr, name, refs);
+                    self.find_occurrences_in_expression(expr, name, refs, interner);
                 }
             }
             Statement::Block(block) => {
-                self.find_all_occurrences(&block.statements, name, refs);
+                self.find_all_occurrences(&block.statements, name, refs, interner);
             }
             _ => {}
         }
     }
 
-    fn find_occurrences_in_expression(&self, expr: &Expression, name: &str, refs: &mut Vec<Span>) {
+    fn find_occurrences_in_expression(
+        &self,
+        expr: &Expression,
+        name: &str,
+        refs: &mut Vec<Span>,
+        interner: &StringInterner,
+    ) {
         match &expr.kind {
             ExpressionKind::Identifier(ident) => {
-                if ident == name {
+                if interner.resolve(*ident) == name {
                     refs.push(expr.span);
                 }
             }
             ExpressionKind::Binary(_, left, right) => {
-                self.find_occurrences_in_expression(left, name, refs);
-                self.find_occurrences_in_expression(right, name, refs);
+                self.find_occurrences_in_expression(left, name, refs, interner);
+                self.find_occurrences_in_expression(right, name, refs, interner);
             }
             ExpressionKind::Unary(_, operand) => {
-                self.find_occurrences_in_expression(operand, name, refs);
+                self.find_occurrences_in_expression(operand, name, refs, interner);
             }
             ExpressionKind::Call(callee, args) => {
-                self.find_occurrences_in_expression(callee, name, refs);
+                self.find_occurrences_in_expression(callee, name, refs, interner);
                 for arg in args {
-                    self.find_occurrences_in_expression(&arg.value, name, refs);
+                    self.find_occurrences_in_expression(&arg.value, name, refs, interner);
                 }
             }
             ExpressionKind::Member(object, _) => {
-                self.find_occurrences_in_expression(object, name, refs);
+                self.find_occurrences_in_expression(object, name, refs, interner);
             }
             ExpressionKind::Index(object, index) => {
-                self.find_occurrences_in_expression(object, name, refs);
-                self.find_occurrences_in_expression(index, name, refs);
+                self.find_occurrences_in_expression(object, name, refs, interner);
+                self.find_occurrences_in_expression(index, name, refs, interner);
             }
             ExpressionKind::Assignment(target, _, value) => {
-                self.find_occurrences_in_expression(target, name, refs);
-                self.find_occurrences_in_expression(value, name, refs);
+                self.find_occurrences_in_expression(target, name, refs, interner);
+                self.find_occurrences_in_expression(value, name, refs, interner);
             }
             ExpressionKind::Conditional(condition, then_expr, else_expr) => {
-                self.find_occurrences_in_expression(condition, name, refs);
-                self.find_occurrences_in_expression(then_expr, name, refs);
-                self.find_occurrences_in_expression(else_expr, name, refs);
+                self.find_occurrences_in_expression(condition, name, refs, interner);
+                self.find_occurrences_in_expression(then_expr, name, refs, interner);
+                self.find_occurrences_in_expression(else_expr, name, refs, interner);
             }
             ExpressionKind::Parenthesized(inner) => {
-                self.find_occurrences_in_expression(inner, name, refs);
+                self.find_occurrences_in_expression(inner, name, refs, interner);
             }
             _ => {}
         }

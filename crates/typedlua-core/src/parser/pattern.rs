@@ -8,17 +8,17 @@ pub trait PatternParser {
     fn parse_pattern(&mut self) -> Result<Pattern, ParserError>;
 }
 
-impl PatternParser for Parser {
+impl PatternParser for Parser<'_> {
     fn parse_pattern(&mut self) -> Result<Pattern, ParserError> {
         let start_span = self.current_span();
 
         match &self.current().kind.clone() {
-            TokenKind::Identifier(name) if name == "_" => {
+            TokenKind::Identifier(name) if self.interner.resolve(*name) == "_" => {
                 self.advance();
                 Ok(Pattern::Wildcard(start_span))
             }
             TokenKind::Identifier(name) => {
-                let id = name.clone();
+                let id = *name;
                 self.advance();
                 Ok(Pattern::Identifier(Spanned::new(id, start_span)))
             }
@@ -57,7 +57,7 @@ impl PatternParser for Parser {
     }
 }
 
-impl Parser {
+impl Parser<'_> {
     fn parse_array_pattern(&mut self) -> Result<Pattern, ParserError> {
         let start_span = self.current_span();
         self.consume(TokenKind::LeftBracket, "Expected '['")?;
@@ -70,7 +70,7 @@ impl Parser {
                 let name = match &self.current().kind {
                     TokenKind::Identifier(s) => {
                         let span = self.current_span();
-                        let ident = Spanned::new(s.clone(), span);
+                        let ident = Spanned::new(*s, span);
                         self.advance();
                         ident
                     }
@@ -119,7 +119,7 @@ impl Parser {
             let key = match &self.current().kind {
                 TokenKind::Identifier(s) => {
                     let span = self.current_span();
-                    let ident = Spanned::new(s.clone(), span);
+                    let ident = Spanned::new(*s, span);
                     self.advance();
                     ident
                 }

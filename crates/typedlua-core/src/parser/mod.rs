@@ -10,6 +10,7 @@ use crate::ast::Program;
 use crate::diagnostics::{Diagnostic, DiagnosticHandler};
 use crate::lexer::{Token, TokenKind};
 use crate::span::Span;
+use crate::string_interner::{CommonIdentifiers, StringInterner};
 use std::sync::Arc;
 
 pub use expression::ExpressionParser;
@@ -31,19 +32,43 @@ impl std::fmt::Display for ParserError {
 
 impl std::error::Error for ParserError {}
 
-pub struct Parser {
+pub struct Parser<'a> {
     tokens: Vec<Token>,
     position: usize,
     diagnostic_handler: Arc<dyn DiagnosticHandler>,
+    interner: &'a StringInterner,
+    common: &'a CommonIdentifiers,
 }
 
-impl Parser {
-    pub fn new(tokens: Vec<Token>, diagnostic_handler: Arc<dyn DiagnosticHandler>) -> Self {
+impl<'a> Parser<'a> {
+    pub fn new(
+        tokens: Vec<Token>,
+        diagnostic_handler: Arc<dyn DiagnosticHandler>,
+        interner: &'a StringInterner,
+        common: &'a CommonIdentifiers,
+    ) -> Self {
         Parser {
             tokens,
             position: 0,
             diagnostic_handler,
+            interner,
+            common,
         }
+    }
+
+    /// Get reference to the string interner
+    pub fn interner(&self) -> &StringInterner {
+        self.interner
+    }
+
+    /// Get reference to common identifiers
+    pub fn common(&self) -> &CommonIdentifiers {
+        self.common
+    }
+
+    /// Resolve a StringId to a string
+    pub fn resolve(&self, id: crate::string_interner::StringId) -> String {
+        self.interner.resolve(id)
     }
 
     pub fn parse(&mut self) -> Result<Program, ParserError> {

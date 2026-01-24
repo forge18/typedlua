@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use typedlua_core::ast::statement::{ExportKind, ImportClause, Statement};
 use typedlua_core::ast::Program;
 use typedlua_core::module_resolver::ModuleId;
+use typedlua_core::string_interner::StringInterner;
 use typedlua_core::Span;
 
 /// Information about an exported symbol
@@ -94,6 +95,7 @@ impl SymbolIndex {
         uri: &Uri,
         module_id: &ModuleId,
         ast: &Program,
+        interner: &StringInterner,
         resolve_import: impl Fn(&str, &ModuleId) -> Option<(ModuleId, Uri)>,
     ) {
         // Clear old entries for this document
@@ -103,13 +105,13 @@ impl SymbolIndex {
         self.uri_to_module.insert(uri.clone(), module_id.clone());
 
         // Index exports
-        self.index_exports(uri, module_id, &ast.statements);
+        self.index_exports(uri, module_id, &ast.statements, interner);
 
         // Index imports
-        self.index_imports(uri, module_id, &ast.statements, resolve_import);
+        self.index_imports(uri, module_id, &ast.statements, interner, resolve_import);
 
         // Index workspace symbols
-        self.index_workspace_symbols(uri, &ast.statements);
+        self.index_workspace_symbols(uri, &ast.statements, interner);
     }
 
     /// Clear index entries for a document
@@ -137,13 +139,19 @@ impl SymbolIndex {
     }
 
     /// Index all exports in a module
-    fn index_exports(&mut self, uri: &Uri, module_id: &ModuleId, statements: &[Statement]) {
+    fn index_exports(
+        &mut self,
+        uri: &Uri,
+        module_id: &ModuleId,
+        statements: &[Statement],
+        interner: &StringInterner,
+    ) {
         for stmt in statements {
             if let Statement::Export(export_decl) = stmt {
                 match &export_decl.kind {
                     ExportKind::Declaration(decl) => {
                         if let Some((local_name, exported_name)) =
-                            Self::get_declaration_export_name(decl)
+                            Self::get_declaration_export_name(decl, interner)
                         {
                             let export_info = ExportInfo {
                                 exported_name: exported_name.clone(),
@@ -160,11 +168,11 @@ impl SymbolIndex {
                         source: _,
                     } => {
                         for spec in specifiers {
-                            let local_name = spec.local.node.clone();
+                            let local_name = interner.resolve(spec.local.node);
                             let exported_name = spec
                                 .exported
                                 .as_ref()
-                                .map(|e| e.node.clone())
+                                .map(|e| interner.resolve(e.node))
                                 .unwrap_or_else(|| local_name.clone());
 
                             let export_info = ExportInfo {
@@ -198,6 +206,7 @@ impl SymbolIndex {
         uri: &Uri,
         module_id: &ModuleId,
         statements: &[Statement],
+        interner: &StringInterner,
         resolve_import: impl Fn(&str, &ModuleId) -> Option<(ModuleId, Uri)>,
     ) {
         for stmt in statements {
@@ -211,11 +220,11 @@ impl SymbolIndex {
                     match &import_decl.clause {
                         ImportClause::Named(specs) => {
                             for spec in specs {
-                                let imported_name = spec.imported.node.clone();
+                                let imported_name = interner.resolve(spec.imported.node);
                                 let local_name = spec
                                     .local
                                     .as_ref()
-                                    .map(|l| l.node.clone())
+                                    .map(|l| interner.resolve(l.node))
                                     .unwrap_or_else(|| imported_name.clone());
 
                                 let import_info = ImportInfo {
@@ -239,7 +248,7 @@ impl SymbolIndex {
                             }
                         }
                         ImportClause::Default(ident) => {
-                            let local_name = ident.node.clone();
+                            let local_name = interner.resolve(ident.node);
                             let import_info = ImportInfo {
                                 local_name: local_name.clone(),
                                 imported_name: "default".to_string(),
@@ -270,9 +279,14 @@ impl SymbolIndex {
     }
 
     /// Index all workspace symbols in a module
-    fn index_workspace_symbols(&mut self, uri: &Uri, statements: &[Statement]) {
+    fn index_workspace_symbols(
+        &mut self,
+        uri: &Uri,
+        statements: &[Statement],
+        interner: &StringInterner,
+    ) {
         for stmt in statements {
-            self.index_statement_symbols(uri, stmt, None);
+            self.index_statement_symbols(uri, stmt, None, interner);
         }
     }
 
@@ -282,6 +296,7 @@ impl SymbolIndex {
         uri: &Uri,
         stmt: &Statement,
         container_name: Option<String>,
+        interner: &StringInterner,
     ) {
         use typedlua_core::ast::pattern::Pattern;
         use typedlua_core::ast::statement::ClassMember;
@@ -289,34 +304,36 @@ impl SymbolIndex {
         match stmt {
             Statement::Variable(var_decl) => {
                 if let Pattern::Identifier(ident) = &var_decl.pattern {
+                    let name = interner.resolve(ident.node);
                     let symbol = WorkspaceSymbolInfo {
-                        name: ident.node.clone(),
+                        name: name.clone(),
                         kind: SymbolKind::VARIABLE,
                         uri: uri.clone(),
                         span: ident.span.clone(),
                         container_name: container_name.clone(),
                     };
                     self.workspace_symbols
-                        .entry(ident.node.to_lowercase())
+                        .entry(name.to_lowercase())
                         .or_insert_with(Vec::new)
                         .push(symbol);
                 }
             }
             Statement::Function(func_decl) => {
+                let name = interner.resolve(func_decl.name.node);
                 let symbol = WorkspaceSymbolInfo {
-                    name: func_decl.name.node.clone(),
+                    name: name.clone(),
                     kind: SymbolKind::FUNCTION,
                     uri: uri.clone(),
                     span: func_decl.name.span.clone(),
                     container_name: container_name.clone(),
                 };
                 self.workspace_symbols
-                    .entry(func_decl.name.node.to_lowercase())
+                    .entry(name.to_lowercase())
                     .or_insert_with(Vec::new)
                     .push(symbol);
             }
             Statement::Class(class_decl) => {
-                let class_name = class_decl.name.node.clone();
+                let class_name = interner.resolve(class_decl.name.node);
                 let symbol = WorkspaceSymbolInfo {
                     name: class_name.clone(),
                     kind: SymbolKind::CLASS,
@@ -333,28 +350,30 @@ impl SymbolIndex {
                 for member in &class_decl.members {
                     match member {
                         ClassMember::Property(prop) => {
+                            let name = interner.resolve(prop.name.node);
                             let symbol = WorkspaceSymbolInfo {
-                                name: prop.name.node.clone(),
+                                name: name.clone(),
                                 kind: SymbolKind::PROPERTY,
                                 uri: uri.clone(),
                                 span: prop.name.span.clone(),
                                 container_name: Some(class_name.clone()),
                             };
                             self.workspace_symbols
-                                .entry(prop.name.node.to_lowercase())
+                                .entry(name.to_lowercase())
                                 .or_insert_with(Vec::new)
                                 .push(symbol);
                         }
                         ClassMember::Method(method) => {
+                            let name = interner.resolve(method.name.node);
                             let symbol = WorkspaceSymbolInfo {
-                                name: method.name.node.clone(),
+                                name: name.clone(),
                                 kind: SymbolKind::METHOD,
                                 uri: uri.clone(),
                                 span: method.name.span.clone(),
                                 container_name: Some(class_name.clone()),
                             };
                             self.workspace_symbols
-                                .entry(method.name.node.to_lowercase())
+                                .entry(name.to_lowercase())
                                 .or_insert_with(Vec::new)
                                 .push(symbol);
                         }
@@ -372,28 +391,30 @@ impl SymbolIndex {
                                 .push(symbol);
                         }
                         ClassMember::Getter(getter) => {
+                            let name = interner.resolve(getter.name.node);
                             let symbol = WorkspaceSymbolInfo {
-                                name: getter.name.node.clone(),
+                                name: name.clone(),
                                 kind: SymbolKind::PROPERTY,
                                 uri: uri.clone(),
                                 span: getter.name.span.clone(),
                                 container_name: Some(class_name.clone()),
                             };
                             self.workspace_symbols
-                                .entry(getter.name.node.to_lowercase())
+                                .entry(name.to_lowercase())
                                 .or_insert_with(Vec::new)
                                 .push(symbol);
                         }
                         ClassMember::Setter(setter) => {
+                            let name = interner.resolve(setter.name.node);
                             let symbol = WorkspaceSymbolInfo {
-                                name: setter.name.node.clone(),
+                                name: name.clone(),
                                 kind: SymbolKind::PROPERTY,
                                 uri: uri.clone(),
                                 span: setter.name.span.clone(),
                                 container_name: Some(class_name.clone()),
                             };
                             self.workspace_symbols
-                                .entry(setter.name.node.to_lowercase())
+                                .entry(name.to_lowercase())
                                 .or_insert_with(Vec::new)
                                 .push(symbol);
                         }
@@ -401,41 +422,44 @@ impl SymbolIndex {
                 }
             }
             Statement::Interface(interface_decl) => {
+                let name = interner.resolve(interface_decl.name.node);
                 let symbol = WorkspaceSymbolInfo {
-                    name: interface_decl.name.node.clone(),
+                    name: name.clone(),
                     kind: SymbolKind::INTERFACE,
                     uri: uri.clone(),
                     span: interface_decl.name.span.clone(),
                     container_name: container_name.clone(),
                 };
                 self.workspace_symbols
-                    .entry(interface_decl.name.node.to_lowercase())
+                    .entry(name.to_lowercase())
                     .or_insert_with(Vec::new)
                     .push(symbol);
             }
             Statement::TypeAlias(type_decl) => {
+                let name = interner.resolve(type_decl.name.node);
                 let symbol = WorkspaceSymbolInfo {
-                    name: type_decl.name.node.clone(),
+                    name: name.clone(),
                     kind: SymbolKind::TYPE_PARAMETER,
                     uri: uri.clone(),
                     span: type_decl.name.span.clone(),
                     container_name: container_name.clone(),
                 };
                 self.workspace_symbols
-                    .entry(type_decl.name.node.to_lowercase())
+                    .entry(name.to_lowercase())
                     .or_insert_with(Vec::new)
                     .push(symbol);
             }
             Statement::Enum(enum_decl) => {
+                let name = interner.resolve(enum_decl.name.node);
                 let symbol = WorkspaceSymbolInfo {
-                    name: enum_decl.name.node.clone(),
+                    name: name.clone(),
                     kind: SymbolKind::ENUM,
                     uri: uri.clone(),
                     span: enum_decl.name.span.clone(),
                     container_name: container_name.clone(),
                 };
                 self.workspace_symbols
-                    .entry(enum_decl.name.node.to_lowercase())
+                    .entry(name.to_lowercase())
                     .or_insert_with(Vec::new)
                     .push(symbol);
             }
@@ -545,35 +569,39 @@ impl SymbolIndex {
     }
 
     /// Helper to extract export name from a declaration
-    fn get_declaration_export_name(stmt: &Statement) -> Option<(String, String)> {
+    fn get_declaration_export_name(
+        stmt: &Statement,
+        interner: &StringInterner,
+    ) -> Option<(String, String)> {
         use typedlua_core::ast::pattern::Pattern;
 
         match stmt {
             Statement::Variable(var_decl) => {
                 if let Pattern::Identifier(ident) = &var_decl.pattern {
-                    Some((ident.node.clone(), ident.node.clone()))
+                    let name = interner.resolve(ident.node);
+                    Some((name.clone(), name))
                 } else {
                     None
                 }
             }
             Statement::Function(func_decl) => {
-                let name = func_decl.name.node.clone();
+                let name = interner.resolve(func_decl.name.node);
                 Some((name.clone(), name))
             }
             Statement::Class(class_decl) => {
-                let name = class_decl.name.node.clone();
+                let name = interner.resolve(class_decl.name.node);
                 Some((name.clone(), name))
             }
             Statement::Interface(interface_decl) => {
-                let name = interface_decl.name.node.clone();
+                let name = interner.resolve(interface_decl.name.node);
                 Some((name.clone(), name))
             }
             Statement::TypeAlias(type_decl) => {
-                let name = type_decl.name.node.clone();
+                let name = interner.resolve(type_decl.name.node);
                 Some((name.clone(), name))
             }
             Statement::Enum(enum_decl) => {
-                let name = enum_decl.name.node.clone();
+                let name = interner.resolve(enum_decl.name.node);
                 Some((name.clone(), name))
             }
             _ => None,

@@ -6,14 +6,14 @@ pub trait ExpressionParser {
     fn parse_expression(&mut self) -> Result<Expression, ParserError>;
 }
 
-impl ExpressionParser for Parser {
+impl ExpressionParser for Parser<'_> {
     fn parse_expression(&mut self) -> Result<Expression, ParserError> {
         self.parse_assignment()
     }
 }
 
 // Expression parsing using Pratt parsing for precedence
-impl Parser {
+impl Parser<'_> {
     fn parse_assignment(&mut self) -> Result<Expression, ParserError> {
         // Check for arrow function: identifier => expr or (params) => expr
         let checkpoint = self.position;
@@ -455,7 +455,7 @@ impl Parser {
                 })
             }
             TokenKind::Identifier(name) => {
-                let id = name.clone();
+                let id = *name;
                 self.advance();
                 Ok(Expression {
                     kind: ExpressionKind::Identifier(id),
@@ -702,7 +702,7 @@ impl Parser {
                     // Parse the expression tokens
                     // We need to create a temporary parser for these tokens
                     let handler = self.diagnostic_handler.clone();
-                    let mut temp_parser = Parser::new(tokens, handler);
+                    let mut temp_parser = Parser::new(tokens, handler, self.interner, self.common);
                     let expr = temp_parser.parse_expression()?;
                     ast_parts.push(crate::ast::expression::TemplatePart::Expression(expr));
                 }

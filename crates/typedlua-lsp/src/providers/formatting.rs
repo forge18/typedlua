@@ -1,7 +1,9 @@
 use crate::document::Document;
 use lsp_types::*;
+
 use std::sync::Arc;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
+use typedlua_core::string_interner::StringInterner;
 use typedlua_core::{Lexer, Parser};
 
 /// Provides code formatting functionality
@@ -20,13 +22,14 @@ impl FormattingProvider {
     ) -> Vec<TextEdit> {
         // Parse the document to ensure it's valid
         let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let mut lexer = Lexer::new(&document.text, handler.clone());
+        let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+        let mut lexer = Lexer::new(&document.text, handler.clone(), &interner);
         let tokens = match lexer.tokenize() {
             Ok(t) => t,
             Err(_) => return Vec::new(), // Don't format invalid code
         };
 
-        let mut parser = Parser::new(tokens, handler);
+        let mut parser = Parser::new(tokens, handler, &interner, &common_ids);
         let _ast = match parser.parse() {
             Ok(a) => a,
             Err(_) => return Vec::new(), // Don't format invalid code
@@ -50,13 +53,14 @@ impl FormattingProvider {
     ) -> Vec<TextEdit> {
         // Parse the document to ensure it's valid
         let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let mut lexer = Lexer::new(&document.text, handler.clone());
+        let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+        let mut lexer = Lexer::new(&document.text, handler.clone(), &interner);
         let tokens = match lexer.tokenize() {
             Ok(t) => t,
             Err(_) => return Vec::new(),
         };
 
-        let mut parser = Parser::new(tokens, handler);
+        let mut parser = Parser::new(tokens, handler, &interner, &common_ids);
         let _ast = match parser.parse() {
             Ok(a) => a,
             Err(_) => return Vec::new(),

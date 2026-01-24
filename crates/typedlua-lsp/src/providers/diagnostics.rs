@@ -2,6 +2,7 @@ use crate::document::Document;
 use lsp_types::*;
 use std::sync::Arc;
 use typedlua_core::diagnostics::{CollectingDiagnosticHandler, DiagnosticLevel};
+use typedlua_core::string_interner::StringInterner;
 use typedlua_core::typechecker::TypeChecker;
 use typedlua_core::{DiagnosticHandler, Lexer, Parser, Span};
 
@@ -20,8 +21,11 @@ impl DiagnosticsProvider {
         // Create a diagnostic handler to collect errors
         let handler = Arc::new(CollectingDiagnosticHandler::new());
 
+        // Create interner
+        let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+
         // Lex the document
-        let mut lexer = Lexer::new(&document.text, handler.clone());
+        let mut lexer = Lexer::new(&document.text, handler.clone(), &interner);
         let tokens = match lexer.tokenize() {
             Ok(t) => t,
             Err(_) => {
@@ -31,7 +35,7 @@ impl DiagnosticsProvider {
         };
 
         // Parse the document
-        let mut parser = Parser::new(tokens, handler.clone());
+        let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
         let ast = match parser.parse() {
             Ok(a) => a,
             Err(_) => {
@@ -41,7 +45,7 @@ impl DiagnosticsProvider {
         };
 
         // Type check the document
-        let mut type_checker = TypeChecker::new(handler.clone());
+        let mut type_checker = TypeChecker::new(handler.clone(), &interner, common_ids);
         if let Err(_) = type_checker.check_program(&ast) {
             return Self::convert_diagnostics(handler);
         }

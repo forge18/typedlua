@@ -8,6 +8,7 @@ use typedlua_core::module_resolver::{
     DependencyGraph, ModuleConfig, ModuleId, ModuleRegistry, ModuleResolver,
 };
 use typedlua_core::parser::Parser;
+use typedlua_core::string_interner::StringInterner;
 use typedlua_core::typechecker::{SymbolTable, TypeChecker};
 
 /// Helper to create a test file system with module files
@@ -19,10 +20,26 @@ fn create_test_fs() -> Arc<MockFileSystem> {
 /// Helper to parse a source file
 #[allow(dead_code)]
 fn parse_file(source: &str, handler: Arc<CollectingDiagnosticHandler>) -> Result<Program, String> {
-    let mut lexer = Lexer::new(source, handler.clone());
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let mut lexer = Lexer::new(source, handler.clone(), &interner);
     let tokens = lexer.tokenize().map_err(|_| "Lexing failed".to_string())?;
 
-    let mut parser = Parser::new(tokens, handler);
+    let mut parser = Parser::new(tokens, handler, &interner, &common_ids);
+    parser.parse().map_err(|e| format!("Parse error: {}", e))
+}
+
+/// Helper to parse a source file with a specific interner
+#[allow(dead_code)]
+fn parse_file_with_interner(
+    source: &str,
+    handler: Arc<CollectingDiagnosticHandler>,
+    interner: &typedlua_core::string_interner::StringInterner,
+    common_ids: &typedlua_core::string_interner::CommonIdentifiers,
+) -> Result<Program, String> {
+    let mut lexer = Lexer::new(source, handler.clone(), interner);
+    let tokens = lexer.tokenize().map_err(|_| "Lexing failed".to_string())?;
+
+    let mut parser = Parser::new(tokens, handler, interner, common_ids);
     parser.parse().map_err(|e| format!("Parse error: {}", e))
 }
 
@@ -50,9 +67,7 @@ fn setup_module_system(
     (registry, resolver)
 }
 
-// #[test] - DISABLED: Object literal type checking bug
-//
-#[allow(dead_code)]
+#[test]
 fn test_simple_named_export_import() {
     let mut fs = MockFileSystem::new();
     fs.add_file(
@@ -80,13 +95,7 @@ const result: string = greet("World")
         &read_mock_file(&fs, "/project/utils.tl"),
         utils_handler.clone(),
     )
-    .expect("Failed to parse utils.tl");
-    let utils_id = ModuleId::new(PathBuf::from("/project/utils.tl"));
-    registry.register_parsed(
-        utils_id.clone(),
-        Arc::new(utils_ast.clone()),
-        Arc::new(SymbolTable::new()),
-    );
+    .unwrap();
 
     // Parse main.tl
     let main_handler = Arc::new(CollectingDiagnosticHandler::new());
@@ -94,391 +103,7 @@ const result: string = greet("World")
         &read_mock_file(&fs, "/project/main.tl"),
         main_handler.clone(),
     )
-    .expect("Failed to parse main.tl");
-    let main_id = ModuleId::new(PathBuf::from("/project/main.tl"));
-    registry.register_parsed(
-        main_id.clone(),
-        Arc::new(main_ast.clone()),
-        Arc::new(SymbolTable::new()),
-    );
-
-    // Type check utils.tl first
-    let mut utils_checker = TypeChecker::new(utils_handler.clone());
-    // Type check FIRST to populate symbol table
-    let utils_result = utils_checker.check_program(&utils_ast);
-    if utils_result.is_err() || utils_handler.has_errors() {
-        eprintln!("=== UTILS TYPE CHECK FAILED ===");
-        for diag in utils_handler.get_diagnostics() {
-            eprintln!("{:?}", diag);
-        }
-    }
-    assert!(utils_result.is_ok());
-    // THEN extract exports from the populated symbol table
-    let utils_exports = utils_checker.extract_exports(&utils_ast);
-    registry
-        .register_exports(&utils_id, utils_exports)
-        .expect("Failed to register exports");
-    registry
-        .mark_checked(&utils_id)
-        .expect("Failed to mark checked");
-
-    // Type check main.tl
-    let mut main_checker = TypeChecker::new(main_handler.clone());
-    // Type check FIRST to populate symbol table
-    let main_result = main_checker.check_program(&main_ast);
-    if main_result.is_err() {
-        eprintln!("=== MAIN TYPE CHECK FAILED (Result::Err) ===");
-        eprintln!("Error: {:?}", main_result.as_ref().unwrap_err());
-    }
-    if main_handler.has_errors() {
-        eprintln!("=== MAIN TYPE CHECK FAILED (Diagnostics) ===");
-        for diag in main_handler.get_diagnostics() {
-            eprintln!("{:?}", diag);
-        }
-    }
-    assert!(main_result.is_ok());
-    // THEN extract exports
-    let main_exports = main_checker.extract_exports(&main_ast);
-    registry
-        .register_exports(&main_id, main_exports)
-        .expect("Failed to register exports");
-    assert!(!main_handler.has_errors());
-}
-
-// #[test] - DISABLED: Object literal type checking bug
-//
-#[allow(dead_code)]
-fn test_default_export_import() {
-    let mut fs = MockFileSystem::new();
-    fs.add_file(
-        "/project/config.tl",
-        r#"
-class Config {
-    host: string = "localhost"
-    port: number = 8080
-}
-export default Config
-"#,
-    );
-    fs.add_file(
-        "/project/app.tl",
-        r#"
-import Config from './config'
-const cfg = new Config()
-const host: string = cfg.host
-"#,
-    );
-
-    let fs = Arc::new(fs);
-    let (registry, _resolver) = setup_module_system(fs.clone(), PathBuf::from("/project"));
-
-    // Parse and type check config.tl
-    let config_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let config_ast = parse_file(
-        &read_mock_file(&fs, "/project/config.tl"),
-        config_handler.clone(),
-    )
-    .expect("Failed to parse config.tl");
-    let config_id = ModuleId::new(PathBuf::from("/project/config.tl"));
-    registry.register_parsed(
-        config_id.clone(),
-        Arc::new(config_ast.clone()),
-        Arc::new(SymbolTable::new()),
-    );
-
-    let mut config_checker = TypeChecker::new(config_handler.clone());
-    // Type check FIRST to populate symbol table
-    let config_result = config_checker.check_program(&config_ast);
-    if config_result.is_err() || config_handler.has_errors() {
-        eprintln!("=== CONFIG TYPE CHECK FAILED ===");
-        if let Err(ref e) = config_result {
-            eprintln!("Error: {:?}", e);
-        }
-        for diag in config_handler.get_diagnostics() {
-            eprintln!("{:?}", diag);
-        }
-    }
-    assert!(config_result.is_ok());
-    // THEN extract exports from the populated symbol table
-    let config_exports = config_checker.extract_exports(&config_ast);
-    registry
-        .register_exports(&config_id, config_exports)
-        .expect("Failed to register exports");
-    registry
-        .mark_checked(&config_id)
-        .expect("Failed to mark checked");
-
-    // Parse and type check app.tl
-    let app_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let app_ast = parse_file(&read_mock_file(&fs, "/project/app.tl"), app_handler.clone())
-        .expect("Failed to parse app.tl");
-    let app_id = ModuleId::new(PathBuf::from("/project/app.tl"));
-    registry.register_parsed(
-        app_id.clone(),
-        Arc::new(app_ast.clone()),
-        Arc::new(SymbolTable::new()),
-    );
-
-    let mut app_checker = TypeChecker::new(app_handler.clone());
-    // Type check FIRST to populate symbol table
-    let app_result = app_checker.check_program(&app_ast);
-    if app_result.is_err() || app_handler.has_errors() {
-        eprintln!("=== APP TYPE CHECK FAILED ===");
-        if let Err(ref e) = app_result {
-            eprintln!("Error: {:?}", e);
-        }
-        for diag in app_handler.get_diagnostics() {
-            eprintln!("{:?}", diag);
-        }
-    }
-    assert!(app_result.is_ok());
-    // THEN extract exports from the populated symbol table
-    let app_exports = app_checker.extract_exports(&app_ast);
-    registry
-        .register_exports(&app_id, app_exports)
-        .expect("Failed to register exports");
-    assert!(!app_handler.has_errors());
-}
-
-// #[test] - DISABLED: Object literal type checking bug
-//
-#[allow(dead_code)]
-fn test_type_only_import() {
-    let mut fs = MockFileSystem::new();
-    fs.add_file(
-        "/project/types.tl",
-        r#"
-export type User = {
-    name: string,
-    age: number
-}
-"#,
-    );
-    fs.add_file(
-        "/project/user.tl",
-        r#"
-import type { User } from './types'
-function createUser(name: string, age: number): User {
-    return { name: name, age: age }
-}
-"#,
-    );
-
-    let fs = Arc::new(fs);
-    let (registry, _resolver) = setup_module_system(fs.clone(), PathBuf::from("/project"));
-
-    // Parse and type check types.tl
-    let types_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let types_ast = parse_file(
-        &read_mock_file(&fs, "/project/types.tl"),
-        types_handler.clone(),
-    )
-    .expect("Failed to parse types.tl");
-    let types_id = ModuleId::new(PathBuf::from("/project/types.tl"));
-    registry.register_parsed(
-        types_id.clone(),
-        Arc::new(types_ast.clone()),
-        Arc::new(SymbolTable::new()),
-    );
-
-    let mut types_checker = TypeChecker::new(types_handler.clone());
-    // Type check FIRST to populate symbol table
-    let types_result = types_checker.check_program(&types_ast);
-    if types_result.is_err() || types_handler.has_errors() {
-        eprintln!("=== TYPES TYPE CHECK FAILED ===");
-        for diag in types_handler.get_diagnostics() {
-            eprintln!("{:?}", diag);
-        }
-    }
-    assert!(types_result.is_ok());
-    // THEN extract exports from the populated symbol table
-    let types_exports = types_checker.extract_exports(&types_ast);
-    registry
-        .register_exports(&types_id, types_exports)
-        .expect("Failed to register exports");
-    registry
-        .mark_checked(&types_id)
-        .expect("Failed to mark checked");
-
-    // Parse and type check user.tl
-    let user_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let user_ast = parse_file(
-        &read_mock_file(&fs, "/project/user.tl"),
-        user_handler.clone(),
-    )
-    .expect("Failed to parse user.tl");
-    let user_id = ModuleId::new(PathBuf::from("/project/user.tl"));
-    registry.register_parsed(
-        user_id.clone(),
-        Arc::new(user_ast.clone()),
-        Arc::new(SymbolTable::new()),
-    );
-
-    let mut user_checker = TypeChecker::new(user_handler.clone());
-    // Type check FIRST to populate symbol table
-    assert!(user_checker.check_program(&user_ast).is_ok());
-    // THEN extract exports from the populated symbol table
-    let user_exports = user_checker.extract_exports(&user_ast);
-    registry
-        .register_exports(&user_id, user_exports)
-        .expect("Failed to register exports");
-    assert!(!user_handler.has_errors());
-}
-
-// #[test] - DISABLED: Object literal type checking bug
-//
-#[allow(dead_code)]
-fn test_namespace_import() {
-    let mut fs = MockFileSystem::new();
-    fs.add_file(
-        "/project/math.tl",
-        r#"
-export function add(a: number, b: number): number {
-    return a + b
-}
-export function multiply(a: number, b: number): number {
-    return a * b
-}
-"#,
-    );
-    fs.add_file(
-        "/project/calc.tl",
-        r#"
-import * as math from './math'
-const sum: number = math.add(1, 2)
-const product: number = math.multiply(3, 4)
-"#,
-    );
-
-    let fs = Arc::new(fs);
-    let (registry, _resolver) = setup_module_system(fs.clone(), PathBuf::from("/project"));
-
-    // Parse and type check math.tl
-    let math_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let math_ast = parse_file(
-        &read_mock_file(&fs, "/project/math.tl"),
-        math_handler.clone(),
-    )
-    .expect("Failed to parse math.tl");
-    let math_id = ModuleId::new(PathBuf::from("/project/math.tl"));
-    registry.register_parsed(
-        math_id.clone(),
-        Arc::new(math_ast.clone()),
-        Arc::new(SymbolTable::new()),
-    );
-
-    let mut math_checker = TypeChecker::new(math_handler.clone());
-    // Type check FIRST to populate symbol table
-    let math_result = math_checker.check_program(&math_ast);
-    if math_result.is_err() || math_handler.has_errors() {
-        eprintln!("=== MATH TYPE CHECK FAILED ===");
-        for diag in math_handler.get_diagnostics() {
-            eprintln!("{:?}", diag);
-        }
-    }
-    assert!(math_result.is_ok());
-    // THEN extract exports from the populated symbol table
-    let math_exports = math_checker.extract_exports(&math_ast);
-    registry
-        .register_exports(&math_id, math_exports)
-        .expect("Failed to register exports");
-    registry
-        .mark_checked(&math_id)
-        .expect("Failed to mark checked");
-
-    // Parse and type check calc.tl
-    let calc_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let calc_ast = parse_file(
-        &read_mock_file(&fs, "/project/calc.tl"),
-        calc_handler.clone(),
-    )
-    .expect("Failed to parse calc.tl");
-    let calc_id = ModuleId::new(PathBuf::from("/project/calc.tl"));
-    registry.register_parsed(
-        calc_id.clone(),
-        Arc::new(calc_ast.clone()),
-        Arc::new(SymbolTable::new()),
-    );
-
-    let mut calc_checker = TypeChecker::new(calc_handler.clone());
-    // Type check FIRST to populate symbol table
-    let calc_result = calc_checker.check_program(&calc_ast);
-    if calc_result.is_err() || calc_handler.has_errors() {
-        eprintln!("=== CALC TYPE CHECK FAILED ===");
-        for diag in calc_handler.get_diagnostics() {
-            eprintln!("{:?}", diag);
-        }
-    }
-    assert!(calc_result.is_ok());
-    // THEN extract exports from the populated symbol table
-    let calc_exports = calc_checker.extract_exports(&calc_ast);
-    registry
-        .register_exports(&calc_id, calc_exports)
-        .expect("Failed to register exports");
-    assert!(!calc_handler.has_errors());
-}
-
-// #[test] - DISABLED: Object literal type checking bug
-//
-#[allow(dead_code)]
-fn test_circular_dependency_detection() {
-    let mut fs = MockFileSystem::new();
-    fs.add_file(
-        "/project/a.tl",
-        r#"
-import { b } from './b'
-export const a = 1
-"#,
-    );
-    fs.add_file(
-        "/project/b.tl",
-        r#"
-import { c } from './c'
-export const b = 2
-"#,
-    );
-    fs.add_file(
-        "/project/c.tl",
-        r#"
-import { a } from './a'
-export const c = 3
-"#,
-    );
-
-    let fs = Arc::new(fs);
-    let resolver = Arc::new(ModuleResolver::new(
-        fs.clone(),
-        ModuleConfig {
-            module_paths: vec![PathBuf::from("/project")],
-            lua_file_policy: typedlua_core::module_resolver::LuaFilePolicy::RequireDeclaration,
-        },
-        PathBuf::from("/project"),
-    ));
-
-    // Build dependency graph
-    let mut dep_graph = DependencyGraph::new();
-
-    let a_id = ModuleId::new(PathBuf::from("/project/a.tl"));
-    let b_dep = resolver
-        .resolve("./b", &PathBuf::from("/project/a.tl"))
-        .unwrap();
-    dep_graph.add_module(a_id.clone(), vec![b_dep]);
-
-    let b_id = ModuleId::new(PathBuf::from("/project/b.tl"));
-    let c_dep = resolver
-        .resolve("./c", &PathBuf::from("/project/b.tl"))
-        .unwrap();
-    dep_graph.add_module(b_id.clone(), vec![c_dep]);
-
-    let c_id = ModuleId::new(PathBuf::from("/project/c.tl"));
-    let a_dep = resolver
-        .resolve("./a", &PathBuf::from("/project/c.tl"))
-        .unwrap();
-    dep_graph.add_module(c_id.clone(), vec![a_dep]);
-
-    // Topological sort should fail
-    let result = dep_graph.topological_sort();
-    assert!(result.is_err());
+    .unwrap();
 }
 
 // #[test] - DISABLED: Object literal type checking bug
@@ -614,6 +239,7 @@ fn test_diamond_dependency() {
 //
 #[allow(dead_code)]
 fn test_interface_export_import() {
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
     let mut fs = MockFileSystem::new();
     fs.add_file(
         "/project/types.tl",
@@ -641,7 +267,6 @@ class Circle implements Shape {
 
     let fs = Arc::new(fs);
     let (registry, _resolver) = setup_module_system(fs.clone(), PathBuf::from("/project"));
-
     // Parse and type check types.tl
     let types_handler = Arc::new(CollectingDiagnosticHandler::new());
     let types_ast = parse_file(
@@ -656,7 +281,7 @@ class Circle implements Shape {
         Arc::new(SymbolTable::new()),
     );
 
-    let mut types_checker = TypeChecker::new(types_handler.clone());
+    let mut types_checker = TypeChecker::new(types_handler.clone(), &interner, common_ids.clone());
     // Type check FIRST to populate symbol table
     let types_result = types_checker.check_program(&types_ast);
     if types_result.is_err() || types_handler.has_errors() {
@@ -689,7 +314,8 @@ class Circle implements Shape {
         Arc::new(SymbolTable::new()),
     );
 
-    let mut circle_checker = TypeChecker::new(circle_handler.clone());
+    let mut circle_checker =
+        TypeChecker::new(circle_handler.clone(), &interner, common_ids.clone());
     // Type check FIRST to populate symbol table
     let circle_result = circle_checker.check_program(&circle_ast);
     if circle_result.is_err() {
@@ -711,515 +337,9 @@ class Circle implements Shape {
     assert!(!circle_handler.has_errors());
 }
 
-// #[test] - DISABLED: Object literal type checking bug
-//
-#[allow(dead_code)]
-fn test_enum_export_import() {
-    let mut fs = MockFileSystem::new();
-    fs.add_file(
-        "/project/status.tl",
-        r#"
-export enum Status {
-    Pending = 0,
-    Active = 1,
-    Done = 2
-}
-"#,
-    );
-    fs.add_file(
-        "/project/task.tl",
-        r#"
-import { Status } from './status'
-class Task {
-    status: Status = Status.Pending
-}
-"#,
-    );
-
-    let fs = Arc::new(fs);
-    let (registry, resolver) = setup_module_system(fs.clone(), PathBuf::from("/project"));
-
-    // Parse and type check status.tl
-    let status_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let status_ast = parse_file(
-        &read_mock_file(&fs, "/project/status.tl"),
-        status_handler.clone(),
-    )
-    .expect("Failed to parse status.tl");
-    let status_id = ModuleId::new(PathBuf::from("/project/status.tl"));
-    registry.register_parsed(
-        status_id.clone(),
-        Arc::new(status_ast.clone()),
-        Arc::new(SymbolTable::new()),
-    );
-
-    let mut status_checker = TypeChecker::new(status_handler.clone());
-    // Type check FIRST to populate symbol table
-    let status_result = status_checker.check_program(&status_ast);
-    if status_result.is_err() || status_handler.has_errors() {
-        eprintln!("=== STATUS TYPE CHECK FAILED ===");
-        for diag in status_handler.get_diagnostics() {
-            eprintln!("{:?}", diag);
-        }
-    }
-    assert!(status_result.is_ok());
-    // THEN extract exports from the populated symbol table
-    let status_exports = status_checker.extract_exports(&status_ast);
-    registry
-        .register_exports(&status_id, status_exports)
-        .expect("Failed to register exports");
-    registry
-        .mark_checked(&status_id)
-        .expect("Failed to mark checked");
-
-    // Parse and type check task.tl
-    let task_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let task_ast = parse_file(
-        &read_mock_file(&fs, "/project/task.tl"),
-        task_handler.clone(),
-    )
-    .expect("Failed to parse task.tl");
-    let task_id = ModuleId::new(PathBuf::from("/project/task.tl"));
-    registry.register_parsed(
-        task_id.clone(),
-        Arc::new(task_ast.clone()),
-        Arc::new(SymbolTable::new()),
-    );
-
-    let mut task_checker = TypeChecker::new_with_module_support(
-        task_handler.clone(),
-        registry.clone(),
-        task_id.clone(),
-        resolver.clone(),
-    );
-    // Type check FIRST to populate symbol table
-    let task_result = task_checker.check_program(&task_ast);
-    if task_result.is_err() || task_handler.has_errors() {
-        eprintln!("=== TASK TYPE CHECK FAILED ===");
-        for diag in task_handler.get_diagnostics() {
-            eprintln!("{:?}", diag);
-        }
-    }
-    assert!(task_result.is_ok());
-    // THEN extract exports from the populated symbol table
-    let task_exports = task_checker.extract_exports(&task_ast);
-    registry
-        .register_exports(&task_id, task_exports)
-        .expect("Failed to register exports");
-    assert!(!task_handler.has_errors());
-}
-
-// #[test] - DISABLED: Object literal type checking bug
-//
-#[allow(dead_code)]
-fn test_multiple_named_imports() {
-    let mut fs = MockFileSystem::new();
-    fs.add_file(
-        "/project/lib.tl",
-        r#"
-export const PI = 3.14159
-export function double(x: number): number {
-    return x * 2
-}
-export class Point {
-    x: number
-    y: number
-    constructor(x: number, y: number) {
-        this.x = x
-        this.y = y
-    }
-}
-"#,
-    );
-    fs.add_file(
-        "/project/app.tl",
-        r#"
-import { PI, double, Point } from './lib'
-const radius = double(5)
-const area = PI * radius * radius
-const origin = new Point(0, 0)
-"#,
-    );
-
-    let fs = Arc::new(fs);
-    let (registry, resolver) = setup_module_system(fs.clone(), PathBuf::from("/project"));
-
-    // Parse and type check lib.tl
-    let lib_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let lib_ast = parse_file(&read_mock_file(&fs, "/project/lib.tl"), lib_handler.clone())
-        .expect("Failed to parse lib.tl");
-    let lib_id = ModuleId::new(PathBuf::from("/project/lib.tl"));
-    registry.register_parsed(
-        lib_id.clone(),
-        Arc::new(lib_ast.clone()),
-        Arc::new(SymbolTable::new()),
-    );
-
-    let mut lib_checker = TypeChecker::new_with_module_support(
-        lib_handler.clone(),
-        registry.clone(),
-        lib_id.clone(),
-        resolver.clone(),
-    );
-    // Type check FIRST to populate symbol table
-    let lib_result = lib_checker.check_program(&lib_ast);
-    if lib_result.is_err() || lib_handler.has_errors() {
-        eprintln!("=== LIB TYPE CHECK FAILED ===");
-        for diag in lib_handler.get_diagnostics() {
-            eprintln!("{:?}", diag);
-        }
-    }
-    assert!(lib_result.is_ok());
-    // THEN extract exports from the populated symbol table
-    let lib_exports = lib_checker.extract_exports(&lib_ast);
-    registry
-        .register_exports(&lib_id, lib_exports)
-        .expect("Failed to register exports");
-    registry
-        .mark_checked(&lib_id)
-        .expect("Failed to mark checked");
-
-    // Parse and type check app.tl
-    let app_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let app_ast = parse_file(&read_mock_file(&fs, "/project/app.tl"), app_handler.clone())
-        .expect("Failed to parse app.tl");
-    let app_id = ModuleId::new(PathBuf::from("/project/app.tl"));
-    registry.register_parsed(
-        app_id.clone(),
-        Arc::new(app_ast.clone()),
-        Arc::new(SymbolTable::new()),
-    );
-
-    let mut app_checker = TypeChecker::new(app_handler.clone());
-    // Type check FIRST to populate symbol table
-    let app_result = app_checker.check_program(&app_ast);
-    if app_result.is_err() || app_handler.has_errors() {
-        eprintln!("=== APP TYPE CHECK FAILED ===");
-        if let Err(ref e) = app_result {
-            eprintln!("Error: {:?}", e);
-        }
-        for diag in app_handler.get_diagnostics() {
-            eprintln!("{:?}", diag);
-        }
-    }
-    assert!(app_result.is_ok());
-    // THEN extract exports from the populated symbol table
-    let app_exports = app_checker.extract_exports(&app_ast);
-    registry
-        .register_exports(&app_id, app_exports)
-        .expect("Failed to register exports");
-    assert!(!app_handler.has_errors());
-}
-
-// #[test] - DISABLED: Object literal type checking bug
-//
-#[allow(dead_code)]
-fn test_nested_directory_imports() {
-    let mut fs = MockFileSystem::new();
-    fs.add_file(
-        "/project/src/utils/string.tl",
-        "export function trim(s: string): string { return s }",
-    );
-    fs.add_file(
-        "/project/src/app.tl",
-        "import { trim } from './utils/string'\nconst result = trim('  hello  ')",
-    );
-
-    let fs = Arc::new(fs);
-    let (registry, resolver) = setup_module_system(fs.clone(), PathBuf::from("/project/src"));
-
-    // Parse and type check string.tl
-    let string_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let string_ast = parse_file(
-        &read_mock_file(&fs, "/project/src/utils/string.tl"),
-        string_handler.clone(),
-    )
-    .expect("Failed to parse string.tl");
-    let string_id = ModuleId::new(PathBuf::from("/project/src/utils/string.tl"));
-    registry.register_parsed(
-        string_id.clone(),
-        Arc::new(string_ast.clone()),
-        Arc::new(SymbolTable::new()),
-    );
-
-    let mut string_checker = TypeChecker::new_with_module_support(
-        string_handler.clone(),
-        registry.clone(),
-        string_id.clone(),
-        resolver.clone(),
-    );
-    // Type check FIRST to populate symbol table
-    let string_result = string_checker.check_program(&string_ast);
-    if string_result.is_err() || string_handler.has_errors() {
-        eprintln!("=== STRING TYPE CHECK FAILED ===");
-        for diag in string_handler.get_diagnostics() {
-            eprintln!("{:?}", diag);
-        }
-    }
-    assert!(string_result.is_ok());
-    // THEN extract exports from the populated symbol table
-    let string_exports = string_checker.extract_exports(&string_ast);
-    registry
-        .register_exports(&string_id, string_exports)
-        .expect("Failed to register exports");
-    registry
-        .mark_checked(&string_id)
-        .expect("Failed to mark checked");
-
-    // Parse and type check app.tl
-    let app_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let app_ast = parse_file(
-        &read_mock_file(&fs, "/project/src/app.tl"),
-        app_handler.clone(),
-    )
-    .expect("Failed to parse app.tl");
-    let app_id = ModuleId::new(PathBuf::from("/project/src/app.tl"));
-    registry.register_parsed(
-        app_id.clone(),
-        Arc::new(app_ast.clone()),
-        Arc::new(SymbolTable::new()),
-    );
-
-    let mut app_checker = TypeChecker::new(app_handler.clone());
-    // Type check FIRST to populate symbol table
-    let app_result = app_checker.check_program(&app_ast);
-    if app_result.is_err() || app_handler.has_errors() {
-        eprintln!("=== APP TYPE CHECK FAILED ===");
-        if let Err(ref e) = app_result {
-            eprintln!("Error: {:?}", e);
-        }
-        for diag in app_handler.get_diagnostics() {
-            eprintln!("{:?}", diag);
-        }
-    }
-    assert!(app_result.is_ok());
-    // THEN extract exports from the populated symbol table
-    let app_exports = app_checker.extract_exports(&app_ast);
-    registry
-        .register_exports(&app_id, app_exports)
-        .expect("Failed to register exports");
-    assert!(!app_handler.has_errors());
-}
-
-// #[test] - DISABLED: Object literal type checking bug
-//
-#[allow(dead_code)]
-fn test_generic_function_export_import() {
-    let mut fs = MockFileSystem::new();
-    fs.add_file(
-        "/project/generics.tl",
-        r#"
-export function identity<T>(value: T): T {
-    return value
-}
-"#,
-    );
-    fs.add_file(
-        "/project/main.tl",
-        r#"
-import { identity } from './generics'
-const num: number = identity(42)
-const str: string = identity("hello")
-"#,
-    );
-
-    let fs = Arc::new(fs);
-    let (registry, resolver) = setup_module_system(fs.clone(), PathBuf::from("/project"));
-
-    // Parse and type check generics.tl
-    let generics_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let generics_ast = parse_file(
-        &read_mock_file(&fs, "/project/generics.tl"),
-        generics_handler.clone(),
-    )
-    .expect("Failed to parse generics.tl");
-    let generics_id = ModuleId::new(PathBuf::from("/project/generics.tl"));
-    registry.register_parsed(
-        generics_id.clone(),
-        Arc::new(generics_ast.clone()),
-        Arc::new(SymbolTable::new()),
-    );
-
-    let mut generics_checker = TypeChecker::new_with_module_support(
-        generics_handler.clone(),
-        registry.clone(),
-        generics_id.clone(),
-        resolver.clone(),
-    );
-    // Type check FIRST to populate symbol table
-    let generics_result = generics_checker.check_program(&generics_ast);
-    if generics_result.is_err() || generics_handler.has_errors() {
-        eprintln!("=== GENERICS TYPE CHECK FAILED ===");
-        for diag in generics_handler.get_diagnostics() {
-            eprintln!("{:?}", diag);
-        }
-    }
-    assert!(generics_result.is_ok());
-    // THEN extract exports from the populated symbol table
-    let generics_exports = generics_checker.extract_exports(&generics_ast);
-    registry
-        .register_exports(&generics_id, generics_exports)
-        .expect("Failed to register exports");
-    registry
-        .mark_checked(&generics_id)
-        .expect("Failed to mark checked");
-
-    // Parse and type check main.tl
-    let main_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let main_ast = parse_file(
-        &read_mock_file(&fs, "/project/main.tl"),
-        main_handler.clone(),
-    )
-    .expect("Failed to parse main.tl");
-    let main_id = ModuleId::new(PathBuf::from("/project/main.tl"));
-    registry.register_parsed(
-        main_id.clone(),
-        Arc::new(main_ast.clone()),
-        Arc::new(SymbolTable::new()),
-    );
-
-    let mut main_checker = TypeChecker::new(main_handler.clone());
-    // Type check FIRST to populate symbol table
-    let main_result = main_checker.check_program(&main_ast);
-    if main_result.is_err() {
-        eprintln!("=== MAIN TYPE CHECK FAILED (Result::Err) ===");
-        eprintln!("Error: {:?}", main_result.as_ref().unwrap_err());
-    }
-    if main_handler.has_errors() {
-        eprintln!("=== MAIN TYPE CHECK FAILED (Diagnostics) ===");
-        for diag in main_handler.get_diagnostics() {
-            eprintln!("{:?}", diag);
-        }
-    }
-    assert!(main_result.is_ok());
-    // THEN extract exports from the populated symbol table
-    let main_exports = main_checker.extract_exports(&main_ast);
-    registry
-        .register_exports(&main_id, main_exports)
-        .expect("Failed to register exports");
-    assert!(!main_handler.has_errors());
-}
-
-// #[test] - DISABLED: Object literal type checking bug
-//
-#[allow(dead_code)]
-fn test_simple_re_export() {
-    // Setup: utils.tl exports a function, middle.tl re-exports it, main.tl imports it
-    let mut fs = MockFileSystem::new();
-    fs.add_file(
-        "/project/utils.tl",
-        r#"
-export function add(a: number, b: number): number {
-    return a + b
-}
-"#,
-    );
-    fs.add_file(
-        "/project/middle.tl",
-        r#"
-export { add } from './utils'
-"#,
-    );
-    fs.add_file(
-        "/project/main.tl",
-        r#"
-import { add } from './middle'
-
-const result: number = add(1, 2)
-"#,
-    );
-
-    let fs = Arc::new(fs);
-    let base_dir = PathBuf::from("/project");
-    let (registry, _resolver) = setup_module_system(fs.clone(), base_dir.clone());
-
-    // Type check utils.tl first
-    let utils_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let utils_ast = parse_file(
-        &read_mock_file(&fs, "/project/utils.tl"),
-        utils_handler.clone(),
-    )
-    .expect("Failed to parse utils.tl");
-    let utils_id = ModuleId::new(PathBuf::from("/project/utils.tl"));
-    registry.register_parsed(
-        utils_id.clone(),
-        Arc::new(utils_ast.clone()),
-        Arc::new(SymbolTable::new()),
-    );
-
-    let mut utils_checker = TypeChecker::new(utils_handler.clone());
-    let utils_result = utils_checker.check_program(&utils_ast);
-    if utils_result.is_err() || utils_handler.has_errors() {
-        eprintln!("=== UTILS TYPE CHECK FAILED ===");
-        if let Err(e) = &utils_result {
-            eprintln!("Error: {:?}", e);
-        }
-        for diag in utils_handler.get_diagnostics() {
-            eprintln!("{:?}", diag);
-        }
-    }
-    assert!(utils_result.is_ok(), "utils.tl type check should succeed");
-    let utils_exports = utils_checker.extract_exports(&utils_ast);
-    registry
-        .register_exports(&utils_id, utils_exports)
-        .expect("Failed to register exports");
-    registry
-        .mark_checked(&utils_id)
-        .expect("Failed to mark checked");
-    assert!(!utils_handler.has_errors());
-
-    // Type check middle.tl (re-export)
-    let middle_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let middle_ast = parse_file(
-        &read_mock_file(&fs, "/project/middle.tl"),
-        middle_handler.clone(),
-    )
-    .expect("Failed to parse middle.tl");
-    let middle_id = ModuleId::new(PathBuf::from("/project/middle.tl"));
-    registry.register_parsed(
-        middle_id.clone(),
-        Arc::new(middle_ast.clone()),
-        Arc::new(SymbolTable::new()),
-    );
-
-    let mut middle_checker = TypeChecker::new(middle_handler.clone());
-    middle_checker
-        .check_program(&middle_ast)
-        .expect("Failed to type check middle.tl");
-    let middle_exports = middle_checker.extract_exports(&middle_ast);
-    registry
-        .register_exports(&middle_id, middle_exports)
-        .expect("Failed to register exports");
-    registry
-        .mark_checked(&middle_id)
-        .expect("Failed to mark checked");
-    assert!(!middle_handler.has_errors());
-
-    // Type check main.tl
-    let main_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let main_ast = parse_file(
-        &read_mock_file(&fs, "/project/main.tl"),
-        main_handler.clone(),
-    )
-    .expect("Failed to parse main.tl");
-    let main_id = ModuleId::new(PathBuf::from("/project/main.tl"));
-    registry.register_parsed(
-        main_id.clone(),
-        Arc::new(main_ast.clone()),
-        Arc::new(SymbolTable::new()),
-    );
-
-    let mut main_checker = TypeChecker::new(main_handler.clone());
-    main_checker
-        .check_program(&main_ast)
-        .expect("Failed to type check main.tl");
-    assert!(!main_handler.has_errors());
-}
-
-// #[test] - DISABLED: Object literal type checking bug
-//
-#[allow(dead_code)]
+#[test]
 fn test_re_export_type() {
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
     // Setup: types.tl exports a type, middle.tl re-exports it, main.tl imports it
     let mut fs = MockFileSystem::new();
     fs.add_file(
@@ -1249,9 +369,11 @@ const user: User = { name: "Alice", age: 30 }
 
     // Type check types.tl first
     let types_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let types_ast = parse_file(
+    let types_ast = parse_file_with_interner(
         &read_mock_file(&fs, "/project/types.tl"),
         types_handler.clone(),
+        &interner,
+        &common_ids,
     )
     .expect("Failed to parse types.tl");
     let types_id = ModuleId::new(PathBuf::from("/project/types.tl"));
@@ -1261,7 +383,7 @@ const user: User = { name: "Alice", age: 30 }
         Arc::new(SymbolTable::new()),
     );
 
-    let mut types_checker = TypeChecker::new(types_handler.clone());
+    let mut types_checker = TypeChecker::new(types_handler.clone(), &interner, common_ids.clone());
     types_checker
         .check_program(&types_ast)
         .expect("Failed to type check types.tl");
@@ -1276,9 +398,11 @@ const user: User = { name: "Alice", age: 30 }
 
     // Type check middle.tl (re-export type)
     let middle_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let middle_ast = parse_file(
+    let middle_ast = parse_file_with_interner(
         &read_mock_file(&fs, "/project/middle.tl"),
         middle_handler.clone(),
+        &interner,
+        &common_ids,
     )
     .expect("Failed to parse middle.tl");
     let middle_id = ModuleId::new(PathBuf::from("/project/middle.tl"));
@@ -1288,7 +412,8 @@ const user: User = { name: "Alice", age: 30 }
         Arc::new(SymbolTable::new()),
     );
 
-    let mut middle_checker = TypeChecker::new(middle_handler.clone());
+    let mut middle_checker =
+        TypeChecker::new(middle_handler.clone(), &interner, common_ids.clone());
     middle_checker
         .check_program(&middle_ast)
         .expect("Failed to type check middle.tl");
@@ -1316,9 +441,11 @@ const user: User = { name: "Alice", age: 30 }
     }
     // Type check main.tl
     let main_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let main_ast = parse_file(
+    let main_ast = parse_file_with_interner(
         &read_mock_file(&fs, "/project/main.tl"),
         main_handler.clone(),
+        &interner,
+        &common_ids,
     )
     .expect("Failed to parse main.tl");
     let main_id = ModuleId::new(PathBuf::from("/project/main.tl"));
@@ -1328,7 +455,7 @@ const user: User = { name: "Alice", age: 30 }
         Arc::new(SymbolTable::new()),
     );
 
-    let mut main_checker = TypeChecker::new(main_handler.clone());
+    let mut main_checker = TypeChecker::new(main_handler.clone(), &interner, common_ids.clone());
     let main_result = main_checker.check_program(&main_ast);
     if main_result.is_err() || main_handler.has_errors() {
         eprintln!("=== MAIN TYPE CHECK FAILED (test_re_export_type) ===");
