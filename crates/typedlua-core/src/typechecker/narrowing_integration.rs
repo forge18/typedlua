@@ -1,10 +1,10 @@
 /// Integration module for type narrowing with the type checker
 /// This provides the scaffolding for how narrowing will be used during type checking
 use super::narrowing::{narrow_type_from_condition, NarrowingContext};
-use crate::ast::expression::Expression;
-use crate::ast::types::Type;
-use crate::string_interner::{StringId, StringInterner};
 use rustc_hash::FxHashMap;
+use typedlua_parser::ast::expression::Expression;
+use typedlua_parser::ast::types::Type;
+use typedlua_parser::string_interner::{StringId, StringInterner};
 
 /// Demonstration of how type narrowing integrates with if statement checking
 ///

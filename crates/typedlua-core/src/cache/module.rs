@@ -2,9 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use super::{CacheError, Result};
-use crate::ast::Program;
 use crate::module_resolver::ModuleExports;
 use crate::typechecker::SerializableSymbolTable;
+use typedlua_parser::ast::Program;
 
 /// Cached module data
 #[derive(Debug, Clone, Serialize, Deserialize)]

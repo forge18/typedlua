@@ -1,7 +1,7 @@
-use crate::ast::statement::TypeParameter;
-use crate::ast::types::{PrimitiveType, Type, TypeKind};
-use crate::span::Span;
 use rustc_hash::FxHashMap;
+use typedlua_parser::ast::statement::TypeParameter;
+use typedlua_parser::ast::types::{PrimitiveType, Type, TypeKind};
+use typedlua_parser::span::Span;
 
 /// A generic type alias with type parameters
 #[derive(Debug, Clone)]

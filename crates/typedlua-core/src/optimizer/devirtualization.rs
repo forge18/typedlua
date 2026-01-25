@@ -7,16 +7,16 @@
 //! calls that can be safely devirtualized. The actual transformation is handled
 //! by the O2 `MethodToFunctionConversionPass`.
 
-use crate::ast::expression::{Expression, ExpressionKind, ReceiverClassInfo};
-use crate::ast::statement::{ClassMember, Statement};
-use crate::ast::types::TypeKind;
-use crate::ast::Program;
 use crate::config::OptimizationLevel;
 use crate::errors::CompilationError;
 use crate::optimizer::OptimizationPass;
-use crate::string_interner::{StringId, StringInterner};
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
+use typedlua_parser::ast::expression::{Expression, ExpressionKind, ReceiverClassInfo};
+use typedlua_parser::ast::statement::{ClassMember, Statement};
+use typedlua_parser::ast::types::TypeKind;
+use typedlua_parser::ast::Program;
+use typedlua_parser::string_interner::{StringId, StringInterner};
 
 /// Class hierarchy information for devirtualization safety analysis
 #[derive(Debug, Default)]
@@ -178,7 +178,7 @@ impl DevirtualizationPass {
                 changed
             }
             Statement::For(for_stmt) => {
-                use crate::ast::statement::ForStatement;
+                use typedlua_parser::ast::statement::ForStatement;
                 let body = match &mut **for_stmt {
                     ForStatement::Numeric(for_num) => &mut for_num.body,
                     ForStatement::Generic(for_gen) => &mut for_gen.body,

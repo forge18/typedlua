@@ -1,7 +1,7 @@
-use crate::ast::expression::{BinaryOp, Expression, ExpressionKind, Literal, UnaryOp};
-use crate::ast::types::{PrimitiveType, Type, TypeKind};
-use crate::string_interner::StringId;
 use rustc_hash::FxHashMap;
+use typedlua_parser::ast::expression::{BinaryOp, Expression, ExpressionKind, Literal, UnaryOp};
+use typedlua_parser::ast::types::{PrimitiveType, Type, TypeKind};
+use typedlua_parser::string_interner::StringId;
 
 /// Type narrowing context - tracks refined types for variables in the current scope
 #[derive(Debug, Clone)]

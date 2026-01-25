@@ -1,12 +1,9 @@
-use crate::ast::expression::{Expression, ExpressionKind, ReceiverClassInfo};
-use crate::ast::statement::Statement;
-use crate::ast::Program;
-use crate::config::OptimizationLevel;
-use crate::errors::CompilationError;
-use crate::optimizer::OptimizationPass;
-use crate::span::Span;
-use crate::string_interner::StringInterner;
 use std::sync::Arc;
+use typedlua_parser::ast::expression::{Expression, ExpressionKind, ReceiverClassInfo};
+use typedlua_parser::ast::statement::Statement;
+use typedlua_parser::ast::Program;
+use typedlua_parser::span::Span;
+use typedlua_parser::string_interner::StringInterner;
 
 pub struct MethodToFunctionConversionPass {
     interner: Arc<StringInterner>,
@@ -44,7 +41,7 @@ impl MethodToFunctionConversionPass {
                 changed
             }
             Statement::For(for_stmt) => {
-                use crate::ast::statement::ForStatement;
+                use typedlua_parser::ast::statement::ForStatement;
                 let body = match &mut **for_stmt {
                     ForStatement::Numeric(for_num) => &mut for_num.body,
                     ForStatement::Generic(for_gen) => &mut for_gen.body,
@@ -301,7 +298,7 @@ mod tests {
     use crate::ast::statement::{Block, Statement};
     use crate::ast::types::{PrimitiveType, Type, TypeKind};
     use crate::ast::Spanned;
-    use crate::span::Span;
+    use typedlua_parser::span::Span;
 
     #[test]
     fn test_method_call_to_function_call_conversion() {

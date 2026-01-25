@@ -1,5 +1,5 @@
-use crate::ast::expression::Literal;
-use crate::ast::types::{
+use typedlua_parser::ast::expression::Literal;
+use typedlua_parser::ast::types::{
     FunctionType, ObjectType, ObjectTypeMember, PrimitiveType, Type, TypeKind,
 };
 

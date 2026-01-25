@@ -1,9 +1,9 @@
 use super::error::{ModuleError, ModuleId};
-use crate::ast::Program;
 use crate::typechecker::{Symbol, SymbolKind, SymbolTable};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
+use typedlua_parser::ast::Program;
 
 /// Status of a module in the compilation pipeline
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

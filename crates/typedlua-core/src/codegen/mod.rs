@@ -183,7 +183,7 @@ impl CodeGenerator {
     }
 
     /// Resolve a StringId to a String
-    fn resolve(&self, id: crate::string_interner::StringId) -> String {
+    fn resolve(&self, id: typedlua_parser::string_interner::StringId) -> String {
         self.interner.resolve(id).to_string()
     }
 
@@ -346,7 +346,7 @@ impl CodeGenerator {
             // Add a mapping for the start of this module (line 0, column 0 of source)
             if let Some(ref mut builder) = source_map_builder {
                 builder.add_mapping_with_source(
-                    crate::span::Span::new(0, 0, 0, 0),
+                    typedlua_parser::span::Span::new(0, 0, 0, 0),
                     source_index,
                     None,
                 );
@@ -683,7 +683,7 @@ impl CodeGenerator {
         self.write(&fn_name);
         self.write("(");
 
-        let mut rest_param_name: Option<crate::string_interner::StringId> = None;
+        let mut rest_param_name: Option<typedlua_parser::string_interner::StringId> = None;
 
         for (i, param) in decl.parameters.iter().enumerate() {
             if param.is_rest {
@@ -866,7 +866,7 @@ impl CodeGenerator {
         // Handle inheritance
         let base_class_name = if let Some(extends) = &class_decl.extends {
             // Extract base class name from Type
-            if let crate::ast::types::TypeKind::Reference(type_ref) = &extends.kind {
+            if let typedlua_parser::ast::types::TypeKind::Reference(type_ref) = &extends.kind {
                 Some(type_ref.name.node)
             } else {
                 None
@@ -1016,7 +1016,7 @@ impl CodeGenerator {
         // Copy default methods from implemented interfaces
         self.writeln("");
         for impl_type in &class_decl.implements {
-            if let crate::ast::types::TypeKind::Reference(type_ref) = &impl_type.kind {
+            if let typedlua_parser::ast::types::TypeKind::Reference(type_ref) = &impl_type.kind {
                 let interface_name = self.resolve(type_ref.name.node).to_string();
 
                 // Get all method names that the class already has
@@ -1347,7 +1347,7 @@ impl CodeGenerator {
         &mut self,
         class_decl: &ClassDeclaration,
         class_name: &str,
-        base_class_name: Option<crate::string_interner::StringId>,
+        base_class_name: Option<typedlua_parser::string_interner::StringId>,
     ) {
         let primary_params = class_decl.primary_constructor.as_ref().unwrap();
 
@@ -1388,7 +1388,9 @@ impl CodeGenerator {
             self.write_indent();
 
             // Apply access modifier naming (private → _name)
-            if param.access.as_ref() == Some(&crate::ast::statement::AccessModifier::Private) {
+            if param.access.as_ref()
+                == Some(&typedlua_parser::ast::statement::AccessModifier::Private)
+            {
                 self.write("self._");
             } else {
                 self.write("self.");
@@ -1599,32 +1601,32 @@ impl CodeGenerator {
         }
     }
 
-    fn operator_kind_name(&self, op: &crate::ast::statement::OperatorKind) -> String {
+    fn operator_kind_name(&self, op: &typedlua_parser::ast::statement::OperatorKind) -> String {
         match op {
-            crate::ast::statement::OperatorKind::Add => "__add".to_string(),
-            crate::ast::statement::OperatorKind::Subtract => "__sub".to_string(),
-            crate::ast::statement::OperatorKind::Multiply => "__mul".to_string(),
-            crate::ast::statement::OperatorKind::Divide => "__div".to_string(),
-            crate::ast::statement::OperatorKind::Modulo => "__mod".to_string(),
-            crate::ast::statement::OperatorKind::Power => "__pow".to_string(),
-            crate::ast::statement::OperatorKind::Concatenate => "__concat".to_string(),
-            crate::ast::statement::OperatorKind::FloorDivide => "__idiv".to_string(),
-            crate::ast::statement::OperatorKind::Equal => "__eq".to_string(),
-            crate::ast::statement::OperatorKind::NotEqual => "__eq".to_string(),
-            crate::ast::statement::OperatorKind::LessThan => "__lt".to_string(),
-            crate::ast::statement::OperatorKind::LessThanOrEqual => "__le".to_string(),
-            crate::ast::statement::OperatorKind::GreaterThan => "__lt".to_string(),
-            crate::ast::statement::OperatorKind::GreaterThanOrEqual => "__le".to_string(),
-            crate::ast::statement::OperatorKind::BitwiseAnd => "__band".to_string(),
-            crate::ast::statement::OperatorKind::BitwiseOr => "__bor".to_string(),
-            crate::ast::statement::OperatorKind::BitwiseXor => "__bxor".to_string(),
-            crate::ast::statement::OperatorKind::ShiftLeft => "__shl".to_string(),
-            crate::ast::statement::OperatorKind::ShiftRight => "__shr".to_string(),
-            crate::ast::statement::OperatorKind::Index => "__index".to_string(),
-            crate::ast::statement::OperatorKind::NewIndex => "__newindex".to_string(),
-            crate::ast::statement::OperatorKind::Call => "__call".to_string(),
-            crate::ast::statement::OperatorKind::UnaryMinus => "__unm".to_string(),
-            crate::ast::statement::OperatorKind::Length => "__len".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::Add => "__add".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::Subtract => "__sub".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::Multiply => "__mul".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::Divide => "__div".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::Modulo => "__mod".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::Power => "__pow".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::Concatenate => "__concat".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::FloorDivide => "__idiv".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::Equal => "__eq".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::NotEqual => "__eq".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::LessThan => "__lt".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::LessThanOrEqual => "__le".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::GreaterThan => "__lt".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::GreaterThanOrEqual => "__le".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::BitwiseAnd => "__band".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::BitwiseOr => "__bor".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::BitwiseXor => "__bxor".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::ShiftLeft => "__shl".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::ShiftRight => "__shr".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::Index => "__index".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::NewIndex => "__newindex".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::Call => "__call".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::UnaryMinus => "__unm".to_string(),
+            typedlua_parser::ast::statement::OperatorKind::Length => "__len".to_string(),
         }
     }
 
@@ -1633,7 +1635,7 @@ impl CodeGenerator {
     /// Example: @log becomes target = log(target)
     fn generate_decorator_call(
         &mut self,
-        decorator: &crate::ast::statement::Decorator,
+        decorator: &typedlua_parser::ast::statement::Decorator,
         target: &str,
     ) {
         use typedlua_parser::ast::statement::DecoratorExpression;

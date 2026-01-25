@@ -17,19 +17,19 @@
 //! 4. Inlining the method body, binding `self` to the receiver expression
 //! 5. Preserving original dispatch if multiple implementations exist
 
-use crate::ast::expression::{AssignmentOp, Expression, ExpressionKind};
-use crate::ast::pattern::Pattern;
-use crate::ast::statement::{Block, ClassMember, InterfaceMember, Statement};
-use crate::ast::types::TypeKind;
-use crate::ast::Program;
-use crate::ast::Spanned;
 use crate::config::OptimizationLevel;
 use crate::errors::CompilationError;
 use crate::optimizer::OptimizationPass;
-use crate::span::Span;
-use crate::string_interner::{StringId, StringInterner};
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
+use typedlua_parser::ast::expression::{AssignmentOp, Expression, ExpressionKind};
+use typedlua_parser::ast::pattern::Pattern;
+use typedlua_parser::ast::statement::{Block, ClassMember, InterfaceMember, Statement};
+use typedlua_parser::ast::types::TypeKind;
+use typedlua_parser::ast::Program;
+use typedlua_parser::ast::Spanned;
+use typedlua_parser::span::Span;
+use typedlua_parser::string_interner::{StringId, StringInterner};
 
 const MAX_INLINABLE_STATEMENTS: usize = 10;
 
@@ -334,7 +334,7 @@ impl InterfaceMethodInliningPass {
                 changed
             }
             Statement::For(for_stmt) => {
-                use crate::ast::statement::ForStatement;
+                use typedlua_parser::ast::statement::ForStatement;
                 let body = match &mut **for_stmt {
                     ForStatement::Numeric(for_num) => &mut for_num.body,
                     ForStatement::Generic(for_gen) => &mut for_gen.body,

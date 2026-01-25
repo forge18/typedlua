@@ -8,18 +8,18 @@
 //! 2. Operator has no side effects (no external state mutation)
 //! 3. Operator is called frequently (heuristic: 3+ call sites)
 
-use crate::ast::expression::{BinaryOp, Expression, ExpressionKind, UnaryOp};
-use crate::ast::pattern::Pattern;
-use crate::ast::statement::{Block, ClassMember, Statement};
-use crate::ast::types::{Type, TypeKind};
-use crate::ast::Program;
 use crate::config::OptimizationLevel;
 use crate::errors::CompilationError;
 use crate::optimizer::OptimizationPass;
-use crate::span::Span;
-use crate::string_interner::{StringId, StringInterner};
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
+use typedlua_parser::ast::expression::{BinaryOp, Expression, ExpressionKind, UnaryOp};
+use typedlua_parser::ast::pattern::Pattern;
+use typedlua_parser::ast::statement::{Block, ClassMember, Statement};
+use typedlua_parser::ast::types::{Type, TypeKind};
+use typedlua_parser::ast::Program;
+use typedlua_parser::span::Span;
+use typedlua_parser::string_interner::{StringId, StringInterner};
 
 const MAX_INLINE_STATEMENTS: usize = 5;
 const MIN_CALL_FREQUENCY: usize = 3;
@@ -110,7 +110,7 @@ impl OperatorInliningPass {
                 self.catalog_block(&while_stmt.body);
             }
             Statement::For(for_stmt) => {
-                use crate::ast::statement::ForStatement;
+                use typedlua_parser::ast::statement::ForStatement;
                 match &**for_stmt {
                     ForStatement::Numeric(for_num) => {
                         self.catalog_expression(&for_num.start);
@@ -635,7 +635,7 @@ impl OperatorInliningPass {
                 changed
             }
             Statement::For(for_stmt) => {
-                use crate::ast::statement::ForStatement;
+                use typedlua_parser::ast::statement::ForStatement;
                 let body = match &mut **for_stmt {
                     ForStatement::Numeric(for_num) => &mut for_num.body,
                     ForStatement::Generic(for_gen) => &mut for_gen.body,
@@ -850,7 +850,7 @@ impl Default for OperatorInliningPass {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::types::{PrimitiveType, Type, TypeKind};
+    use typedlua_parser::ast::types::{PrimitiveType, Type, TypeKind};
 
     #[test]
     fn test_operator_catalog_build() {

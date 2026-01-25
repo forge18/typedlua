@@ -1,10 +1,12 @@
-use crate::ast::expression::Literal;
-use crate::ast::statement::{IndexKeyType, PropertySignature};
-use crate::ast::types::{MappedType, ObjectType, ObjectTypeMember, PrimitiveType, Type, TypeKind};
-use crate::ast::Ident;
-use crate::span::Span;
-use crate::string_interner::StringInterner;
 use rustc_hash::FxHashMap;
+use typedlua_parser::ast::expression::Literal;
+use typedlua_parser::ast::statement::{IndexKeyType, PropertySignature};
+use typedlua_parser::ast::types::{
+    MappedType, ObjectType, ObjectTypeMember, PrimitiveType, Type, TypeKind,
+};
+use typedlua_parser::ast::Ident;
+use typedlua_parser::span::Span;
+use typedlua_parser::string_interner::StringInterner;
 
 /// Apply a utility type transformation
 pub fn apply_utility_type(
@@ -214,8 +216,8 @@ fn record(
     };
 
     // Create an object type with an index signature
-    use crate::ast::statement::IndexSignature;
-    use crate::ast::Ident;
+    use typedlua_parser::ast::statement::IndexSignature;
+    use typedlua_parser::ast::Ident;
 
     let key_id = common_ids.key;
     let index_sig = IndexSignature {
@@ -986,10 +988,10 @@ fn is_assignable_to(source: &Type, target: &Type) -> bool {
 /// Evaluate a template literal type to a union of string literals
 /// For example: `Hello ${T}` where T = "World" | "Rust" becomes "Hello World" | "Hello Rust"
 pub fn evaluate_template_literal_type(
-    template: &crate::ast::types::TemplateLiteralType,
+    template: &typedlua_parser::ast::types::TemplateLiteralType,
     type_env: &super::TypeEnvironment,
 ) -> Result<Type, String> {
-    use crate::ast::types::TemplateLiteralTypePart;
+    use typedlua_parser::ast::types::TemplateLiteralTypePart;
 
     // Extract all interpolated types and get their possible values
     let mut part_expansions: Vec<Vec<String>> = Vec::new();
@@ -1121,7 +1123,7 @@ fn cartesian_product(vecs: &[Vec<String>]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::Ident;
+    use typedlua_parser::ast::Ident;
 
     fn make_span() -> Span {
         Span::new(0, 0, 0, 0)
@@ -1336,7 +1338,7 @@ mod tests {
 
     #[test]
     fn test_return_type() {
-        use crate::ast::types::FunctionType;
+        use typedlua_parser::ast::types::FunctionType;
 
         let func = Type::new(
             TypeKind::Function(FunctionType {

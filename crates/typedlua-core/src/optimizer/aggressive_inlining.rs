@@ -1166,4 +1166,4 @@ impl AggressiveInliningPass {
     }
 }
 
-use crate::ast::expression::ArrayElement;
+use typedlua_parser::ast::expression::ArrayElement;

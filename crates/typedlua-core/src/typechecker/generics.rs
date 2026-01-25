@@ -1,10 +1,10 @@
-use crate::ast::statement::TypeParameter;
-use crate::ast::types::{Type, TypeKind, TypeReference};
-use crate::string_interner::StringId;
 use rustc_hash::FxHashMap;
+use typedlua_parser::ast::statement::TypeParameter;
+use typedlua_parser::ast::types::{Type, TypeKind, TypeReference};
+use typedlua_parser::string_interner::StringId;
 
 #[cfg(test)]
-use crate::span::Span;
+use typedlua_parser::span::Span;
 
 /// Substitutes type parameters with concrete types in a type
 pub fn instantiate_type(
@@ -116,7 +116,7 @@ fn substitute_type(typ: &Type, substitutions: &FxHashMap<StringId, Type>) -> Res
 
         // Function type: substitute parameter and return types
         TypeKind::Function(func_type) => {
-            use crate::ast::statement::Parameter;
+            use typedlua_parser::ast::statement::Parameter;
 
             let substituted_params: Result<Vec<Parameter>, String> = func_type
                 .parameters
@@ -354,8 +354,8 @@ pub fn build_substitutions(
 pub fn instantiate_block(
     block: &crate::ast::statement::Block,
     substitutions: &FxHashMap<StringId, Type>,
-) -> crate::ast::statement::Block {
-    use crate::ast::statement::Block;
+) -> typedlua_parser::ast::statement::Block {
+    use typedlua_parser::ast::statement::Block;
 
     Block {
         statements: block
@@ -371,8 +371,8 @@ pub fn instantiate_block(
 pub fn instantiate_statement(
     stmt: &crate::ast::statement::Statement,
     substitutions: &FxHashMap<StringId, Type>,
-) -> crate::ast::statement::Statement {
-    use crate::ast::statement::{
+) -> typedlua_parser::ast::statement::Statement {
+    use typedlua_parser::ast::statement::{
         ElseIf, ForGeneric, ForNumeric, ForStatement, IfStatement, RepeatStatement,
         ReturnStatement, Statement, ThrowStatement, VariableDeclaration, WhileStatement,
     };
@@ -534,10 +534,10 @@ pub fn instantiate_parameter(
 
 /// Instantiate an expression with type substitutions
 pub fn instantiate_expression(
-    expr: &crate::ast::expression::Expression,
+    expr: &typedlua_parser::ast::expression::Expression,
     substitutions: &FxHashMap<StringId, Type>,
-) -> crate::ast::expression::Expression {
-    use crate::ast::expression::{Expression, ExpressionKind};
+) -> typedlua_parser::ast::expression::Expression {
+    use typedlua_parser::ast::expression::{Expression, ExpressionKind};
 
     let new_kind = match &expr.kind {
         ExpressionKind::Literal(lit) => ExpressionKind::Literal(lit.clone()),
@@ -728,10 +728,10 @@ fn instantiate_argument(
 
 /// Helper to instantiate an array element
 fn instantiate_array_element(
-    elem: &crate::ast::expression::ArrayElement,
+    elem: &typedlua_parser::ast::expression::ArrayElement,
     substitutions: &FxHashMap<StringId, Type>,
-) -> crate::ast::expression::ArrayElement {
-    use crate::ast::expression::ArrayElement;
+) -> typedlua_parser::ast::expression::ArrayElement {
+    use typedlua_parser::ast::expression::ArrayElement;
     match elem {
         ArrayElement::Expression(e) => {
             ArrayElement::Expression(instantiate_expression(e, substitutions))
@@ -744,8 +744,8 @@ fn instantiate_array_element(
 fn instantiate_object_property(
     prop: &crate::ast::expression::ObjectProperty,
     substitutions: &FxHashMap<StringId, Type>,
-) -> crate::ast::expression::ObjectProperty {
-    use crate::ast::expression::ObjectProperty;
+) -> typedlua_parser::ast::expression::ObjectProperty {
+    use typedlua_parser::ast::expression::ObjectProperty;
     match prop {
         ObjectProperty::Property { key, value, span } => ObjectProperty::Property {
             key: key.clone(),
@@ -789,8 +789,8 @@ fn instantiate_function_expression(
 fn instantiate_arrow_function(
     arrow: &crate::ast::expression::ArrowFunction,
     substitutions: &FxHashMap<StringId, Type>,
-) -> crate::ast::expression::ArrowFunction {
-    use crate::ast::expression::{ArrowBody, ArrowFunction};
+) -> typedlua_parser::ast::expression::ArrowFunction {
+    use typedlua_parser::ast::expression::{ArrowBody, ArrowFunction};
     ArrowFunction {
         parameters: arrow
             .parameters
@@ -813,10 +813,10 @@ fn instantiate_arrow_function(
 
 /// Helper to instantiate a template literal
 fn instantiate_template_literal(
-    template: &crate::ast::expression::TemplateLiteral,
+    template: &typedlua_parser::ast::expression::TemplateLiteral,
     substitutions: &FxHashMap<StringId, Type>,
-) -> crate::ast::expression::TemplateLiteral {
-    use crate::ast::expression::{TemplateLiteral, TemplatePart};
+) -> typedlua_parser::ast::expression::TemplateLiteral {
+    use typedlua_parser::ast::expression::{TemplateLiteral, TemplatePart};
     TemplateLiteral {
         parts: template
             .parts
@@ -834,10 +834,10 @@ fn instantiate_template_literal(
 
 /// Helper to instantiate a match expression
 fn instantiate_match_expression(
-    match_expr: &crate::ast::expression::MatchExpression,
+    match_expr: &typedlua_parser::ast::expression::MatchExpression,
     substitutions: &FxHashMap<StringId, Type>,
-) -> crate::ast::expression::MatchExpression {
-    use crate::ast::expression::{MatchArm, MatchArmBody, MatchExpression};
+) -> typedlua_parser::ast::expression::MatchExpression {
+    use typedlua_parser::ast::expression::{MatchArm, MatchArmBody, MatchExpression};
     MatchExpression {
         value: Box::new(instantiate_expression(&match_expr.value, substitutions)),
         arms: match_expr
@@ -883,8 +883,8 @@ fn instantiate_try_expression(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::types::{PrimitiveType, TypeKind};
-    use crate::ast::Spanned;
+    use typedlua_parser::ast::types::{PrimitiveType, TypeKind};
+    use typedlua_parser::ast::Spanned;
 
     #[test]
     fn test_instantiate_simple_type() {
@@ -1003,8 +1003,8 @@ mod tests {
 
     #[test]
     fn test_infer_type_arguments_simple() {
-        use crate::ast::pattern::Pattern;
-        use crate::ast::statement::Parameter;
+        use typedlua_parser::ast::pattern::Pattern;
+        use typedlua_parser::ast::statement::Parameter;
 
         let span = Span::new(0, 0, 0, 0);
         let interner = crate::string_interner::StringInterner::new();
@@ -1054,8 +1054,8 @@ mod tests {
 
     #[test]
     fn test_infer_type_arguments_array() {
-        use crate::ast::pattern::Pattern;
-        use crate::ast::statement::Parameter;
+        use typedlua_parser::ast::pattern::Pattern;
+        use typedlua_parser::ast::statement::Parameter;
 
         let span = Span::new(0, 0, 0, 0);
         let interner = crate::string_interner::StringInterner::new();

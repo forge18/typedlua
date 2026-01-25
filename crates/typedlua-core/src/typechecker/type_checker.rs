@@ -157,9 +157,9 @@ impl<'a> TypeChecker<'a> {
 
     /// Load the standard library for the configured Lua version
     fn load_stdlib(&mut self) -> Result<(), String> {
-        use crate::lexer::Lexer;
-        use crate::parser::Parser;
         use crate::stdlib;
+        use typedlua_parser::lexer::Lexer;
+        use typedlua_parser::parser::Parser;
 
         // Get stdlib files for the target version
         let stdlib_files = stdlib::get_all_stdlib(self.options.target);

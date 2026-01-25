@@ -1,7 +1,7 @@
-use crate::ast::types::Type;
-use crate::span::Span;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
+use typedlua_parser::ast::types::Type;
+use typedlua_parser::span::Span;
 
 /// Kind of symbol (variable, function, class, etc.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,8 +1,8 @@
-use crate::ast::statement::{EnumDeclaration, Statement};
-use crate::ast::Program;
 use crate::config::OptimizationLevel;
 use crate::errors::CompilationError;
 use crate::optimizer::OptimizationPass;
+use typedlua_parser::ast::statement::{EnumDeclaration, Statement};
+use typedlua_parser::ast::Program;
 
 pub struct RichEnumOptimizationPass;
 
@@ -48,15 +48,15 @@ impl RichEnumOptimizationPass {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::expression::{Expression, ExpressionKind, Literal};
-    use crate::ast::pattern::Pattern;
-    use crate::ast::statement::{
+    use typedlua_parser::ast::expression::{Expression, ExpressionKind, Literal};
+    use typedlua_parser::ast::pattern::Pattern;
+    use typedlua_parser::ast::statement::{
         Block, EnumConstructor, EnumDeclaration, EnumField, EnumMember, Parameter,
     };
-    use crate::ast::types::{PrimitiveType, Type, TypeKind};
-    use crate::ast::Spanned;
-    use crate::span::Span;
-    use crate::string_interner::StringInterner;
+    use typedlua_parser::ast::types::{PrimitiveType, Type, TypeKind};
+    use typedlua_parser::ast::Spanned;
+    use typedlua_parser::span::Span;
+    use typedlua_parser::string_interner::StringInterner;
 
     fn number_type() -> Type {
         Type::new(TypeKind::Primitive(PrimitiveType::Number), Span::dummy())
