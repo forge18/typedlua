@@ -1,4 +1,6 @@
--- TypedLua Runtime Library
+//! Decorator runtime support for TypedLua.
+
+pub const DECORATOR_RUNTIME: &str = r#"-- TypedLua Runtime Library
 -- Provides built-in decorators and runtime helpers
 
 local TypedLua = {}
@@ -151,3 +153,4 @@ if not deprecated then
 end
 
 return TypedLua
+"#;

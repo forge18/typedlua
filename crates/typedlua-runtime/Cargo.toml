@@ -1,0 +1,7 @@
+[package]
+name = "typedlua-runtime"
+version = "0.1.0"
+edition = "2021"
+description = "Runtime support code for TypedLua compiler"
+
+[dependencies]

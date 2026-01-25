@@ -18,6 +18,7 @@ blake3.workspace = true
 bumpalo.workspace = true
 rustc-hash.workspace = true
 tracing.workspace = true
+typedlua-runtime = { path = "../typedlua-runtime" }
 
 [dev-dependencies]
 insta.workspace = true

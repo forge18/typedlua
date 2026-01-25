@@ -11,6 +11,12 @@ use crate::string_interner::StringId;
 use crate::string_interner::StringInterner;
 pub use sourcemap::{SourceMap, SourceMapBuilder};
 use std::sync::Arc;
+use typedlua_runtime::bitwise;
+use typedlua_runtime::class;
+use typedlua_runtime::decorator;
+use typedlua_runtime::enum_rt;
+use typedlua_runtime::module;
+use typedlua_runtime::reflection;
 
 /// Target Lua version for code generation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -257,90 +263,8 @@ impl CodeGenerator {
             self.writeln("}");
             self.writeln("");
 
-            // Generate Reflect module
-            self.writeln("-- ============================================================");
-            self.writeln("-- Reflection Runtime Module");
-            self.writeln("-- ============================================================");
-            self.writeln("Reflect = {}");
-            self.writeln("");
-            self.writeln("-- O(1) instanceof check using ancestors table");
-            self.writeln("function Reflect.isInstance(obj, typeName)");
-            self.indent();
-            self.writeln("if type(obj) ~= \"table\" or not obj.__ancestors then");
-            self.indent();
-            self.writeln("return false");
-            self.dedent();
-            self.writeln("end");
-            self.writeln("local typeId = __TypeRegistry[typeName]");
-            self.writeln("if not typeId then return false end");
-            self.writeln("return obj.__ancestors[typeId] == true");
-            self.dedent();
-            self.writeln("end");
-            self.writeln("");
-
-            self.writeln("function Reflect.typeof(obj)");
-            self.indent();
-            self.writeln("if type(obj) == \"table\" and obj.__typeName then");
-            self.indent();
-            self.writeln("return {");
-            self.indent();
-            self.writeln("id = obj.__typeId,");
-            self.writeln("name = obj.__typeName,");
-            self.writeln("kind = \"class\"");
-            self.dedent();
-            self.writeln("}");
-            self.dedent();
-            self.writeln("end");
-            self.writeln("return nil");
-            self.dedent();
-            self.writeln("end");
-            self.writeln("");
-
-            self.writeln("function Reflect.getFields(obj)");
-            self.indent();
-            self.writeln("if type(obj) == \"table\" and obj._buildAllFields then");
-            self.indent();
-            self.writeln("return obj:_buildAllFields()");
-            self.dedent();
-            self.writeln("end");
-            self.writeln("return {}");
-            self.dedent();
-            self.writeln("end");
-            self.writeln("");
-
-            self.writeln("function Reflect.getMethods(obj)");
-            self.indent();
-            self.writeln("if type(obj) == \"table\" and obj._buildAllMethods then");
-            self.indent();
-            self.writeln("return obj:_buildAllMethods()");
-            self.dedent();
-            self.writeln("end");
-            self.writeln("return {}");
-            self.dedent();
-            self.writeln("end");
-            self.writeln("");
-
-            self.writeln("function Reflect.forName(name)");
-            self.indent();
-            self.writeln("-- Try global lookup first (for registered types)");
-            self.writeln("_G = _G or getfenv(0)");
-            self.writeln("if _G[name] and _G[name].__typeName == name then");
-            self.indent();
-            self.writeln("return _G[name]");
-            self.dedent();
-            self.writeln("end");
-            self.writeln("-- Try type registry lookup");
-            self.writeln("local typeId = __TypeRegistry[name]");
-            self.writeln("if typeId then");
-            self.indent();
-            self.writeln("-- Lookup by typeId would require reverse registry");
-            self.writeln("-- For now, rely on global lookup above");
-            self.dedent();
-            self.writeln("end");
-            self.writeln("return nil");
-            self.dedent();
-            self.writeln("end");
-            self.writeln("");
+            // Generate Reflect module from runtime
+            self.writeln(reflection::REFLECTION_MODULE);
         }
 
         self.output.clone()
@@ -401,33 +325,7 @@ impl CodeGenerator {
             &mut source_map_builder,
         );
         advance("\n", &mut source_map_builder);
-        advance("-- Module registry and cache\n", &mut source_map_builder);
-        advance("local __modules = {}\n", &mut source_map_builder);
-        advance("local __cache = {}\n", &mut source_map_builder);
-        advance("\n", &mut source_map_builder);
-        advance(
-            "-- Custom require function for bundled modules\n",
-            &mut source_map_builder,
-        );
-        advance("local function __require(name)\n", &mut source_map_builder);
-        advance("    if __cache[name] then\n", &mut source_map_builder);
-        advance("        return __cache[name]\n", &mut source_map_builder);
-        advance("    end\n", &mut source_map_builder);
-        advance("    \n", &mut source_map_builder);
-        advance("    if not __modules[name] then\n", &mut source_map_builder);
-        advance(
-            "        error(\"Module not found: \" .. name)\n",
-            &mut source_map_builder,
-        );
-        advance("    end\n", &mut source_map_builder);
-        advance("    \n", &mut source_map_builder);
-        advance(
-            "    local exports = __modules[name]()\n",
-            &mut source_map_builder,
-        );
-        advance("    __cache[name] = exports\n", &mut source_map_builder);
-        advance("    return exports\n", &mut source_map_builder);
-        advance("end\n", &mut source_map_builder);
+        advance(module::MODULE_PRELUDE, &mut source_map_builder);
         advance("\n", &mut source_map_builder);
 
         // Generate each module as a function
@@ -1275,146 +1173,29 @@ impl CodeGenerator {
             self.writeln(&format!(".__parent = {}", base_name_str));
         }
 
-        // Generate lazy _buildAllFields() function
+        // Generate lazy _buildAllFields() and _buildAllMethods() functions
         self.writeln("");
-        self.write_indent();
-        self.writeln(&format!("function {}._buildAllFields()", class_name));
-        self.indent();
-        self.write_indent();
-        self.writeln(&format!(
-            "if {}._allFieldsCache then return {}._allFieldsCache end",
-            class_name, class_name
-        ));
-        self.write_indent();
-        self.writeln("local fields = {}");
-        self.write_indent();
-        self.writeln("local idx = 1");
-
-        // Add own fields
-        self.write_indent();
-        self.writeln("-- Copy own fields");
-        self.write_indent();
-        self.writeln(&format!(
-            "for _, f in ipairs({}.__ownFields) do",
-            class_name
-        ));
-        self.indent();
-        self.write_indent();
-        self.writeln("fields[idx] = f");
-        self.write_indent();
-        self.writeln("idx = idx + 1");
-        self.dedent();
-        self.writeln("end");
-
-        // Add inherited fields
-        if let Some(base_name) = &base_class_name {
-            let base_name_str = self.resolve(*base_name);
-            self.write_indent();
-            self.writeln(&format!("-- Inherit fields from {}", base_name_str));
-            self.write_indent();
-            self.writeln(&format!(
-                "if {} and {}._buildAllFields then",
-                base_name_str, base_name_str
-            ));
-            self.indent();
-            self.write_indent();
-            self.writeln(&format!(
-                "local inherited = {}:_buildAllFields()",
-                base_name_str
-            ));
-            self.write_indent();
-            self.writeln("for _, f in ipairs(inherited) do");
-            self.indent();
-            self.write_indent();
-            self.writeln("fields[idx] = f");
-            self.write_indent();
-            self.writeln("idx = idx + 1");
-            self.dedent();
-            self.writeln("end");
-            self.dedent();
-            self.write_indent();
-            self.writeln("end");
-        }
-
-        // Cache and return
-        self.write_indent();
-        self.writeln(&format!("{}._allFieldsCache = fields", class_name));
-        self.write_indent();
-        self.writeln("return fields");
-        self.dedent();
-        self.write_indent();
-        self.writeln("end");
-
-        // Generate lazy _buildAllMethods() function
+        self.writeln(
+            &class::BUILD_ALL_FIELDS
+                .replace("{}", &class_name)
+                .replace("{}", &class_name)
+                .replace("{}", &class_name)
+                .replace("{}", &class_name)
+                .replace("{}", &class_name)
+                .replace("{}", &class_name)
+                .replace("{}", &class_name),
+        );
         self.writeln("");
-        self.write_indent();
-        self.writeln(&format!("function {}._buildAllMethods()", class_name));
-        self.indent();
-        self.write_indent();
-        self.writeln(&format!(
-            "if {}._allMethodsCache then return {}._allMethodsCache end",
-            class_name, class_name
-        ));
-        self.write_indent();
-        self.writeln("local methods = {}");
-        self.write_indent();
-        self.writeln("local idx = 1");
-
-        // Add own methods
-        self.write_indent();
-        self.writeln("-- Copy own methods");
-        self.write_indent();
-        self.writeln(&format!(
-            "for _, m in ipairs({}.__ownMethods) do",
-            class_name
-        ));
-        self.indent();
-        self.write_indent();
-        self.writeln("methods[idx] = m");
-        self.write_indent();
-        self.writeln("idx = idx + 1");
-        self.dedent();
-        self.writeln("end");
-
-        // Add inherited methods
-        if let Some(base_name) = &base_class_name {
-            let base_name_str = self.resolve(*base_name);
-            self.write_indent();
-            self.writeln(&format!("-- Inherit methods from {}", base_name_str));
-            self.write_indent();
-            self.writeln(&format!(
-                "if {} and {}._buildAllMethods then",
-                base_name_str, base_name_str
-            ));
-            self.indent();
-            self.write_indent();
-            self.writeln(&format!(
-                "local inherited = {}:_buildAllMethods()",
-                base_name_str
-            ));
-            self.write_indent();
-            self.writeln("for _, m in ipairs(inherited) do");
-            self.indent();
-            self.write_indent();
-            self.writeln("methods[idx] = m");
-            self.write_indent();
-            self.writeln("idx = idx + 1");
-            self.dedent();
-            self.writeln("end");
-            self.dedent();
-            self.write_indent();
-            self.writeln("end");
-        }
-
-        // Cache and return
-        self.write_indent();
-        self.writeln(&format!("{}._allMethodsCache = methods", class_name));
-        self.write_indent();
-        self.writeln("return methods");
-        self.dedent();
-        self.write_indent();
-        self.writeln("end");
-
+        self.writeln(
+            &class::BUILD_ALL_METHODS
+                .replace("{}", &class_name)
+                .replace("{}", &class_name)
+                .replace("{}", &class_name)
+                .replace("{}", &class_name)
+                .replace("{}", &class_name)
+                .replace("{}", &class_name)
+                .replace("{}", &class_name),
+        );
         self.writeln("");
 
         // Restore previous parent class context
@@ -2013,8 +1794,7 @@ impl CodeGenerator {
 
     /// Embed the TypedLua runtime library at the beginning of the generated code
     fn embed_runtime_library(&mut self) {
-        const RUNTIME_LUA: &str = include_str!("../../../../runtime/typedlua_runtime.lua");
-        self.writeln(RUNTIME_LUA);
+        self.writeln(decorator::DECORATOR_RUNTIME);
         self.writeln("");
     }
 
@@ -2022,75 +1802,7 @@ impl CodeGenerator {
     /// These are always included when targeting Lua 5.1 since they are small
     /// and defined as local functions (no global namespace pollution)
     fn embed_bitwise_helpers(&mut self) {
-        self.writeln("-- Bitwise operation helpers for Lua 5.1");
-        self.writeln("local function _bit_band(a, b)");
-        self.writeln("    local result = 0");
-        self.writeln("    local bitval = 1");
-        self.writeln("    while a > 0 and b > 0 do");
-        self.writeln("        if a % 2 == 1 and b % 2 == 1 then");
-        self.writeln("            result = result + bitval");
-        self.writeln("        end");
-        self.writeln("        bitval = bitval * 2");
-        self.writeln("        a = math.floor(a / 2)");
-        self.writeln("        b = math.floor(b / 2)");
-        self.writeln("    end");
-        self.writeln("    return result");
-        self.writeln("end");
-        self.writeln("");
-
-        self.writeln("local function _bit_bor(a, b)");
-        self.writeln("    local result = 0");
-        self.writeln("    local bitval = 1");
-        self.writeln("    while a > 0 or b > 0 do");
-        self.writeln("        if a % 2 == 1 or b % 2 == 1 then");
-        self.writeln("            result = result + bitval");
-        self.writeln("        end");
-        self.writeln("        bitval = bitval * 2");
-        self.writeln("        a = math.floor(a / 2)");
-        self.writeln("        b = math.floor(b / 2)");
-        self.writeln("    end");
-        self.writeln("    return result");
-        self.writeln("end");
-        self.writeln("");
-
-        self.writeln("local function _bit_bxor(a, b)");
-        self.writeln("    local result = 0");
-        self.writeln("    local bitval = 1");
-        self.writeln("    while a > 0 or b > 0 do");
-        self.writeln("        if (a % 2) ~= (b % 2) then");
-        self.writeln("            result = result + bitval");
-        self.writeln("        end");
-        self.writeln("        bitval = bitval * 2");
-        self.writeln("        a = math.floor(a / 2)");
-        self.writeln("        b = math.floor(b / 2)");
-        self.writeln("    end");
-        self.writeln("    return result");
-        self.writeln("end");
-        self.writeln("");
-
-        self.writeln("local function _bit_bnot(a)");
-        self.writeln("    local result = 0");
-        self.writeln("    local bitval = 1");
-        self.writeln("    for i = 0, 31 do");
-        self.writeln("        if a % 2 == 0 then");
-        self.writeln("            result = result + bitval");
-        self.writeln("        end");
-        self.writeln("        bitval = bitval * 2");
-        self.writeln("        a = math.floor(a / 2)");
-        self.writeln("    end");
-        self.writeln("    return result");
-        self.writeln("end");
-        self.writeln("");
-
-        self.writeln("local function _bit_lshift(a, b)");
-        self.writeln("    return math.floor(a) * (2 ^ b)");
-        self.writeln("end");
-        self.writeln("");
-
-        self.writeln("local function _bit_rshift(a, b)");
-        self.writeln("    return math.floor(math.floor(a) / (2 ^ b))");
-        self.writeln("end");
-        self.writeln("");
+        self.writeln(bitwise::for_lua51());
     }
 
     fn generate_expression(&mut self, expr: &Expression) {
@@ -3557,46 +3269,21 @@ impl CodeGenerator {
         self.writeln(&format!("setmetatable({}, {})", enum_name, mt_name));
 
         self.writeln("");
-        self.write_indent();
-        self.writeln(&format!("function {}:name()", enum_name));
-        self.indent();
-        self.write_indent();
-        self.writeln("return self.__name");
-        self.dedent();
-        self.write_indent();
-        self.writeln("end");
-
+        self.writeln(&enum_rt::ENUM_NAME.replace("{}", enum_name));
         self.writeln("");
-        self.write_indent();
-        self.writeln(&format!("function {}:ordinal()", enum_name));
-        self.indent();
-        self.write_indent();
-        self.writeln("return self.__ordinal");
-        self.dedent();
-        self.write_indent();
-        self.writeln("end");
-
+        self.writeln(&enum_rt::ENUM_ORDINAL.replace("{}", enum_name));
         self.writeln("");
-        self.write_indent();
-        self.writeln(&format!("function {}.values()", enum_name));
-        self.indent();
-        self.write_indent();
-        let values_return = format!("return {}.__values", enum_name);
-        self.writeln(&values_return);
-        self.dedent();
-        self.write_indent();
-        self.writeln("end");
-
+        self.writeln(
+            &enum_rt::ENUM_VALUES
+                .replace("{}", &enum_name)
+                .replace("{}", enum_name),
+        );
         self.writeln("");
-        self.write_indent();
-        self.write(&format!("function {}.valueOf(name)", enum_name));
-        self.writeln("");
-        self.indent();
-        self.write_indent();
-        self.writeln(&format!("return {}.__byName[name]", enum_name));
-        self.dedent();
-        self.write_indent();
-        self.writeln("end");
+        self.writeln(
+            &enum_rt::ENUM_VALUE_OF
+                .replace("{}", &enum_name)
+                .replace("{}", enum_name),
+        );
 
         for method in &enum_decl.methods {
             self.writeln("");
