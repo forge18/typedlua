@@ -1340,6 +1340,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "typedlua-core",
+ "typedlua-parser",
 ]
 
 [[package]]
@@ -1379,6 +1380,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "typedlua-core",
+ "typedlua-parser",
 ]
 
 [[package]]

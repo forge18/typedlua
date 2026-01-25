@@ -1,5 +1,5 @@
-use crate::span::Span;
 use std::sync::Mutex;
+use typedlua_parser::span::Span;
 
 // Bridge implementation for parser crate compatibility
 // This allows core's diagnostic handlers to be used with the parser crate's Lexer and Parser
@@ -617,7 +617,9 @@ impl typedlua_parser::DiagnosticHandler for ConsoleDiagnosticHandler {
             .map(|d| {
                 let level = match d.level {
                     DiagnosticLevel::Error => typedlua_parser::diagnostics::DiagnosticLevel::Error,
-                    DiagnosticLevel::Warning => typedlua_parser::diagnostics::DiagnosticLevel::Warning,
+                    DiagnosticLevel::Warning => {
+                        typedlua_parser::diagnostics::DiagnosticLevel::Warning
+                    }
                     DiagnosticLevel::Info => typedlua_parser::diagnostics::DiagnosticLevel::Info,
                 };
                 let code = d
@@ -631,10 +633,12 @@ impl typedlua_parser::DiagnosticHandler for ConsoleDiagnosticHandler {
                     related_information: d
                         .related_information
                         .into_iter()
-                        .map(|r| typedlua_parser::diagnostics::DiagnosticRelatedInformation {
-                            span: r.span,
-                            message: r.message,
-                        })
+                        .map(
+                            |r| typedlua_parser::diagnostics::DiagnosticRelatedInformation {
+                                span: r.span,
+                                message: r.message,
+                            },
+                        )
                         .collect(),
                     suggestions: d
                         .suggestions
@@ -674,7 +678,9 @@ impl typedlua_parser::DiagnosticHandler for CollectingDiagnosticHandler {
             .map(|d| {
                 let level = match d.level {
                     DiagnosticLevel::Error => typedlua_parser::diagnostics::DiagnosticLevel::Error,
-                    DiagnosticLevel::Warning => typedlua_parser::diagnostics::DiagnosticLevel::Warning,
+                    DiagnosticLevel::Warning => {
+                        typedlua_parser::diagnostics::DiagnosticLevel::Warning
+                    }
                     DiagnosticLevel::Info => typedlua_parser::diagnostics::DiagnosticLevel::Info,
                 };
                 let code = d
@@ -688,10 +694,12 @@ impl typedlua_parser::DiagnosticHandler for CollectingDiagnosticHandler {
                     related_information: d
                         .related_information
                         .into_iter()
-                        .map(|r| typedlua_parser::diagnostics::DiagnosticRelatedInformation {
-                            span: r.span,
-                            message: r.message,
-                        })
+                        .map(
+                            |r| typedlua_parser::diagnostics::DiagnosticRelatedInformation {
+                                span: r.span,
+                                message: r.message,
+                            },
+                        )
                         .collect(),
                     suggestions: d
                         .suggestions

@@ -1,9 +1,9 @@
-use crate::ast::Program;
 use crate::config::OptimizationLevel;
 use crate::diagnostics::DiagnosticHandler;
 use crate::errors::CompilationError;
-use crate::string_interner::StringInterner;
 use std::sync::Arc;
+use typedlua_parser::ast::Program;
+use typedlua_parser::string_interner::StringInterner;
 
 mod passes;
 use passes::*;

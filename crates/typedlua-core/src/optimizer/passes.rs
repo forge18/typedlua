@@ -1,17 +1,17 @@
-use crate::ast::expression::{BinaryOp, Expression, ExpressionKind, Literal, UnaryOp};
-use crate::ast::pattern::Pattern;
-use crate::ast::statement::{
-    Block, ForNumeric, ForStatement, Statement, VariableDeclaration, VariableKind,
-};
-use crate::ast::Program;
-use crate::ast::Spanned;
 use crate::config::OptimizationLevel;
 use crate::errors::CompilationError;
 use crate::optimizer::OptimizationPass;
-use crate::span::Span;
-use crate::string_interner::StringInterner;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use typedlua_parser::ast::expression::{BinaryOp, Expression, ExpressionKind, Literal, UnaryOp};
+use typedlua_parser::ast::pattern::Pattern;
+use typedlua_parser::ast::statement::{
+    Block, ForNumeric, ForStatement, Statement, VariableDeclaration, VariableKind,
+};
+use typedlua_parser::ast::Program;
+use typedlua_parser::ast::Spanned;
+use typedlua_parser::span::Span;
+use typedlua_parser::string_interner::StringInterner;
 
 /// Constant folding optimization pass
 /// Evaluates constant expressions at compile time
@@ -1277,9 +1277,9 @@ impl GlobalLocalizationPass {
 // O2: Function Inlining Pass
 // =============================================================================
 
-use crate::ast::expression::ArrowBody;
-use crate::ast::statement::{FunctionDeclaration, Parameter, ReturnStatement};
-use crate::string_interner::StringId;
+use typedlua_parser::ast::expression::ArrowBody;
+use typedlua_parser::ast::statement::{FunctionDeclaration, Parameter, ReturnStatement};
+use typedlua_parser::string_interner::StringId;
 
 enum InlineResult {
     /// Direct expression substitution - for simple single-return functions
@@ -2232,9 +2232,9 @@ impl FunctionInliningPass {
     }
 }
 
-use crate::ast::expression::Argument;
-use crate::ast::expression::ArrayElement;
-use crate::ast::expression::MatchArmBody;
+use typedlua_parser::ast::expression::Argument;
+use typedlua_parser::ast::expression::ArrayElement;
+use typedlua_parser::ast::expression::MatchArmBody;
 
 // =============================================================================
 // O2: Loop Optimization Pass
@@ -4100,12 +4100,12 @@ impl OptimizationPass for InterfaceMethodInliningPass {
 // O3: Generic Specialization Pass
 // =============================================================================
 
-use crate::ast::expression::ObjectProperty;
-use crate::ast::types::Type;
 use crate::typechecker::{build_substitutions, instantiate_function_declaration};
 use rustc_hash::FxHashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use typedlua_parser::ast::expression::ObjectProperty;
+use typedlua_parser::ast::types::Type;
 
 /// Computes a hash of type arguments for caching specialized functions
 fn hash_type_args(type_args: &[Type]) -> u64 {

@@ -3,16 +3,16 @@ use super::symbol_table::{Symbol, SymbolKind, SymbolTable};
 use super::type_compat::TypeCompatibility;
 use super::type_environment::TypeEnvironment;
 use super::TypeCheckError;
-use crate::ast::expression::*;
-use crate::ast::pattern::{ArrayPatternElement, Pattern};
-use crate::ast::statement::*;
-use crate::ast::types::*;
-use crate::ast::Program;
 use crate::config::CompilerOptions;
 use crate::diagnostics::DiagnosticHandler;
-use crate::span::Span;
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
+use typedlua_parser::ast::expression::*;
+use typedlua_parser::ast::pattern::{ArrayPatternElement, Pattern};
+use typedlua_parser::ast::statement::*;
+use typedlua_parser::ast::types::*;
+use typedlua_parser::ast::Program;
+use typedlua_parser::span::Span;
 
 /// Information about a class member for access checking
 #[derive(Clone)]
@@ -1536,9 +1536,9 @@ impl<'a> TypeChecker<'a> {
     /// Check a decorator expression
     fn check_decorator_expression(
         &mut self,
-        expr: &mut crate::ast::statement::DecoratorExpression,
+        expr: &mut typedlua_parser::ast::statement::DecoratorExpression,
     ) -> Result<(), TypeCheckError> {
-        use crate::ast::statement::DecoratorExpression;
+        use typedlua_parser::ast::statement::DecoratorExpression;
 
         match expr {
             DecoratorExpression::Identifier(name) => {
@@ -3499,11 +3499,11 @@ impl<'a> TypeChecker<'a> {
 
     /// Register minimal stdlib (fallback when full stdlib fails to parse)
     fn register_minimal_stdlib(&mut self) {
-        use crate::ast::pattern::Pattern;
-        use crate::ast::statement::Parameter;
-        use crate::ast::types::*;
-        use crate::ast::Spanned;
-        use crate::span::Span;
+        use typedlua_parser::ast::pattern::Pattern;
+        use typedlua_parser::ast::statement::Parameter;
+        use typedlua_parser::ast::types::*;
+        use typedlua_parser::ast::Spanned;
+        use typedlua_parser::span::Span;
 
         let span = Span::new(0, 0, 0, 0);
 

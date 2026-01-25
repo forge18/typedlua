@@ -1,16 +1,15 @@
 pub mod sourcemap;
 
-use crate::ast::expression::*;
-use crate::ast::pattern::{ArrayPattern, ArrayPatternElement, ObjectPattern, Pattern};
-use crate::ast::statement::*;
-use crate::ast::Program;
 use crate::config::OptimizationLevel;
 use crate::optimizer::Optimizer;
-use crate::span::Span;
-use crate::string_interner::StringId;
-use crate::string_interner::StringInterner;
 pub use sourcemap::{SourceMap, SourceMapBuilder};
 use std::sync::Arc;
+use typedlua_parser::ast::expression::*;
+use typedlua_parser::ast::pattern::{ArrayPattern, ArrayPatternElement, ObjectPattern, Pattern};
+use typedlua_parser::ast::statement::*;
+use typedlua_parser::ast::Program;
+use typedlua_parser::span::Span;
+use typedlua_parser::string_interner::{StringId, StringInterner};
 use typedlua_runtime::bitwise;
 use typedlua_runtime::class;
 use typedlua_runtime::decorator;
@@ -1637,7 +1636,7 @@ impl CodeGenerator {
         decorator: &crate::ast::statement::Decorator,
         target: &str,
     ) {
-        use crate::ast::statement::DecoratorExpression;
+        use typedlua_parser::ast::statement::DecoratorExpression;
 
         match &decorator.expression {
             DecoratorExpression::Identifier(name) => {
@@ -1680,8 +1679,11 @@ impl CodeGenerator {
     }
 
     /// Generate decorator expression (helper for nested decorator expressions)
-    fn generate_decorator_expression(&mut self, expr: &crate::ast::statement::DecoratorExpression) {
-        use crate::ast::statement::DecoratorExpression;
+    fn generate_decorator_expression(
+        &mut self,
+        expr: &typedlua_parser::ast::statement::DecoratorExpression,
+    ) {
+        use typedlua_parser::ast::statement::DecoratorExpression;
 
         match expr {
             DecoratorExpression::Identifier(name) => {
@@ -1761,8 +1763,11 @@ impl CodeGenerator {
     }
 
     /// Check if a decorator expression references a built-in decorator
-    fn is_decorator_built_in(&self, expr: &crate::ast::statement::DecoratorExpression) -> bool {
-        use crate::ast::statement::DecoratorExpression;
+    fn is_decorator_built_in(
+        &self,
+        expr: &typedlua_parser::ast::statement::DecoratorExpression,
+    ) -> bool {
+        use typedlua_parser::ast::statement::DecoratorExpression;
 
         match expr {
             DecoratorExpression::Identifier(name) => {
@@ -2743,7 +2748,7 @@ impl CodeGenerator {
     }
 
     fn generate_pattern_match(&mut self, pattern: &Pattern, value_var: &str) {
-        use crate::ast::pattern::*;
+        use typedlua_parser::ast::pattern::*;
 
         match pattern {
             Pattern::Wildcard(_) => {
@@ -2769,12 +2774,12 @@ impl CodeGenerator {
                 // Check each element
                 for (i, elem) in array_pattern.elements.iter().enumerate() {
                     match elem {
-                        ArrayPatternElement::Pattern(pat) => {
+                        typedlua_parser::ast::pattern::ArrayPatternElement::Pattern(pat) => {
                             self.write(" and ");
                             let index_expr = format!("{}[{}]", value_var, i + 1);
                             self.generate_pattern_match(pat, &index_expr);
                         }
-                        ArrayPatternElement::Rest(_) => {
+                        typedlua_parser::ast::pattern::ArrayPatternElement::Rest(_) => {
                             // Rest pattern doesn't add conditions
                         }
                         ArrayPatternElement::Hole => {
@@ -2793,7 +2798,7 @@ impl CodeGenerator {
     }
 
     fn generate_pattern_bindings(&mut self, pattern: &Pattern, value_var: &str) {
-        use crate::ast::pattern::*;
+        use typedlua_parser::ast::pattern::*;
 
         match pattern {
             Pattern::Identifier(ident) => {
@@ -3516,12 +3521,10 @@ impl CodeGenerator {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::diagnostics::CollectingDiagnosticHandler;
-    use crate::lexer::Lexer;
-    use crate::parser::Parser;
-    use crate::string_interner::StringInterner;
     use std::sync::Arc;
+    use typedlua_parser::lexer::Lexer;
+    use typedlua_parser::parser::Parser;
+    use typedlua_parser::string_interner::StringInterner;
 
     fn generate_code(source: &str) -> String {
         let handler = Arc::new(CollectingDiagnosticHandler::new());

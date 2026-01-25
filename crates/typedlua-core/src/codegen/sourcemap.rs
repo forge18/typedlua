@@ -1,5 +1,5 @@
-use crate::span::Span;
 use serde::{Deserialize, Serialize};
+use typedlua_parser::span::Span;
 
 /// A source map builder following the Source Map v3 specification
 /// https://sourcemaps.info/spec.html

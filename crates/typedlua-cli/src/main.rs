@@ -281,8 +281,8 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
     use std::sync::Arc;
     use typedlua_core::codegen::CodeGenerator;
     use typedlua_core::diagnostics::{CollectingDiagnosticHandler, DiagnosticHandler};
-    use typedlua_core::lexer::Lexer;
-    use typedlua_core::parser::Parser;
+    use typedlua_parser::lexer::Lexer;
+    use typedlua_parser::parser::Parser;
 
     info!("Compiling {} file(s)...", cli.files.len());
 
@@ -312,7 +312,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
 
             // Create string interner with common identifiers
             let (interner, common_ids) =
-                typedlua_core::string_interner::StringInterner::new_with_common_identifiers();
+                typedlua_parser::string_interner::StringInterner::new_with_common_identifiers();
             let interner = Arc::new(interner);
 
             // Lex the source

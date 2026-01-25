@@ -1,18 +1,20 @@
-use crate::ast::expression::{Argument, ArrowBody, Expression, ExpressionKind, MatchArmBody};
-use crate::ast::pattern::Pattern;
-use crate::ast::statement::{
-    Block, ForStatement, FunctionDeclaration, Parameter, ReturnStatement, Statement,
-    VariableDeclaration, VariableKind,
-};
-use crate::ast::Program;
 use crate::config::OptimizationLevel;
 use crate::errors::CompilationError;
 use crate::optimizer::OptimizationPass;
-use crate::span::Span;
-use crate::string_interner::StringId;
-use crate::StringInterner;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use typedlua_parser::ast::expression::{
+    Argument, ArrowBody, Expression, ExpressionKind, MatchArmBody,
+};
+use typedlua_parser::ast::pattern::Pattern;
+use typedlua_parser::ast::statement::{
+    Block, ForStatement, FunctionDeclaration, Parameter, ReturnStatement, Statement,
+    VariableDeclaration, VariableKind,
+};
+use typedlua_parser::ast::Program;
+use typedlua_parser::span::Span;
+use typedlua_parser::string_interner::StringId;
+use typedlua_parser::string_interner::StringInterner;
 
 enum InlineResult {
     Direct(Box<Expression>),

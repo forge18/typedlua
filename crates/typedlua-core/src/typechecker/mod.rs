@@ -26,7 +26,7 @@ pub use utility_types::{
     evaluate_template_literal_type,
 };
 
-use crate::span::Span;
+use typedlua_parser::span::Span;
 
 /// Type checker error
 #[derive(Debug, Clone)]
