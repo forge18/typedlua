@@ -67,7 +67,7 @@ pub fn narrow_type_from_condition(
     condition: &Expression,
     base_ctx: &NarrowingContext,
     original_types: &FxHashMap<StringId, Type>,
-    interner: &crate::string_interner::StringInterner,
+    interner: &crate::string_interner::typedlua_parser::typedlua_parser::string_interner::string_interner::StringInterner,
 ) -> (NarrowingContext, NarrowingContext) {
     let mut then_ctx = base_ctx.clone_for_branch();
     let mut else_ctx = base_ctx.clone_for_branch();
@@ -244,7 +244,7 @@ pub fn narrow_type_from_condition(
 
 /// Extract typeof check: typeof x == "string" -> Some((x, "string"))
 fn extract_typeof_check(
-    interner: &crate::string_interner::StringInterner,
+    interner: &crate::string_interner::typedlua_parser::typedlua_parser::string_interner::string_interner::StringInterner,
     left: &Expression,
     right: &Expression,
 ) -> Option<(StringId, String)> {
@@ -283,7 +283,7 @@ fn extract_type_guard_call(
     function: &Expression,
     arguments: &[crate::ast::expression::Argument],
     original_types: &FxHashMap<StringId, Type>,
-    interner: &crate::string_interner::StringInterner,
+    interner: &crate::string_interner::typedlua_parser::typedlua_parser::string_interner::string_interner::StringInterner,
 ) -> Option<(StringId, Type)> {
     // Check if this is a function call with one argument
     if arguments.len() != 1 {
@@ -292,7 +292,7 @@ fn extract_type_guard_call(
 
     // Get the variable being checked
     let var_name = match &arguments[0].value.kind {
-        ExpressionKind::Identifier(name) => *name.clone(),
+        ExpressionKind::Identifier(name) => name,
         _ => return None,
     };
 
@@ -314,11 +314,11 @@ fn extract_type_guard_call(
 
         // Fallback to heuristic for backwards compatibility:
         // Functions named "is*" are assumed to be type guards
-        let func_name_str = interner.resolve(*func_name);
+        let func_name_str = interner.resolve(*func_name).to_string();
         if let Some(stripped) = func_name_str.strip_prefix("is") {
             // Extract the type name from the function name (e.g., "isString" -> "string")
-            let type_name: String = stripped.to_lowercase();
-            if let Some(narrowed_type) = typeof_string_to_type(&type_name) {
+            let lower: String = stripped.to_lowercase();
+            if let Some(narrowed_type) = typeof_string_to_type(&lower) {
                 return Some((var_name, narrowed_type));
             }
         }
@@ -329,7 +329,7 @@ fn extract_type_guard_call(
 
 /// Extract nil check: x == nil -> Some((x, true))
 fn extract_nil_check(
-    _interner: &crate::string_interner::StringInterner,
+    _interner: &typedlua_parser::string_interner::StringInterner,
     left: &Expression,
     right: &Expression,
 ) -> Option<(StringId, bool)> {
