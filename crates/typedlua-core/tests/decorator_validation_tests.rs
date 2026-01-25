@@ -13,7 +13,7 @@ fn type_check(source: &str) -> Result<(), String> {
     let tokens = lexer.tokenize().map_err(|e| format!("{:?}", e))?;
 
     let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-    let program = parser.parse().map_err(|e| format!("{:?}", e))?;
+    let mut program = parser.parse().map_err(|e| format!("{:?}", e))?;
 
     let mut checker = TypeChecker::new(handler, &interner, &common_ids);
     checker = checker.with_options(CompilerOptions {
@@ -21,7 +21,7 @@ fn type_check(source: &str) -> Result<(), String> {
         ..Default::default()
     });
 
-    checker.check_program(&program).map_err(|e| e.message)?;
+    checker.check_program(&mut program).map_err(|e| e.message)?;
 
     Ok(())
 }
@@ -234,7 +234,7 @@ fn test_decorator_disabled_by_config() {
     let mut lexer = Lexer::new(source, handler.clone(), &interner);
     let tokens = lexer.tokenize().unwrap();
     let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-    let program = parser.parse().unwrap();
+    let mut program = parser.parse().unwrap();
 
     let mut checker = TypeChecker::new(handler, &interner, &common_ids);
     checker = checker.with_options(CompilerOptions {
@@ -242,7 +242,7 @@ fn test_decorator_disabled_by_config() {
         ..Default::default()
     });
 
-    let result = checker.check_program(&program);
+    let result = checker.check_program(&mut program);
     assert!(
         result.is_err(),
         "Decorators should fail when disabled in config"

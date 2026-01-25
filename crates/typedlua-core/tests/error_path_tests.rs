@@ -56,7 +56,7 @@ fn test_type_mismatch() {
     let mut program = parser.parse().unwrap();
 
     let mut tc = TypeChecker::new(handler.clone(), &interner, &common_ids);
-    let _ = tc.check_program(&program);
+    let _ = tc.check_program(&mut program);
 }
 
 #[test]
@@ -70,7 +70,7 @@ fn test_undefined_variable() {
     let mut program = parser.parse().unwrap();
 
     let mut tc = TypeChecker::new(handler.clone(), &interner, &common_ids);
-    let _ = tc.check_program(&program);
+    let _ = tc.check_program(&mut program);
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn test_return_type_mismatch() {
     let mut program = parser.parse().unwrap();
 
     let mut tc = TypeChecker::new(handler.clone(), &interner, &common_ids);
-    let _ = tc.check_program(&program);
+    let _ = tc.check_program(&mut program);
 }
 
 // Diagnostic handler tests
@@ -141,9 +141,9 @@ fn test_full_pipeline_with_errors() {
     let mut lexer = Lexer::new(input, handler.clone(), &interner);
     if let Ok(tokens) = lexer.tokenize() {
         let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-        if let Ok(program) = parser.parse() {
+        if let Ok(mut program) = parser.parse() {
             let mut tc = TypeChecker::new(handler.clone(), &interner, &common_ids);
-            let _ = tc.check_program(&program);
+            let _ = tc.check_program(&mut program);
         }
     }
 

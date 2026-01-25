@@ -28,7 +28,7 @@ fn compile_and_check(source: &str) -> Result<String, String> {
     let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids)
         .with_options(CompilerOptions::default());
     type_checker
-        .check_program(&program)
+        .check_program(&mut program)
         .map_err(|e| e.message)?;
 
     // Generate code
@@ -294,7 +294,7 @@ fn test_o2_optimization_precomputes_instances() {
     // Type check
     let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids)
         .with_options(CompilerOptions::default());
-    type_checker.check_program(&program).unwrap();
+    type_checker.check_program(&mut program).unwrap();
 
     // Generate code with O2 optimization
     let mut codegen =
@@ -353,7 +353,7 @@ fn test_o3_optimization_adds_inline_hints() {
     // Type check
     let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids)
         .with_options(CompilerOptions::default());
-    type_checker.check_program(&program).unwrap();
+    type_checker.check_program(&mut program).unwrap();
 
     // Generate code with O3 optimization
     let mut codegen =
@@ -400,7 +400,7 @@ fn test_o1_uses_constructor_calls() {
     // Type check
     let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids)
         .with_options(CompilerOptions::default());
-    type_checker.check_program(&program).unwrap();
+    type_checker.check_program(&mut program).unwrap();
 
     // Generate code
     let mut codegen = CodeGenerator::new(interner.clone());

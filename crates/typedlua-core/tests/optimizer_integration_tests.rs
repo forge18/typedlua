@@ -34,7 +34,7 @@ fn compile_with_optimization_level(
     let mut type_checker =
         TypeChecker::new(handler.clone(), &interner, &common_ids).with_options(options);
     type_checker
-        .check_program(&program)
+        .check_program(&mut program)
         .map_err(|e| e.message)?;
 
     let mut codegen = CodeGenerator::new(interner.clone()).with_optimization_level(level);

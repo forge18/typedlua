@@ -1,6 +1,6 @@
 # TypedLua TODO
 
-**Last Updated:** 2026-01-24 (Method to function call conversion - PHASE 2 COMPLETE, ready for PHASE 3)
+**Last Updated:** 2026-01-24 (Devirtualization - detailed breakdown added)
 
 ---
 
@@ -401,9 +401,9 @@ Pure Lua reflection via compile-time metadata generation. No native code or FFI 
 
 ### 3.1-3.4 Compiler Optimizations
 
-**Status:** O1 passes complete, O2 passes complete (8/8), O3 passes scaffolded | **Model:** Opus
+**Status:** O1 passes complete, O2 passes complete (9/9), O3 passes IN PROGRESS | **Model:** Opus
 
-All 16 optimization passes are registered. O1 passes (constant folding, dead code elimination, algebraic simplification) are fully functional. O2 passes: function inlining, loop optimization, null coalescing, safe navigation, exception handling, string concatenation, dead store elimination, tail call optimization, and rich enum optimization are complete. O3 passes are analysis-only placeholders.
+All optimization passes are registered. O1 passes (constant folding, dead code elimination, algebraic simplification) are fully functional. O2 passes: function inlining, loop optimization, null coalescing, safe navigation, exception handling, string concatenation, dead store elimination, tail call optimization, rich enum optimization, and method-to-function conversion are complete. O3 passes are analysis-only placeholders.
 
 **3.1 Optimization Infrastructure:**
 
@@ -494,7 +494,7 @@ All 16 optimization passes are registered. O1 passes (constant folding, dead cod
   - [x] Handle nested function bodies and arrow functions recursively
   - [x] Preserve variables captured by closures
 
-- [ ] Method to function call conversion (O2) - IN PROGRESS
+- [x] Method to function call conversion (O2) - COMPLETE
   - [x] PHASE 1: Add type annotation storage to AST
     - [x] Add `annotated_type: Option<Type>` field to `Expression` struct in ast/expression.rs
     - [x] Add `receiver_class: Option<ReceiverClassInfo>` field to `Expression` struct
@@ -502,11 +502,6 @@ All 16 optimization passes are registered. O1 passes (constant folding, dead cod
     - [x] Add `Default` implementations for `Expression`, `ExpressionKind`, and `Span`
     - [x] Update all ~45 Expression struct construction sites in parser/expression.rs
 
-  - [x] PHASE 2: Populate type annotations in type checker
-    - [x] Change `infer_expression_type(&Expression)` to `(&mut Expression)` to enable mutation
-    - [x] Add handling for regular MethodCall to use `infer_method_type()`
-    - [x] Set `receiver_class` when method call receiver is a known class identifier
-    - [x] Set `annotated_type` with inferred return type for MethodCall expressions
   - [x] PHASE 2: Populate type annotations in type checker - COMPLETE
     - [x] Change `infer_expression_type(&Expression)` to `(&mut Expression)` to enable mutation
     - [x] Add handling for regular MethodCall to use `infer_method_type()`
@@ -515,24 +510,33 @@ All 16 optimization passes are registered. O1 passes (constant folding, dead cod
     - [x] Fix remaining ~25+ call sites affected by signature change (COMPLETE - all compile)
     - [x] Update function signatures: check_statement, check_variable_declaration, check_function_declaration, check_if_statement, check_while_statement, check_for_statement, check_repeat_statement, check_return_statement, check_block, check_interface_declaration, check_enum_declaration, check_rich_enum_declaration, check_class_declaration, check_class_property, check_constructor, check_class_method, check_class_getter, check_class_setter, check_operator_declaration, check_try_statement, check_catch_clause, check_decorators, check_decorator_expression, check_throw_statement
 
-   - [x] PHASE 3: Create MethodToFunctionConversionPass - COMPLETE
-     - [x] Create pass struct in optimizer/method_to_function_conversion.rs
-     - [x] Implement OptimizationPass trait (name, min_level, run)
-     - [x] Implement visitor that scans for MethodCall with known receiver type
-     - [x] Transform MethodCall -> Call with direct Class.method invocation
-     - [x] Handle receiver expressions (new expressions, class identifiers)
-     - [x] Register pass in optimizer/mod.rs for O2 level
-     - [x] Add unit tests (2 tests pass)
+  - [x] PHASE 3: Create MethodToFunctionConversionPass - COMPLETE
+    - [x] Create pass struct in optimizer/method_to_function_conversion.rs
+    - [x] Implement OptimizationPass trait (name, min_level, run)
+    - [x] Implement visitor that scans for MethodCall with known receiver type
+    - [x] Transform MethodCall -> Call with direct Class.method invocation
+    - [x] Handle receiver expressions (new expressions, class identifiers)
+    - [x] Register pass in optimizer/mod.rs for O2 level
+    - [x] Add unit tests (2 tests pass)
 
-   - [ ] PHASE 4: Register and test
-     - [ ] Add integration tests in tests/method_to_function_tests.rs:
-       - [ ] Test new expression conversion
-       - [ ] Test class identifier conversion
-       - [ ] Test chained method calls
-       - [ ] Test optional method calls (should not convert)
-       - [ ] Test static method calls (should convert)
-       - [ ] Test preservation of argument evaluation order
-     - [ ] Run full test suite to verify no regressions
+  - [x] PHASE 4: Integration tests - COMPLETE
+    - [x] Add integration tests in tests/method_to_function_tests.rs (15 tests pass):
+      - [x] Test instance method call basic
+      - [x] Test class method call on instance
+      - [x] Test chained method calls
+      - [x] Test optional method calls (should not convert)
+      - [x] Test static method generates function
+      - [x] Test preservation of argument evaluation order
+      - [x] Test new expression method call
+      - [x] Test method call with complex receiver
+      - [x] Test method call in loop
+      - [x] Test method call in conditional
+      - [x] Test method with self parameter
+      - [x] Test method call in return statement
+      - [x] Test multiple method calls in expression
+      - [x] Test no regression on regular function calls
+      - [x] Test no conversion at O1
+    - [x] Run full test suite to verify no regressions
 
   - [x] Tail call optimization
     - [x] Review Lua runtime tail‑call behavior for generated functions
@@ -578,13 +582,136 @@ All 16 optimization passes are registered. O1 passes (constant folding, dead cod
 
 **Note:** Inline hints (`-- @inline` comments) are deferred as Lua interpreters don't standardly support them. The O2 optimization focuses on precomputing instances as literal tables.
 
-### 3.4 O3 Optimizations - Aggressive (SCAFFOLDED)
+### 3.4 O3 Optimizations - Aggressive (IN PROGRESS: Devirtualization detailed breakdown)
 
-- [ ] Devirtualization
-  - [ ] Identify virtual method call sites (method tables)
-  - [ ] Analyze concrete type information at call sites
-  - [ ] Replace virtual dispatch with direct function call where type is known
-  - [ ] Add tests for class hierarchy method calls
+#### Devirtualization (O3) - DETAILED BREAKDOWN
+
+**Status:** IN PROGRESS | **Model:** Sonnet | **Prerequisites:** MethodToFunctionConversionPass (O2)
+
+**Overview:** Converts indirect method calls through method tables into direct function calls when the concrete type is statically known. Builds on existing `receiver_class` infrastructure.
+
+---
+
+##### Phase 1: AST & Type System Extensions
+
+**Goal:** Track concrete type information for devirtualization decisions
+
+**Files:** `ast/expression.rs`, `typechecker/type_checker.rs`
+
+- [ ] Add `ConcreteType` enum to `ast/expression.rs`
+  ```rust
+  pub enum ConcreteType {
+      Class(StringId),
+      Interface(StringId, Vec<StringId>),
+      Unknown,
+  }
+  ```
+
+- [ ] Add `concrete_type: Option<ConcreteType>` field to `Expression` struct
+
+- [ ] Extend `ReceiverClassInfo` struct with `method_name: Option<StringId>` field
+
+- [ ] Populate `concrete_type` in type checker during method call type inference
+
+- [ ] Track full type chain for inheritance analysis in `Expression.concrete_type`
+
+---
+
+##### Phase 2: Devirtualization Analysis Pass
+
+**Goal:** Analyze method call sites to determine if devirtualization is safe
+
+**Files:** `optimizer/devirtualization.rs` (NEW)
+
+- [ ] Create `crates/typedlua-core/src/optimizer/devirtualization.rs`
+
+- [ ] Define `DevirtualizationPass` struct implementing `OptimizationPass` trait
+
+- [ ] Implement call site classifier:
+  - Scan all `ExpressionKind::MethodCall` in AST
+  - Check `receiver_class` and `concrete_type` fields
+  - Categorize calls as:
+    - **Directly devirtualizable**: Single known class, no inheritance overrides
+    - **Conditional**: Known class with potential overrides
+    - **Unknown**: Cannot determine concrete type
+
+- [ ] Build class hierarchy map from AST declarations
+  - Traverse all class declarations
+  - Build parent-child relationships
+  - Track method overrides per class
+
+- [ ] Implement override analysis
+  - Check if method is overridden in subclasses
+  - Verify class is `final` for safe devirtualization
+  - Check if all subtypes are known and final
+
+---
+
+##### Phase 3: Transformation Pass
+
+**Goal:** Convert virtual calls to direct calls where safe
+
+**Files:** `optimizer/devirtualization.rs`
+
+- [ ] Implement method call transformer
+  - When safe, transform `obj:method(args)` → `Class.method(obj, args)`
+  - Use `receiver_class.class_name` to find the class
+  - Use `method_name` to find the specific method
+
+- [ ] Handle inheritance chains
+  - For non-final classes, check if all subclasses are known
+  - If only one implementation exists, devirtualize to that
+
+- [ ] Handle interface types
+  - When receiver implements single-interface with one impl, devirtualize
+  - Otherwise, preserve virtual dispatch
+
+---
+
+##### Phase 4: Integration & Testing
+
+**Goal:** Register pass and verify correctness
+
+**Files:** `optimizer/mod.rs`, `tests/devirtualization_tests.rs` (NEW)
+
+- [ ] Register `DevirtualizationPass` in `Optimizer::register_passes()` at O3 level
+  - Ensure it runs after `MethodToFunctionConversionPass`
+
+- [ ] Create `tests/devirtualization_tests.rs`
+  - [ ] Test basic devirtualization of final class methods
+  - [ ] Test devirtualization with inheritance (single subclass)
+  - [ ] Test preservation of virtual dispatch for overridden methods
+  - [ ] Test interface devirtualization when single impl exists
+  - [ ] Test that O2 level does NOT devirtualize (regression check)
+
+- [ ] Create integration tests for:
+  - Class hierarchies (3+ levels)
+  - Diamond inheritance patterns
+  - Multiple interfaces
+
+---
+
+##### Devirtualization Safety Criteria
+
+A method call can be devirtualized when ALL of:
+1. Receiver type is known concretely (not `any`, not union)
+2. The class is marked `final` OR all subclasses are known and don't override the method
+3. Method is not accessible via interface (to preserve polymorphism)
+
+**Files Modified/Created:**
+
+```
+Modified:
+- ast/expression.rs          # ConcreteType enum, Expression fields
+- typechecker/type_checker.rs # Populate concrete_type
+- optimizer/mod.rs            # Register pass
+
+Created:
+- optimizer/devirtualization.rs  # Main pass implementation
+- tests/devirtualization_tests.rs # Test suite
+```
+
+---
 
 - [ ] Generic specialization
   - [ ] Detect generic function instantiations with concrete type arguments

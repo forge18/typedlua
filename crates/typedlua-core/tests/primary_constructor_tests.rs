@@ -42,7 +42,7 @@ fn type_check(source: &str) -> Result<(), String> {
     let mut program = parser.parse().map_err(|e| e.message)?;
 
     let mut checker = TypeChecker::new(handler.clone(), &interner, &common_ids);
-    let result = checker.check_program(&program);
+    let result = checker.check_program(&mut program);
 
     // Check both type checker errors and diagnostic errors
     if let Err(e) = result {
@@ -70,7 +70,7 @@ fn compile_to_lua(source: &str) -> Result<String, String> {
     let mut program = parser.parse().map_err(|e| e.message)?;
 
     let mut checker = TypeChecker::new(handler.clone(), &interner, &common_ids);
-    checker.check_program(&program).map_err(|e| e.message)?;
+    checker.check_program(&mut program).map_err(|e| e.message)?;
 
     let mut codegen = CodeGenerator::new(interner.clone());
     let lua_code = codegen.generate(&mut program);

@@ -34,7 +34,7 @@ fn compile_and_check(source: &str) -> Result<String, String> {
     let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids)
         .with_options(CompilerOptions::default());
     type_checker
-        .check_program(&program)
+        .check_program(&mut program)
         .map_err(|e| e.message)?;
 
     // Generate code

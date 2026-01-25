@@ -29,7 +29,7 @@ fn compile_and_check(source: &str) -> Result<String, String> {
     // Type check
     let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids)
         .with_options(CompilerOptions::default());
-    if let Err(e) = type_checker.check_program(&program) {
+    if let Err(e) = type_checker.check_program(&mut program) {
         return Err(format!("Type checking failed: {}", e.message));
     }
 

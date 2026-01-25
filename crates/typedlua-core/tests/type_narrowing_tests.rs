@@ -18,7 +18,7 @@ fn type_check(source: &str) -> Result<(), String> {
 
     // Parse
     let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-    let program = parser
+    let mut program = parser
         .parse()
         .map_err(|e| format!("Parsing failed: {:?}", e))?;
 
@@ -26,7 +26,7 @@ fn type_check(source: &str) -> Result<(), String> {
     let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids)
         .with_options(CompilerOptions::default());
     type_checker
-        .check_program(&program)
+        .check_program(&mut program)
         .map_err(|e| e.message)?;
 
     Ok(())
