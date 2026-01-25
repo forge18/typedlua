@@ -23,6 +23,9 @@ use operator_inlining::OperatorInliningPass;
 mod interface_inlining;
 use interface_inlining::InterfaceMethodInliningPass;
 
+mod aggressive_inlining;
+use aggressive_inlining::AggressiveInliningPass;
+
 /// Trait for optimization passes that transform the AST
 pub trait OptimizationPass {
     /// Get the name of this optimization pass
@@ -92,9 +95,9 @@ impl Optimizer {
                 interner.clone(),
             )));
 
-        // O3 passes - Aggressive optimizations (5 passes)
-        // self.passes
-        //     .push(Box::new(AggressiveInliningPass::default()));
+        // O3 passes - Aggressive optimizations (6 passes)
+        self.passes
+            .push(Box::new(AggressiveInliningPass::new(interner.clone())));
         self.passes
             .push(Box::new(OperatorInliningPass::new(interner.clone())));
         self.passes

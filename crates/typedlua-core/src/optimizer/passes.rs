@@ -4020,48 +4020,6 @@ impl TailCallOptimizationPass {
 }
 
 // =============================================================================
-// O3: Aggressive Inlining Pass
-// =============================================================================
-
-/// Aggressive function inlining pass (threshold: 15 statements)
-/// More aggressive inlining for O3 optimization
-pub struct AggressiveInliningPass {
-    threshold: usize,
-}
-
-impl Default for AggressiveInliningPass {
-    fn default() -> Self {
-        Self { threshold: 15 }
-    }
-}
-
-impl OptimizationPass for AggressiveInliningPass {
-    fn name(&self) -> &'static str {
-        "aggressive-inlining"
-    }
-
-    fn min_level(&self) -> OptimizationLevel {
-        OptimizationLevel::O3
-    }
-
-    fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
-        // Similar to FunctionInliningPass but with higher threshold
-        let mut inlinable_count = 0;
-
-        for stmt in &program.statements {
-            if let Statement::Function(func) = stmt {
-                if func.body.statements.len() <= self.threshold {
-                    inlinable_count += 1;
-                }
-            }
-        }
-
-        let _ = inlinable_count;
-        Ok(false)
-    }
-}
-
-// =============================================================================
 // O3: Operator Inlining Pass
 // =============================================================================
 
