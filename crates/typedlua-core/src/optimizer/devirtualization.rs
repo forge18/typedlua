@@ -465,7 +465,7 @@ mod tests {
     #[test]
     fn test_class_hierarchy_build() {
         // Simple test that hierarchy builds without crashing
-        let program = Program::new(vec![], crate::span::Span::dummy());
+        let program = Program::new(vec![], typedlua_parser::span::Span::dummy());
         let hierarchy = ClassHierarchy::build(&program);
         assert!(hierarchy.known_classes.is_empty());
     }

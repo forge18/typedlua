@@ -158,8 +158,12 @@ impl InterfaceImplementationMap {
             }
             Statement::For(for_stmt) => {
                 let body = match &**for_stmt {
-                    crate::ast::statement::ForStatement::Numeric(for_num) => &for_num.body,
-                    crate::ast::statement::ForStatement::Generic(for_gen) => &for_gen.body,
+                    typedlua_parser::ast::statement::ForStatement::Numeric(for_num) => {
+                        &for_num.body
+                    }
+                    typedlua_parser::ast::statement::ForStatement::Generic(for_gen) => {
+                        &for_gen.body
+                    }
                 };
                 self.block_mutates_self(body, class_id)
             }
@@ -218,10 +222,10 @@ impl InterfaceImplementationMap {
             ExpressionKind::Match(match_expr) => {
                 self.expression_mutates_self(&match_expr.value, class_id)
                     || match_expr.arms.iter().any(|arm| match &arm.body {
-                        crate::ast::expression::MatchArmBody::Expression(e) => {
+                        typedlua_parser::ast::expression::MatchArmBody::Expression(e) => {
                             self.expression_mutates_self(e, class_id)
                         }
-                        crate::ast::expression::MatchArmBody::Block(b) => {
+                        typedlua_parser::ast::expression::MatchArmBody::Block(b) => {
                             self.block_mutates_self(b, class_id)
                         }
                     })
@@ -232,10 +236,10 @@ impl InterfaceImplementationMap {
                         .as_ref()
                         .is_some_and(|d| self.expression_mutates_self(d, class_id))
                 }) || match &arrow.body {
-                    crate::ast::expression::ArrowBody::Expression(e) => {
+                    typedlua_parser::ast::expression::ArrowBody::Expression(e) => {
                         self.expression_mutates_self(e, class_id)
                     }
-                    crate::ast::expression::ArrowBody::Block(b) => {
+                    typedlua_parser::ast::expression::ArrowBody::Block(b) => {
                         self.block_mutates_self(b, class_id)
                     }
                 }
@@ -484,10 +488,10 @@ impl InterfaceMethodInliningPass {
                 let mut changed = self.process_expression(&mut match_expr.value, impl_map);
                 for arm in &mut match_expr.arms {
                     match &mut arm.body {
-                        crate::ast::expression::MatchArmBody::Expression(e) => {
+                        typedlua_parser::ast::expression::MatchArmBody::Expression(e) => {
                             changed |= self.process_expression(e, impl_map);
                         }
-                        crate::ast::expression::MatchArmBody::Block(block) => {
+                        typedlua_parser::ast::expression::MatchArmBody::Block(block) => {
                             changed |= self.process_block(block, impl_map);
                         }
                     }
@@ -502,10 +506,10 @@ impl InterfaceMethodInliningPass {
                     }
                 }
                 match &mut arrow.body {
-                    crate::ast::expression::ArrowBody::Expression(e) => {
+                    typedlua_parser::ast::expression::ArrowBody::Expression(e) => {
                         changed |= self.process_expression(e, impl_map);
                     }
-                    crate::ast::expression::ArrowBody::Block(block) => {
+                    typedlua_parser::ast::expression::ArrowBody::Block(block) => {
                         changed |= self.process_block(block, impl_map);
                     }
                 }
@@ -559,10 +563,10 @@ impl InterfaceMethodInliningPass {
                 let mut changed = false;
                 for elem in elements {
                     match elem {
-                        crate::ast::expression::ArrayElement::Expression(expr) => {
+                        typedlua_parser::ast::expression::ArrayElement::Expression(expr) => {
                             changed |= self.process_expression(expr, impl_map);
                         }
-                        crate::ast::expression::ArrayElement::Spread(expr) => {
+                        typedlua_parser::ast::expression::ArrayElement::Spread(expr) => {
                             changed |= self.process_expression(expr, impl_map);
                         }
                     }
@@ -572,7 +576,7 @@ impl InterfaceMethodInliningPass {
             ExpressionKind::Object(props) => {
                 let mut changed = false;
                 for prop in props {
-                    if let crate::ast::expression::ObjectProperty::Property { value, .. } = prop {
+                    if let typedlua_parser::ast::expression::ObjectProperty::Property { value, .. } = prop {
                         changed |= self.process_expression(value, impl_map);
                     }
                 }
@@ -598,7 +602,7 @@ impl InterfaceMethodInliningPass {
     ) -> Option<ExpressionKind> {
         if method_body.statements.is_empty() {
             return Some(ExpressionKind::Literal(
-                crate::ast::expression::Literal::Nil,
+                typedlua_parser::ast::expression::Literal::Nil,
             ));
         }
 
@@ -627,7 +631,7 @@ impl InterfaceMethodInliningPass {
                         return Some(transformed);
                     }
                     return Some(Expression::new(
-                        ExpressionKind::Literal(crate::ast::expression::Literal::Nil),
+                        ExpressionKind::Literal(typedlua_parser::ast::expression::Literal::Nil),
                         span,
                     ));
                 }
@@ -772,8 +776,8 @@ impl Default for InterfaceMethodInliningPass {
 mod tests {
     use super::*;
     use crate::ast::expression::{AssignmentOp, ExpressionKind, Literal};
-    use crate::ast::pattern::Pattern;
-    use crate::ast::statement::{Block, ReturnStatement, VariableDeclaration, VariableKind};
+    use typedlua_parser::ast::pattern::Pattern;
+    use typedlua_parser::ast::statement::{Block, ReturnStatement, VariableDeclaration, VariableKind};
     use crate::span::Span;
 
     #[test]
@@ -792,7 +796,7 @@ mod tests {
             statements: vec![
                 Statement::Variable(VariableDeclaration {
                     kind: VariableKind::Local,
-                    pattern: Pattern::Identifier(crate::ast::Spanned::new(
+                    pattern: Pattern::Identifier(typedlua_parser::ast::Spanned::new(
                         StringId::from_u32(1),
                         Span::dummy(),
                     )),
@@ -805,7 +809,7 @@ mod tests {
                 }),
                 Statement::Variable(VariableDeclaration {
                     kind: VariableKind::Local,
-                    pattern: Pattern::Identifier(crate::ast::Spanned::new(
+                    pattern: Pattern::Identifier(typedlua_parser::ast::Spanned::new(
                         StringId::from_u32(2),
                         Span::dummy(),
                     )),
@@ -846,7 +850,10 @@ mod tests {
                     Box::new(Expression {
                         kind: ExpressionKind::Member(
                             Box::new(Expression::new(ExpressionKind::SelfKeyword, Span::dummy())),
-                            crate::ast::Spanned::new(StringId::from_u32(2), Span::dummy()),
+                            typedlua_parser::ast::Spanned::new(
+                                StringId::from_u32(2),
+                                Span::dummy(),
+                            ),
                         ),
                         span: Span::dummy(),
                         annotated_type: None,

@@ -341,7 +341,7 @@ fn extract_nil_check(
 
 /// Convert typeof string to a type
 fn typeof_string_to_type(type_name: &str) -> Option<Type> {
-    let span = crate::span::Span::new(0, 0, 0, 0);
+    let span = typedlua_parser::span::Span::new(0, 0, 0, 0);
     match type_name {
         "nil" => Some(Type::new(TypeKind::Primitive(PrimitiveType::Nil), span)),
         "boolean" => Some(Type::new(TypeKind::Primitive(PrimitiveType::Boolean), span)),

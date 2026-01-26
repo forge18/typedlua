@@ -217,7 +217,7 @@ fn is_type_compatible(arg: &Type, constraint: &Type) -> bool {
 /// Returns a map from type parameter name to inferred type
 pub fn infer_type_arguments(
     type_params: &[TypeParameter],
-    function_params: &[crate::ast::statement::Parameter],
+    function_params: &[typedlua_parser::ast::statement::Parameter],
     arg_types: &[Type],
 ) -> Result<Vec<Type>, String> {
     if function_params.len() != arg_types.len() {
@@ -352,7 +352,7 @@ pub fn build_substitutions(
 /// Instantiate a block with type substitutions
 /// Clones the block and substitutes type annotations in all statements
 pub fn instantiate_block(
-    block: &crate::ast::statement::Block,
+    block: &typedlua_parser::ast::statement::Block,
     substitutions: &FxHashMap<StringId, Type>,
 ) -> typedlua_parser::ast::statement::Block {
     use typedlua_parser::ast::statement::Block;
@@ -369,7 +369,7 @@ pub fn instantiate_block(
 
 /// Instantiate a statement with type substitutions
 pub fn instantiate_statement(
-    stmt: &crate::ast::statement::Statement,
+    stmt: &typedlua_parser::ast::statement::Statement,
     substitutions: &FxHashMap<StringId, Type>,
 ) -> typedlua_parser::ast::statement::Statement {
     use typedlua_parser::ast::statement::{
@@ -490,10 +490,10 @@ pub fn instantiate_statement(
 
 /// Instantiate a function declaration with type substitutions
 pub fn instantiate_function_declaration(
-    func: &crate::ast::statement::FunctionDeclaration,
+    func: &typedlua_parser::ast::statement::FunctionDeclaration,
     substitutions: &FxHashMap<StringId, Type>,
-) -> crate::ast::statement::FunctionDeclaration {
-    crate::ast::statement::FunctionDeclaration {
+) -> typedlua_parser::ast::statement::FunctionDeclaration {
+    typedlua_parser::ast::statement::FunctionDeclaration {
         name: func.name.clone(),
         type_parameters: None, // Remove type parameters after specialization
         parameters: func
@@ -513,10 +513,10 @@ pub fn instantiate_function_declaration(
 
 /// Instantiate a parameter with type substitutions
 pub fn instantiate_parameter(
-    param: &crate::ast::statement::Parameter,
+    param: &typedlua_parser::ast::statement::Parameter,
     substitutions: &FxHashMap<StringId, Type>,
-) -> crate::ast::statement::Parameter {
-    crate::ast::statement::Parameter {
+) -> typedlua_parser::ast::statement::Parameter {
+    typedlua_parser::ast::statement::Parameter {
         pattern: param.pattern.clone(),
         type_annotation: param
             .type_annotation
@@ -742,7 +742,7 @@ fn instantiate_array_element(
 
 /// Helper to instantiate an object property
 fn instantiate_object_property(
-    prop: &crate::ast::expression::ObjectProperty,
+    prop: &typedlua_parser::ast::expression::ObjectProperty,
     substitutions: &FxHashMap<StringId, Type>,
 ) -> typedlua_parser::ast::expression::ObjectProperty {
     use typedlua_parser::ast::expression::ObjectProperty;

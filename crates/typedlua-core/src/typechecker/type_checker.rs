@@ -1509,7 +1509,7 @@ impl<'a> TypeChecker<'a> {
     /// Check decorators
     fn check_decorators(
         &mut self,
-        decorators: &mut [crate::ast::statement::Decorator],
+        decorators: &mut [typedlua_parser::ast::statement::Decorator],
     ) -> Result<(), TypeCheckError> {
         // Check if decorators are enabled
         if !decorators.is_empty() && !self.options.enable_decorators {
