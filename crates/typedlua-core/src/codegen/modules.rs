@@ -136,7 +136,13 @@ impl CodeGenerator {
                 self.write(", ");
             }
             self.write("_mod.");
-            self.write(&self.resolve(spec.exported.clone().unwrap().node));
+            // For re-exports, exported is None and local is the name to use
+            let export_name = spec
+                .exported
+                .clone()
+                .map(|e| e.node)
+                .unwrap_or(spec.local.node);
+            self.write(&self.resolve(export_name));
         }
         self.writeln("");
     }

@@ -179,7 +179,7 @@ impl<'a> TypeChecker<'a> {
             Statement::Enum(enum_decl) => self.check_enum_declaration(enum_decl),
             Statement::Class(class_decl) => self.check_class_declaration(class_decl),
             Statement::Import(import) => self.check_import_statement(import),
-            Statement::Export(_) => Ok(()), // Module system will be implemented in a future version
+            Statement::Export(export) => self.check_export_statement(export),
             // Declaration file statements - register them in the symbol table
             Statement::DeclareFunction(func) => self.register_declare_function(func),
             Statement::DeclareNamespace(ns) => self.register_declare_namespace(ns),
@@ -205,14 +205,19 @@ impl<'a> TypeChecker<'a> {
 
         // Get the declared type or use inferred type
         let var_type = if let Some(type_ann) = &decl.type_annotation {
+            // Resolve the type annotation (handles type references)
+            let resolved_type_ann = self
+                .evaluate_type(type_ann)
+                .map_err(|e| TypeCheckError::new(e, decl.span))?;
+
             // Check that initializer is assignable to declared type
-            if !TypeCompatibility::is_assignable(&init_type, type_ann) {
+            if !TypeCompatibility::is_assignable(&init_type, &resolved_type_ann) {
                 return Err(TypeCheckError::new(
                     "Type mismatch: cannot assign expression to declared type",
                     decl.span,
                 ));
             }
-            type_ann.clone()
+            resolved_type_ann
         } else {
             // For const, use narrow type; for local, widen literals
             if matches!(decl.kind, VariableKind::Const) {
@@ -875,24 +880,89 @@ impl<'a> TypeChecker<'a> {
             .evaluate_type(&alias.type_annotation)
             .map_err(|e| TypeCheckError::new(e, alias.span))?;
 
+        let alias_name = self.interner.resolve(alias.name.node).to_string();
+
         // Check if this is a generic type alias
         if let Some(type_params) = &alias.type_parameters {
             self.type_env
                 .register_generic_type_alias(
-                    self.interner.resolve(alias.name.node).to_string(),
+                    alias_name.clone(),
                     type_params.clone(),
-                    typ_to_register,
+                    typ_to_register.clone(),
                 )
                 .map_err(|e| TypeCheckError::new(e, alias.span))?;
         } else {
             self.type_env
-                .register_type_alias(
-                    self.interner.resolve(alias.name.node).to_string(),
-                    typ_to_register,
-                )
+                .register_type_alias(alias_name.clone(), typ_to_register.clone())
                 .map_err(|e| TypeCheckError::new(e, alias.span))?;
         }
+
+        // Also register in symbol table for export extraction
+        let symbol = Symbol {
+            name: alias_name.clone(),
+            typ: typ_to_register,
+            kind: SymbolKind::TypeAlias,
+            span: alias.span,
+            is_exported: true,
+            references: Vec::new(),
+        };
+        if let Err(e) = self.symbol_table.declare(symbol) {
+            eprintln!(
+                "DEBUG: Failed to declare type alias '{}': {}",
+                alias_name, e
+            );
+        } else {
+            eprintln!(
+                "DEBUG: Successfully declared type alias '{}' in symbol table",
+                alias_name
+            );
+        }
+
         Ok(())
+    }
+
+    /// Check export statement and register exported symbols
+    fn check_export_statement(&mut self, export: &ExportDeclaration) -> Result<(), TypeCheckError> {
+        match &export.kind {
+            ExportKind::Declaration(decl) => {
+                // Process the declaration to register it in the symbol table
+                // Note: Most check functions require &mut, but we only have & here
+                // For now, only handle TypeAlias which takes &TypeAliasDeclaration
+                match &**decl {
+                    Statement::TypeAlias(alias) => self.check_type_alias(alias),
+                    // TODO: Handle other declaration types (Function, Class, Interface, Variable, Enum)
+                    // These require mutable references and would need the ExportDeclaration to be mutable
+                    _ => Ok(()),
+                }
+            }
+            ExportKind::Named {
+                specifiers: _,
+                source,
+            } => {
+                // For re-exports, we don't need to register anything in the local symbol table
+                // The symbols will be resolved from the source module during extract_exports
+                // However, we should validate that the source module exists
+                if let Some(source_path) = source {
+                    if let (Some(resolver), Some(current_id)) =
+                        (&self.module_resolver, &self.current_module_id)
+                    {
+                        if let Err(e) = resolver.resolve(source_path, current_id.path()) {
+                            return Err(TypeCheckError::new(
+                                format!("Cannot resolve module '{}': {}", source_path, e),
+                                export.span,
+                            ));
+                        }
+                    }
+                }
+                Ok(())
+            }
+            ExportKind::Default(expr) => {
+                // Type check the default export expression
+                let mut expr_clone = expr.clone();
+                self.infer_expression_type(&mut expr_clone)?;
+                Ok(())
+            }
+        }
     }
 
     /// Check enum declaration
@@ -1019,9 +1089,19 @@ impl<'a> TypeChecker<'a> {
         // Check if it's a utility type
         if let Some(type_args) = &type_ref.type_arguments {
             if TypeEnvironment::is_utility_type(&name) {
+                // Resolve type arguments first (they might be type references)
+                let resolved_args: Result<Vec<Type>, TypeCheckError> = type_args
+                    .iter()
+                    .map(|arg| {
+                        self.evaluate_type(arg)
+                            .map_err(|e| TypeCheckError::new(e, arg.span))
+                    })
+                    .collect();
+                let resolved_args = resolved_args?;
+
                 return self
                     .type_env
-                    .resolve_utility_type(&name, type_args, span, self.interner, self.common)
+                    .resolve_utility_type(&name, &resolved_args, span, self.interner, self.common)
                     .map_err(|e| TypeCheckError::new(e, span));
             }
 
@@ -2203,6 +2283,15 @@ impl<'a> TypeChecker<'a> {
                 use super::evaluate_template_literal_type;
                 evaluate_template_literal_type(template, &self.type_env)
             }
+            TypeKind::Reference(type_ref) => {
+                // Resolve type reference using the proper resolution logic
+                // This handles utility types, generic types, and regular type aliases
+                // If resolution fails (e.g., type parameter not found), return the reference as-is
+                match self.resolve_type_reference(type_ref) {
+                    Ok(resolved) => Ok(resolved),
+                    Err(_) => Ok(typ.clone()), // Return the reference unresolved (might be a type parameter)
+                }
+            }
             _ => Ok(typ.clone()),
         }
     }
@@ -2468,11 +2557,21 @@ impl<'a> TypeChecker<'a> {
 
         let mut exports = ModuleExports::new();
 
-        for stmt in &program.statements {
+        eprintln!(
+            "DEBUG: extract_exports called with {} statements, current_module: {:?}",
+            program.statements.len(),
+            self.current_module_id
+        );
+        for (i, stmt) in program.statements.iter().enumerate() {
+            eprintln!("DEBUG: Statement {}: {:?}", i, std::mem::discriminant(stmt));
             if let Statement::Export(export_decl) = stmt {
                 match &export_decl.kind {
                     ExportKind::Declaration(decl) => {
                         // Extract symbol(s) from the declaration
+                        eprintln!(
+                            "DEBUG: ExportKind::Declaration, decl type: {:?}",
+                            std::mem::discriminant(&**decl)
+                        );
                         match &**decl {
                             Statement::Variable(var_decl) => {
                                 // Extract identifier from pattern
@@ -2506,10 +2605,20 @@ impl<'a> TypeChecker<'a> {
                             }
                             Statement::TypeAlias(type_alias) => {
                                 let alias_name = self.interner.resolve(type_alias.name.node);
+                                eprintln!("DEBUG: Found TypeAlias export: {}", alias_name);
                                 if let Some(symbol) = self.symbol_table.lookup(&alias_name) {
+                                    eprintln!(
+                                        "DEBUG: Found symbol for {}, adding to exports",
+                                        alias_name
+                                    );
                                     exports.add_named(
                                         alias_name,
                                         ExportedSymbol::new(symbol.clone(), true),
+                                    );
+                                } else {
+                                    eprintln!(
+                                        "DEBUG: Symbol not found in symbol table: {}",
+                                        alias_name
                                     );
                                 }
                             }
@@ -2526,27 +2635,80 @@ impl<'a> TypeChecker<'a> {
                             _ => {}
                         }
                     }
-                    ExportKind::Named { specifiers, .. } => {
+                    ExportKind::Named { specifiers, source } => {
                         // Export existing symbols: export { foo, bar as baz }
+                        // Or re-export from another module: export { foo } from './module'
                         for spec in specifiers {
                             let local_name = self.interner.resolve(spec.local.node);
-                            if let Some(symbol) = self.symbol_table.lookup(&local_name) {
-                                let export_name = spec
-                                    .exported
-                                    .as_ref()
-                                    .map(|e| self.interner.resolve(e.node))
-                                    .unwrap_or_else(|| local_name.clone());
+                            let export_name = spec
+                                .exported
+                                .as_ref()
+                                .map(|e| self.interner.resolve(e.node))
+                                .unwrap_or_else(|| local_name.clone());
 
-                                // Check if it's a type-only export
-                                let is_type_only = matches!(
-                                    symbol.kind,
-                                    SymbolKind::TypeAlias | SymbolKind::Interface
-                                );
+                            // Check if this is a re-export from another module
+                            if let Some(source_path) = source {
+                                // For re-exports, look up the symbol from the source module
+                                if let (Some(registry), Some(resolver), Some(current_id)) = (
+                                    &self.module_registry,
+                                    &self.module_resolver,
+                                    &self.current_module_id,
+                                ) {
+                                    // Resolve the source path to a module ID
+                                    match resolver.resolve(source_path, current_id.path()) {
+                                        Ok(source_module_id) => {
+                                            eprintln!("DEBUG: Resolved source path '{}' to module id: {:?}", source_path, source_module_id);
+                                            // Get exports from the source module
+                                            match registry.get_exports(&source_module_id) {
+                                                Ok(source_exports) => {
+                                                    eprintln!(
+                                                        "DEBUG: Source module has {} named exports",
+                                                        source_exports.named.len()
+                                                    );
+                                                    for name in source_exports.named.keys() {
+                                                        eprintln!("DEBUG:   - {}", name);
+                                                    }
+                                                    // Look up the symbol by local_name in source exports
+                                                    if let Some(exported_sym) =
+                                                        source_exports.get_named(&local_name)
+                                                    {
+                                                        exports.add_named(
+                                                            export_name,
+                                                            exported_sym.clone(),
+                                                        );
+                                                    } else {
+                                                        eprintln!("DEBUG: Symbol '{}' not found in source module exports", local_name);
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    eprintln!("DEBUG: Failed to get exports from source module: {:?}", e);
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            eprintln!(
+                                                "DEBUG: Failed to resolve source path '{}': {:?}",
+                                                source_path, e
+                                            );
+                                        }
+                                    }
+                                } else {
+                                    eprintln!("DEBUG: Missing module_registry, module_resolver, or current_module_id");
+                                }
+                            } else {
+                                // Local export - look up in symbol table
+                                if let Some(symbol) = self.symbol_table.lookup(&local_name) {
+                                    // Check if it's a type-only export
+                                    let is_type_only = matches!(
+                                        symbol.kind,
+                                        SymbolKind::TypeAlias | SymbolKind::Interface
+                                    );
 
-                                exports.add_named(
-                                    export_name,
-                                    ExportedSymbol::new(symbol.clone(), is_type_only),
-                                );
+                                    exports.add_named(
+                                        export_name,
+                                        ExportedSymbol::new(symbol.clone(), is_type_only),
+                                    );
+                                }
                             }
                         }
                     }
@@ -2603,19 +2765,47 @@ impl<'a> TypeChecker<'a> {
                     .declare(symbol)
                     .map_err(|e| TypeCheckError::new(e, import.span))?;
             }
-            ImportClause::Named(specifiers) | ImportClause::TypeOnly(specifiers) => {
+            ImportClause::Named(specifiers) => {
                 for spec in specifiers {
                     let name_str = self.interner.resolve(spec.imported.node);
-                    let any_type =
-                        Type::new(TypeKind::Primitive(PrimitiveType::Unknown), spec.span);
+
+                    // Try to resolve the type from the source module
+                    let import_type =
+                        self.resolve_import_type(&import.source, &name_str, import.span)?;
+
                     let symbol = Symbol::new(
                         name_str.to_string(),
                         SymbolKind::Variable,
-                        any_type,
+                        import_type,
                         spec.span,
                     );
                     self.symbol_table
                         .declare(symbol)
+                        .map_err(|e| TypeCheckError::new(e, spec.span))?;
+                }
+            }
+            ImportClause::TypeOnly(specifiers) => {
+                for spec in specifiers {
+                    let name_str = self.interner.resolve(spec.imported.node);
+
+                    // Try to resolve the type from the source module
+                    let import_type =
+                        self.resolve_import_type(&import.source, &name_str, import.span)?;
+
+                    // Register in symbol table
+                    let symbol = Symbol::new(
+                        name_str.to_string(),
+                        SymbolKind::TypeAlias,
+                        import_type.clone(),
+                        spec.span,
+                    );
+                    self.symbol_table
+                        .declare(symbol)
+                        .map_err(|e| TypeCheckError::new(e, spec.span))?;
+
+                    // Also register in type_env so it can be resolved in type annotations
+                    self.type_env
+                        .register_type_alias(name_str.to_string(), import_type)
                         .map_err(|e| TypeCheckError::new(e, spec.span))?;
                 }
             }
@@ -2634,6 +2824,69 @@ impl<'a> TypeChecker<'a> {
             }
         }
         Ok(())
+    }
+
+    /// Resolve the type of an imported symbol from the source module
+    fn resolve_import_type(
+        &self,
+        source: &str,
+        symbol_name: &str,
+        span: Span,
+    ) -> Result<Type, TypeCheckError> {
+        eprintln!(
+            "DEBUG: resolve_import_type called for '{}' from '{}'",
+            symbol_name, source
+        );
+        eprintln!("DEBUG: current_module_id: {:?}", self.current_module_id);
+
+        // If we have module support, try to resolve from the source module
+        if let (Some(registry), Some(resolver), Some(current_id)) = (
+            &self.module_registry,
+            &self.module_resolver,
+            &self.current_module_id,
+        ) {
+            eprintln!("DEBUG: Have registry, resolver, and current_id");
+            match resolver.resolve(source, current_id.path()) {
+                Ok(source_module_id) => {
+                    eprintln!(
+                        "DEBUG: Resolved source '{}' to module: {:?}",
+                        source, source_module_id
+                    );
+                    match registry.get_exports(&source_module_id) {
+                        Ok(source_exports) => {
+                            eprintln!(
+                                "DEBUG: Source module has {} exports",
+                                source_exports.named.len()
+                            );
+                            if let Some(exported_sym) = source_exports.get_named(symbol_name) {
+                                eprintln!(
+                                    "DEBUG: Found symbol '{}' in source exports, type: {:?}",
+                                    symbol_name, exported_sym.symbol.typ
+                                );
+                                return Ok(exported_sym.symbol.typ.clone());
+                            } else {
+                                eprintln!(
+                                    "DEBUG: Symbol '{}' not found in source exports",
+                                    symbol_name
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("DEBUG: Failed to get exports: {:?}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("DEBUG: Failed to resolve source '{}': {:?}", source, e);
+                }
+            }
+        } else {
+            eprintln!("DEBUG: Missing registry, resolver, or current_id");
+        }
+
+        // Fallback: return Unknown type
+        eprintln!("DEBUG: Falling back to Unknown type for '{}'", symbol_name);
+        Ok(Type::new(TypeKind::Primitive(PrimitiveType::Unknown), span))
     }
 
     fn check_namespace_declaration(

@@ -12,7 +12,7 @@ pub mod stdlib;
 pub mod typechecker;
 
 pub use arena::Arena;
-pub use codegen::{CodeGenerator, LuaTarget};
+pub use codegen::{CodeGenMode, CodeGenerator, CodeGeneratorBuilder, LuaTarget};
 pub use config::{CliOverrides, CompilerConfig};
 pub use di::Container;
 pub use diagnostics::{

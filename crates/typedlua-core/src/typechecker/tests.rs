@@ -164,6 +164,9 @@ fn test_utility_type_partial() {
     "#;
 
     let result = parse_and_check(source);
+    if let Err(ref e) = result {
+        eprintln!("Error: {:?}", e);
+    }
     assert!(result.is_ok(), "Partial<T> utility type should work");
 }
 

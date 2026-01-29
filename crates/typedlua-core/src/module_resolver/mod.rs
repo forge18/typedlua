@@ -11,6 +11,37 @@ use super::fs::FileSystem;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/// Normalize a path by removing . and .. components
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut components = Vec::new();
+
+    for component in path.components() {
+        match component {
+            std::path::Component::Prefix(_) | std::path::Component::RootDir => {
+                components.push(component);
+            }
+            std::path::Component::CurDir => {
+                // Skip . components
+            }
+            std::path::Component::ParentDir => {
+                // Pop the last component for ..
+                if let Some(last) = components.last() {
+                    if !matches!(last, std::path::Component::ParentDir) {
+                        components.pop();
+                    } else {
+                        components.push(component);
+                    }
+                }
+            }
+            std::path::Component::Normal(_) => {
+                components.push(component);
+            }
+        }
+    }
+
+    components.iter().collect()
+}
+
 /// Configuration for module resolution
 #[derive(Debug, Clone)]
 pub struct ModuleConfig {
@@ -206,13 +237,15 @@ impl ModuleResolver {
         match path.canonicalize() {
             Ok(canonical) => Ok(ModuleId::new(canonical)),
             Err(_) => {
-                // Fallback for mock file system - use absolute path
+                // Fallback for mock file system - use absolute path with normalization
                 let absolute = if path.is_absolute() {
                     path.to_path_buf()
                 } else {
                     self.base_dir.join(path)
                 };
-                Ok(ModuleId::new(absolute))
+                // Normalize the path by removing . and .. components
+                let normalized = normalize_path(&absolute);
+                Ok(ModuleId::new(normalized))
             }
         }
     }

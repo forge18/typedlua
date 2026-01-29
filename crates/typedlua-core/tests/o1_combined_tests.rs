@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use std::rc::Rc;
+use std::sync::Arc;
 use typedlua_core::codegen::CodeGenerator;
 use typedlua_core::config::CompilerOptions;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
@@ -31,7 +31,8 @@ fn compile_with_o1(source: &str) -> Result<String, String> {
         .check_program(&mut program)
         .map_err(|e| e.message)?;
 
-    let mut codegen = CodeGenerator::new(interner.clone());
+    let mut codegen = CodeGenerator::new(interner.clone())
+        .with_optimization_level(typedlua_core::config::OptimizationLevel::O1);
     let output = codegen.generate(&mut program);
 
     Ok(output)

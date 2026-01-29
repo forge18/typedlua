@@ -366,7 +366,7 @@ const user: User = { name: "Alice", age: 30 }
 
     let fs = Arc::new(fs);
     let base_dir = PathBuf::from("/project");
-    let (registry, _resolver) = setup_module_system(fs.clone(), base_dir.clone());
+    let (registry, resolver) = setup_module_system(fs.clone(), base_dir.clone());
 
     // Type check types.tl first
     let types_handler = Arc::new(CollectingDiagnosticHandler::new());
@@ -413,7 +413,15 @@ const user: User = { name: "Alice", age: 30 }
         Arc::new(SymbolTable::new()),
     );
 
-    let mut middle_checker = TypeChecker::new(middle_handler.clone(), &interner, &common_ids);
+    // Use new_with_module_support for middle.tl since it has re-exports
+    let mut middle_checker = TypeChecker::new_with_module_support(
+        middle_handler.clone(),
+        &interner,
+        &common_ids,
+        registry.clone(),
+        middle_id.clone(),
+        resolver.clone(),
+    );
     middle_checker
         .check_program(&mut middle_ast)
         .expect("Failed to type check middle.tl");
@@ -425,6 +433,14 @@ const user: User = { name: "Alice", age: 30 }
         .mark_checked(&middle_id)
         .expect("Failed to mark checked");
     assert!(!middle_handler.has_errors());
+
+    // Debug: Check what's in types exports
+    eprintln!("=== TYPES EXPORTS ===");
+    let types_exports_check = registry.get_exports(&types_id).unwrap();
+    eprintln!(
+        "Named exports: {:?}",
+        types_exports_check.named.keys().collect::<Vec<_>>()
+    );
 
     // Debug: Check what's in middle exports
     eprintln!("=== MIDDLE EXPORTS ===");
@@ -455,7 +471,15 @@ const user: User = { name: "Alice", age: 30 }
         Arc::new(SymbolTable::new()),
     );
 
-    let mut main_checker = TypeChecker::new(main_handler.clone(), &interner, &common_ids);
+    // Use new_with_module_support for main.tl since it imports from middle
+    let mut main_checker = TypeChecker::new_with_module_support(
+        main_handler.clone(),
+        &interner,
+        &common_ids,
+        registry.clone(),
+        main_id.clone(),
+        resolver.clone(),
+    );
     let main_result = main_checker.check_program(&mut main_ast);
     if main_result.is_err() || main_handler.has_errors() {
         eprintln!("=== MAIN TYPE CHECK FAILED (test_re_export_type) ===");

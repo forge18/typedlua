@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use std::rc::Rc;
+use std::sync::Arc;
 use typedlua_core::codegen::CodeGenerator;
 use typedlua_core::config::CompilerOptions;
 use typedlua_core::diagnostics::{CollectingDiagnosticHandler, DiagnosticHandler};

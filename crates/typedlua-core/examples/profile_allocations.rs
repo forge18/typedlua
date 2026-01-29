@@ -1,3 +1,4 @@
+use std::rc::Rc;
 /// Heap allocation profiler using dhat
 ///
 /// This tool profiles memory allocations during compilation to identify hotspots
@@ -10,7 +11,6 @@
 ///
 /// Output: dhat-heap.json (open with https://nnethercote.github.io/dh_view/dh_view.html)
 use std::sync::Arc;
-use std::rc::Rc;
 use typedlua_core::codegen::CodeGenerator;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::typechecker::TypeChecker;

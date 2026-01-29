@@ -3,8 +3,8 @@
 //! Devirtualization converts virtual method calls to direct function calls
 //! when the receiver's concrete type is known and it's safe to do so.
 
-use std::sync::Arc;
 use std::rc::Rc;
+use std::sync::Arc;
 use typedlua_core::codegen::CodeGenerator;
 use typedlua_core::config::OptimizationLevel;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;

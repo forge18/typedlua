@@ -313,7 +313,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
             // Create string interner with common identifiers
             let (interner, common_ids) =
                 typedlua_parser::string_interner::StringInterner::new_with_common_identifiers();
-            let interner = Arc::new(interner);
+            let interner = std::rc::Rc::new(interner);
 
             // Lex the source
             let mut lexer = Lexer::new(&source, handler.clone(), &interner);

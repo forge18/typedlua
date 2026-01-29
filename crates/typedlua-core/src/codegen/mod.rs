@@ -1,3 +1,4 @@
+pub mod builder;
 pub mod sourcemap;
 pub mod strategies;
 
@@ -10,7 +11,11 @@ pub mod patterns;
 pub mod statements;
 
 use super::optimizer::Optimizer;
+pub use builder::CodeGeneratorBuilder;
 pub use sourcemap::{SourceMap, SourceMapBuilder};
+
+// Re-export types needed for builder API
+pub use super::config::OptimizationLevel;
 use std::rc::Rc;
 use std::sync::Arc;
 use typedlua_parser::ast::pattern::Pattern;
