@@ -256,20 +256,13 @@ impl CodeGenerator {
 
     /// Generate a bundle from multiple modules
     ///
-    /// This creates a single Lua file with a custom module system that:
-    /// - Stores all modules as functions in __modules table
-    /// - Implements __require() with caching
-    /// - Executes the entry point module
-    ///
-    /// # Parameters
-    /// * `modules` - List of (module_id, program, import_map) tuples
-    ///   - `module_id` - Canonical path identifier for the module
-    ///   - `program` - The parsed AST
-    ///   - `import_map` - Map from import source strings to resolved module IDs
-    /// * `entry_module_id` - The module ID to execute as entry point
-    /// * `target` - Target Lua version
+    /// # Arguments
+    /// * `modules` - Vector of (module_id, program, import_map) tuples
+    /// * `entry_module_id` - The ID of the entry point module
+    /// * `target` - Lua target version
     /// * `with_source_map` - Whether to generate source map
     /// * `output_file` - Optional output file name for source map reference
+    /// * `interner` - The string interner used during parsing (required for resolving StringIds)
     ///
     /// # Returns
     /// Returns a tuple of (generated_code, optional_source_map)
@@ -279,6 +272,7 @@ impl CodeGenerator {
         target: LuaTarget,
         with_source_map: bool,
         output_file: Option<String>,
+        interner: Option<Arc<StringInterner>>,
     ) -> (String, Option<SourceMap>) {
         let mut output = String::new();
 
@@ -338,15 +332,17 @@ impl CodeGenerator {
             }
 
             // Generate module code with source map support
-            // Create a new interner for this module (bundles can have multiple independent modules)
+            // Use the provided interner or create a new one if not provided
             // Note: Arc used for shared ownership with CodeGenerator; threading not used here
-            #[allow(clippy::arc_with_non_send_sync)]
-            let interner = Arc::new(StringInterner::new());
-            let mut generator = CodeGenerator::new(interner.clone())
-                .with_target(target)
-                .with_mode(CodeGenMode::Bundle {
-                    module_id: module_id.clone(),
-                });
+            let interner = interner
+                .clone()
+                .unwrap_or_else(|| Arc::new(StringInterner::new()));
+            let mut generator =
+                CodeGenerator::new(interner)
+                    .with_target(target)
+                    .with_mode(CodeGenMode::Bundle {
+                        module_id: module_id.clone(),
+                    });
 
             // Set the import map so imports can be resolved to module IDs
             generator.import_map = import_map;

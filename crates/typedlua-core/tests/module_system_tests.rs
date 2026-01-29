@@ -472,6 +472,7 @@ const user: User = { name: "Alice", age: 30 }
 #[test]
 fn test_bundle_mode_simple() {
     use typedlua_core::codegen::{CodeGenerator, LuaTarget};
+    use typedlua_parser::string_interner::StringInterner;
 
     // Create simple module code
     let utils_code = r#"
@@ -487,13 +488,17 @@ const result: number = add(1, 2)
 print(result)
 "#;
 
-    // Parse modules
+    // Parse modules with shared interner
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
     let utils_handler = Arc::new(CollectingDiagnosticHandler::new());
     let utils_ast =
-        parse_file(utils_code, utils_handler.clone()).expect("Failed to parse utils.tl");
+        parse_file_with_interner(utils_code, utils_handler.clone(), &interner, &common_ids)
+            .expect("Failed to parse utils.tl");
 
     let main_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let main_ast = parse_file(main_code, main_handler.clone()).expect("Failed to parse main.tl");
+    let main_ast =
+        parse_file_with_interner(main_code, main_handler.clone(), &interner, &common_ids)
+            .expect("Failed to parse main.tl");
 
     // Create import map for main.tl
     let mut main_import_map = std::collections::HashMap::new();
@@ -509,8 +514,14 @@ print(result)
         ("/project/main.tl".to_string(), &main_ast, main_import_map),
     ];
 
-    let (bundle, _) =
-        CodeGenerator::generate_bundle(&modules, "/project/main.tl", LuaTarget::Lua54, false, None);
+    let (bundle, _) = CodeGenerator::generate_bundle(
+        &modules,
+        "/project/main.tl",
+        LuaTarget::Lua54,
+        false,
+        None,
+        Some(Arc::new(interner)),
+    );
 
     // Verify bundle structure
     assert!(bundle.contains("-- TypedLua Bundle"));
@@ -532,6 +543,7 @@ print(result)
 #[test]
 fn test_bundle_mode_multiple_modules() {
     use typedlua_core::codegen::{CodeGenerator, LuaTarget};
+    use typedlua_parser::string_interner::StringInterner;
 
     // Create math utilities
     let math_code = r#"
@@ -557,16 +569,22 @@ const result: number = square(5)
 print(result)
 "#;
 
-    // Parse all modules
+    // Parse all modules with shared interner
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
     let math_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let math_ast = parse_file(math_code, math_handler.clone()).expect("Failed to parse math.tl");
+    let math_ast =
+        parse_file_with_interner(math_code, math_handler.clone(), &interner, &common_ids)
+            .expect("Failed to parse math.tl");
 
     let utils_handler = Arc::new(CollectingDiagnosticHandler::new());
     let utils_ast =
-        parse_file(utils_code, utils_handler.clone()).expect("Failed to parse utils.tl");
+        parse_file_with_interner(utils_code, utils_handler.clone(), &interner, &common_ids)
+            .expect("Failed to parse utils.tl");
 
     let main_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let main_ast = parse_file(main_code, main_handler.clone()).expect("Failed to parse main.tl");
+    let main_ast =
+        parse_file_with_interner(main_code, main_handler.clone(), &interner, &common_ids)
+            .expect("Failed to parse main.tl");
 
     // Create import maps
     let mut utils_import_map = std::collections::HashMap::new();
@@ -590,8 +608,14 @@ print(result)
         ("/project/main.tl".to_string(), &main_ast, main_import_map),
     ];
 
-    let (bundle, _) =
-        CodeGenerator::generate_bundle(&modules, "/project/main.tl", LuaTarget::Lua54, false, None);
+    let (bundle, _) = CodeGenerator::generate_bundle(
+        &modules,
+        "/project/main.tl",
+        LuaTarget::Lua54,
+        false,
+        None,
+        Some(Arc::new(interner)),
+    );
 
     // Verify all modules are present
     assert!(bundle.contains("__modules[\"/project/math.tl\"]"));
@@ -609,6 +633,7 @@ print(result)
 #[test]
 fn test_bundle_mode_with_re_exports() {
     use typedlua_core::codegen::{CodeGenerator, LuaTarget};
+    use typedlua_parser::string_interner::StringInterner;
 
     // Create base module
     let base_code = r#"
@@ -630,16 +655,22 @@ const result: string = helper()
 print(result)
 "#;
 
-    // Parse all modules
+    // Parse all modules with shared interner
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
     let base_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let base_ast = parse_file(base_code, base_handler.clone()).expect("Failed to parse base.tl");
+    let base_ast =
+        parse_file_with_interner(base_code, base_handler.clone(), &interner, &common_ids)
+            .expect("Failed to parse base.tl");
 
     let middle_handler = Arc::new(CollectingDiagnosticHandler::new());
     let middle_ast =
-        parse_file(middle_code, middle_handler.clone()).expect("Failed to parse middle.tl");
+        parse_file_with_interner(middle_code, middle_handler.clone(), &interner, &common_ids)
+            .expect("Failed to parse middle.tl");
 
     let main_handler = Arc::new(CollectingDiagnosticHandler::new());
-    let main_ast = parse_file(main_code, main_handler.clone()).expect("Failed to parse main.tl");
+    let main_ast =
+        parse_file_with_interner(main_code, main_handler.clone(), &interner, &common_ids)
+            .expect("Failed to parse main.tl");
 
     // Create import maps
     let mut middle_import_map = std::collections::HashMap::new();
@@ -663,8 +694,14 @@ print(result)
         ("/project/main.tl".to_string(), &main_ast, main_import_map),
     ];
 
-    let (bundle, _) =
-        CodeGenerator::generate_bundle(&modules, "/project/main.tl", LuaTarget::Lua54, false, None);
+    let (bundle, _) = CodeGenerator::generate_bundle(
+        &modules,
+        "/project/main.tl",
+        LuaTarget::Lua54,
+        false,
+        None,
+        Some(Arc::new(interner)),
+    );
 
     // Verify re-export uses __require
     assert!(bundle.contains("__require(\"/project/base.tl\")"));
@@ -678,6 +715,7 @@ print(result)
 #[test]
 fn test_bundle_mode_with_source_maps() {
     use typedlua_core::codegen::{CodeGenerator, LuaTarget};
+    use typedlua_parser::string_interner::StringInterner;
 
     // Create simple test modules
     let utils_code = r#"
@@ -693,12 +731,17 @@ const result: number = add(1, 2)
 print(result)
 "#;
 
+    // Parse with shared interner
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
     let utils_handler = Arc::new(CollectingDiagnosticHandler::new());
     let main_handler = Arc::new(CollectingDiagnosticHandler::new());
 
     let utils_ast =
-        parse_file(utils_code, utils_handler.clone()).expect("Failed to parse utils.tl");
-    let main_ast = parse_file(main_code, main_handler.clone()).expect("Failed to parse main.tl");
+        parse_file_with_interner(utils_code, utils_handler.clone(), &interner, &common_ids)
+            .expect("Failed to parse utils.tl");
+    let main_ast =
+        parse_file_with_interner(main_code, main_handler.clone(), &interner, &common_ids)
+            .expect("Failed to parse main.tl");
 
     // Create import map
     let mut main_import_map = std::collections::HashMap::new();
@@ -720,6 +763,7 @@ print(result)
         LuaTarget::Lua54,
         true,
         Some("bundle.lua".to_string()),
+        Some(Arc::new(interner)),
     );
 
     // Verify bundle was generated

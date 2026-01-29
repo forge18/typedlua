@@ -1309,36 +1309,34 @@ pub trait TypeCheckVisitor {
 
 ---
 
-#### Phase 2: AccessControlVisitor (Access Modifier Checks)
+#### Phase 2: AccessControlVisitor (Access Modifier Checks) ✓ COMPLETE
 
-**Current location:** `type_checker.rs` lines 2761-2855
+**Status:** COMPLETE | **Location:** `typechecker/visitors/access_control.rs`
 
-**Methods to extract:**
+**Implementation:**
 
-- `check_member_access(class_name, member_name, span)` - Checks public/private/protected
-- `is_subclass(child, ancestor)` - Checks inheritance relationship
-- `class_info` struct tracking (could be shared)
+- [x] Created `visitors/access_control.rs` with `AccessControlVisitor` trait:
+  - [x] `check_member_access(class_name, member_name, span) -> Result<(), TypeCheckError>`
+  - [x] `is_subclass(child, ancestor) -> bool`
+  - [x] `register_class(name, parent, members)`
+  - [x] `register_member(class_name, member_name, access_modifier, is_static, member_kind)`
+  - [x] `mark_class_final(class_name)` / `is_class_final(class_name)`
+  - [x] `get_class_members(class_name)`
+  - [x] `set_current_class(class_name)` / `get_current_class()`
 
-**2.1 Create `visitors/access_control.rs`**
+- [x] Created `AccessControl` struct with:
+  - [x] `class_members: FxHashMap<StringId, FxHashMap<StringId, ClassMemberInfo>>`
+  - [x] `final_classes: FxHashSet<StringId>`
+  - [x] `current_class: Option<StringId>`
 
-- [ ] Define `AccessControlVisitor` trait:
-  - [ ] `check_member_access(class_name, member_name, span) -> Result<(), TypeCheckError>`
-  - [ ] `is_subclass(child, ancestor) -> bool`
-  - [ ] `register_class(name, parent, members)`
+- [x] Integrated into TypeChecker:
+  - [x] Added `access_control: AccessControl` field
+  - [x] Wrapper method delegates to `self.access_control.check_member_access()`
+  - [x] Used throughout for class registration, member tracking, and access checks
 
-**2.2 Create `AccessControl` implementation**
+**Lines extracted:** ~150 lines
 
-- [ ] Extract access modifier checking logic
-- [ ] Track class hierarchy separately from TypeChecker
-- [ ] Maintain `class_members` and `final_classes` maps
-
-**2.3 Integrate into TypeChecker**
-
-- [ ] Add `self.access_control: AccessControl` field
-- [ ] Replace `check_member_access` calls with `self.access_control.check_member_access`
-- [ ] Pass `current_class` context when needed
-
-**Estimated lines extracted:** ~150 lines
+**Test Results:** All 10 access modifier tests pass (access_modifiers_tests.rs)
 
 ---
 
