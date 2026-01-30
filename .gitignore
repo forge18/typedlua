@@ -29,6 +29,9 @@ Cargo.lock
 # Claude Code
 .claude/logs/
 .claude/cache/
+CLAUDE.md
+/*/CLAUDE.md
+/**/CLAUDE.md
 
 # Documentation build
 /docs/_build
