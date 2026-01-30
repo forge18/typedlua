@@ -700,6 +700,39 @@ impl<'a> TypeChecker<'a> {
         &mut self,
         iface: &mut InterfaceDeclaration,
     ) -> Result<(), TypeCheckError> {
+        let iface_name = self.interner.resolve(iface.name.node).to_string();
+
+        // Register interface with access control so its members can be tracked
+        self.access_control.register_class(&iface_name, None);
+
+        // Register interface members for access control
+        for member in &iface.members {
+            let member_info = match member {
+                InterfaceMember::Property(prop) => ClassMemberInfo {
+                    name: self.interner.resolve(prop.name.node).to_string(),
+                    access: AccessModifier::Public,
+                    _is_static: false,
+                    kind: ClassMemberKind::Property {
+                        type_annotation: prop.type_annotation.clone(),
+                    },
+                    is_final: prop.is_readonly,
+                },
+                InterfaceMember::Method(method) => ClassMemberInfo {
+                    name: self.interner.resolve(method.name.node).to_string(),
+                    access: AccessModifier::Public,
+                    _is_static: false,
+                    kind: ClassMemberKind::Method {
+                        parameters: method.parameters.clone(),
+                        return_type: Some(method.return_type.clone()),
+                    },
+                    is_final: false,
+                },
+                InterfaceMember::Index(_) => continue, // Skip index signatures for now
+            };
+            self.access_control
+                .register_member(&iface_name, member_info);
+        }
+
         // For generic interfaces, we need to register them differently
         // For now, we'll register generic interfaces similar to generic type aliases
         // They will be instantiated when referenced with type arguments
@@ -1018,6 +1051,23 @@ impl<'a> TypeChecker<'a> {
         enum_decl: &mut EnumDeclaration,
     ) -> Result<(), TypeCheckError> {
         let enum_name = self.interner.resolve(enum_decl.name.node).to_string();
+
+        // Register rich enum with access control so its members can be tracked
+        self.access_control.register_class(&enum_name, None);
+
+        // Register enum fields as members for access control
+        for field in &enum_decl.fields {
+            let field_info = ClassMemberInfo {
+                name: self.interner.resolve(field.name.node).to_string(),
+                access: AccessModifier::Public,
+                _is_static: false,
+                kind: ClassMemberKind::Property {
+                    type_annotation: field.type_annotation.clone(),
+                },
+                is_final: false,
+            };
+            self.access_control.register_member(&enum_name, field_info);
+        }
 
         let mut member_types = FxHashMap::default();
         for (i, member) in enum_decl.members.iter().enumerate() {
@@ -1537,9 +1587,34 @@ impl<'a> TypeChecker<'a> {
                             }
                         }
                     }
-                    ObjectTypeMember::Index(_) => {
-                        // Index signature checking is complex, skip for now
+                    ObjectTypeMember::Index(index_sig) => {
+                        // Validate that all class properties are compatible with index signature
+                        self.validate_index_signature(class_decl, index_sig)?;
                     }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate that all class properties are compatible with interface index signature
+    fn validate_index_signature(
+        &self,
+        class_decl: &ClassDeclaration,
+        index_sig: &IndexSignature,
+    ) -> Result<(), TypeCheckError> {
+        for member in &class_decl.members {
+            if let ClassMember::Property(prop) = member {
+                // Check if property type is assignable to index signature value type
+                if !TypeCompatibility::is_assignable(&prop.type_annotation, &index_sig.value_type) {
+                    return Err(TypeCheckError::new(
+                        format!(
+                            "Property '{}' is not assignable to index signature value type",
+                            self.interner.resolve(prop.name.node)
+                        ),
+                        prop.span,
+                    ));
                 }
             }
         }

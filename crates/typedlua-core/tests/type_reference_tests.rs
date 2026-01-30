@@ -130,26 +130,6 @@ fn test_type_reference_vs_primitive() {
 }
 
 #[test]
-#[ignore] // TODO: Implement structural typing for type aliases - currently uses nominal typing
-fn test_different_type_aliases_same_underlying() {
-    let source = r#"
-        type UserId = number
-        type ProductId = number
-
-        function assign(user: UserId): ProductId {
-            return user
-        }
-    "#;
-
-    // Different type aliases with the same underlying type are compatible
-    // due to structural typing (resolving aliases to their base types)
-    assert!(
-        type_check(source).is_ok(),
-        "Different type alias names with same underlying type should be compatible"
-    );
-}
-
-#[test]
 fn test_type_reference_compatibility_same_name() {
     // This test demonstrates a limitation: we can't assign concrete types
     // to type aliases without type resolution

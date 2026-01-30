@@ -180,7 +180,7 @@ impl AccessControlVisitor for AccessControl {
             // Check if class exists
             if !self.class_members.contains_key(class_name) {
                 return Err(TypeCheckError::new(
-                    format!("Class '{}' not found", class_name),
+                    format!("Class or type '{}' not found", class_name),
                     span,
                 ));
             }

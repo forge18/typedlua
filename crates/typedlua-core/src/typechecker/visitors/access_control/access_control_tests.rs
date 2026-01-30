@@ -730,6 +730,7 @@ mod tests {
             Span::default(),
         );
 
+        // Nonexistent members should fail
         assert!(result.is_err(), "Accessing nonexistent member should fail");
     }
 
@@ -745,6 +746,7 @@ mod tests {
             Span::default(),
         );
 
+        // Nonexistent classes should fail
         assert!(
             result.is_err(),
             "Accessing member of nonexistent class should fail"

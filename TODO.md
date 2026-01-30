@@ -2333,7 +2333,7 @@ fuzz/
 
 - [ ] Review the architecture for modularity
 - [ ] Review naming conventions
-- [ ] Apply DRY, YAGNI, and KISS
+- [ ] Apply DRY and YAGNI
 - [ ] Review file structure for readability and congnitive load
 - [ ] Ensure DI best practices
 
@@ -2344,6 +2344,7 @@ fuzz/
 - [ ] Find any code that isn't "wired up"
 - [ ] Update comments to follow best practices
 - [ ] Remove dead code
+- [ ] Identify any unimplemented features
 - [ ] Ensure long functions are broken down for cognitive load
 - [ ] Ensure proper tracing is setup in all critical paths with our zero cost tracing
 

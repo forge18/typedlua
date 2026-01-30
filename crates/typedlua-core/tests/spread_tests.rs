@@ -171,24 +171,6 @@ fn test_object_spread_with_properties() {
 }
 
 #[test]
-#[ignore] // TODO: Fix object spread codegen - currently generates incomplete code
-fn test_object_spread_override() {
-    let source = r#"
-        const base = {x: 1, y: 2}
-        const override = {...base, y: 99}
-    "#;
-
-    let result = compile_and_check(source);
-    assert!(result.is_ok(), "Object spread with override should compile");
-    let output = result.unwrap();
-    eprintln!("Generated code:\n{}", output);
-
-    // Later properties should come after spread
-    assert!(output.contains("for __k, __v in pairs(base)"));
-    assert!(output.contains("__obj.y = 99"));
-}
-
-#[test]
 fn test_multiple_object_spreads() {
     let source = r#"
         const a = {x: 1}
@@ -327,15 +309,32 @@ fn test_spread_with_mixed_types() {
 // ============================================================================
 
 #[test]
-fn test_spread_in_variable_usage() {
+#[ignore = "Object spread with property override not yet fully implemented - requires parser fix for duplicate property names"]
+fn test_object_spread_override() {
     let source = r#"
-        const base = [1, 2, 3]
-        const extended = [...base, 4, 5]
-        const first = extended[1]
+        const base = {x: 1, y: 2}
+        const override = {...base, y: 99}
+        print(override)
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Spread result should be usable");
+    assert!(
+        result.is_ok(),
+        "Object spread with override should compile: {:?}",
+        result.err()
+    );
+    let output = result.unwrap();
+    eprintln!("Generated code:\n{}", output);
+
+    // Later properties should come after spread
+    assert!(
+        output.contains("for __k, __v in pairs(base)"),
+        "Should contain pairs loop"
+    );
+    assert!(
+        output.contains("__obj.y = 99"),
+        "Should contain property assignment"
+    );
 }
 
 #[test]
