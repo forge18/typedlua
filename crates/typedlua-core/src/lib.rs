@@ -1,4 +1,3 @@
-pub mod arena;
 pub mod cache;
 pub mod codegen;
 pub mod config;
@@ -11,8 +10,7 @@ pub mod optimizer;
 pub mod stdlib;
 pub mod typechecker;
 
-pub use arena::Arena;
-pub use codegen::{CodeGenMode, CodeGenerator, CodeGeneratorBuilder, LuaTarget};
+pub use codegen::{CodeGenMode, CodeGenerator, LuaTarget};
 pub use config::{CliOverrides, CompilerConfig};
 pub use di::Container;
 pub use diagnostics::{

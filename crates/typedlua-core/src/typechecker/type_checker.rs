@@ -33,6 +33,8 @@ pub struct TypeChecker<'a> {
     current_module_id: Option<crate::module_resolver::ModuleId>,
     /// Module resolver for imports
     module_resolver: Option<Arc<crate::module_resolver::ModuleResolver>>,
+    /// Track module dependencies for cache invalidation
+    module_dependencies: Vec<std::path::PathBuf>,
     /// Stack of whether we're inside a catch block (for rethrow validation)
     in_catch_block: Vec<bool>,
     /// Current namespace path for this module
@@ -58,6 +60,7 @@ impl<'a> TypeChecker<'a> {
             module_registry: None,
             current_module_id: None,
             module_resolver: None,
+            module_dependencies: Vec::new(),
             in_catch_block: Vec::new(),
             current_namespace: None,
             diagnostic_handler,
@@ -2828,65 +2831,47 @@ impl<'a> TypeChecker<'a> {
 
     /// Resolve the type of an imported symbol from the source module
     fn resolve_import_type(
-        &self,
+        &mut self,
         source: &str,
         symbol_name: &str,
         span: Span,
     ) -> Result<Type, TypeCheckError> {
-        eprintln!(
-            "DEBUG: resolve_import_type called for '{}' from '{}'",
-            symbol_name, source
-        );
-        eprintln!("DEBUG: current_module_id: {:?}", self.current_module_id);
-
         // If we have module support, try to resolve from the source module
         if let (Some(registry), Some(resolver), Some(current_id)) = (
             &self.module_registry,
             &self.module_resolver,
             &self.current_module_id,
         ) {
-            eprintln!("DEBUG: Have registry, resolver, and current_id");
             match resolver.resolve(source, current_id.path()) {
                 Ok(source_module_id) => {
-                    eprintln!(
-                        "DEBUG: Resolved source '{}' to module: {:?}",
-                        source, source_module_id
-                    );
+                    // Track this dependency for cache invalidation
+                    self.module_dependencies
+                        .push(source_module_id.path().to_path_buf());
+
                     match registry.get_exports(&source_module_id) {
                         Ok(source_exports) => {
-                            eprintln!(
-                                "DEBUG: Source module has {} exports",
-                                source_exports.named.len()
-                            );
                             if let Some(exported_sym) = source_exports.get_named(symbol_name) {
-                                eprintln!(
-                                    "DEBUG: Found symbol '{}' in source exports, type: {:?}",
-                                    symbol_name, exported_sym.symbol.typ
-                                );
                                 return Ok(exported_sym.symbol.typ.clone());
-                            } else {
-                                eprintln!(
-                                    "DEBUG: Symbol '{}' not found in source exports",
-                                    symbol_name
-                                );
                             }
                         }
-                        Err(e) => {
-                            eprintln!("DEBUG: Failed to get exports: {:?}", e);
+                        Err(_) => {
+                            // Module exists but exports not available yet
                         }
                     }
                 }
-                Err(e) => {
-                    eprintln!("DEBUG: Failed to resolve source '{}': {:?}", source, e);
+                Err(_) => {
+                    // Import resolution failed - will be reported as error elsewhere
                 }
             }
-        } else {
-            eprintln!("DEBUG: Missing registry, resolver, or current_id");
         }
 
         // Fallback: return Unknown type
-        eprintln!("DEBUG: Falling back to Unknown type for '{}'", symbol_name);
         Ok(Type::new(TypeKind::Primitive(PrimitiveType::Unknown), span))
+    }
+
+    /// Get the list of module dependencies tracked during type checking
+    pub fn get_module_dependencies(&self) -> &[std::path::PathBuf] {
+        &self.module_dependencies
     }
 
     fn check_namespace_declaration(

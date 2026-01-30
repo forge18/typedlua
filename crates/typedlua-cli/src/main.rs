@@ -1,6 +1,6 @@
 use clap::Parser;
 use std::path::{Path, PathBuf};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use tracing_subscriber::EnvFilter;
 
 /// TypedLua - A TypeScript-inspired type system for Lua
@@ -59,6 +59,38 @@ struct Cli {
     /// Disable incremental compilation cache
     #[arg(long)]
     no_cache: bool,
+
+    /// Disable strict null checks
+    #[arg(long)]
+    no_strict_null_checks: bool,
+
+    /// Strict naming convention enforcement (error, warning, off)
+    #[arg(long, value_name = "LEVEL")]
+    strict_naming: Option<String>,
+
+    /// Disallow implicit unknown types
+    #[arg(long)]
+    no_implicit_unknown: bool,
+
+    /// Enable decorator syntax (default: true)
+    #[arg(long)]
+    enable_decorators: bool,
+
+    /// Module code generation mode (require, bundle)
+    #[arg(long, value_name = "MODE")]
+    module_mode: Option<String>,
+
+    /// Module search paths (comma-separated)
+    #[arg(long, value_name = "PATHS")]
+    module_paths: Option<String>,
+
+    /// Enforce namespace declarations match file paths
+    #[arg(long)]
+    enforce_namespace_path: bool,
+
+    /// Copy plain .lua files to output directory
+    #[arg(long)]
+    copy_lua_to_output: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -112,6 +144,7 @@ fn main() -> anyhow::Result<()> {
     resolved_cli.source_map = config.compiler_options.source_map;
     resolved_cli.no_emit = config.compiler_options.no_emit;
     resolved_cli.pretty = config.compiler_options.pretty;
+    resolved_cli.copy_lua_to_output = config.compiler_options.copy_lua_to_output;
 
     if cli.watch {
         watch_mode(resolved_cli)?;
@@ -246,6 +279,36 @@ fn load_config_and_files(
         overrides.no_emit = Some(true);
     }
 
+    // Override type checking options
+    if cli.no_strict_null_checks {
+        overrides.strict_null_checks = Some(false);
+    }
+    if let Some(ref naming) = cli.strict_naming {
+        overrides.strict_naming = Some(match naming.as_str() {
+            "error" => typedlua_core::config::StrictLevel::Error,
+            "warning" => typedlua_core::config::StrictLevel::Warning,
+            "off" => typedlua_core::config::StrictLevel::Off,
+            _ => typedlua_core::config::StrictLevel::Error,
+        });
+    }
+    if cli.no_implicit_unknown {
+        overrides.no_implicit_unknown = Some(true);
+    }
+
+    // Override module options
+    overrides.enable_decorators = Some(cli.enable_decorators);
+    if let Some(ref mode) = cli.module_mode {
+        overrides.module_mode = Some(match mode.as_str() {
+            "bundle" => typedlua_core::config::ModuleMode::Bundle,
+            _ => typedlua_core::config::ModuleMode::Require,
+        });
+    }
+    if let Some(ref paths) = cli.module_paths {
+        overrides.module_paths = Some(paths.split(',').map(|s| s.to_string()).collect());
+    }
+    overrides.enforce_namespace_path = Some(cli.enforce_namespace_path);
+    overrides.copy_lua_to_output = Some(cli.copy_lua_to_output);
+
     // Merge CLI overrides into config
     config.merge(&overrides);
 
@@ -273,7 +336,8 @@ struct CompilationOutput {
     source_map: Option<typedlua_core::codegen::SourceMap>,
     output_path: PathBuf,
     /// Module to save to cache after compilation (stale files only)
-    cache_entry: Option<(PathBuf, typedlua_core::cache::CachedModule)>,
+    /// Tuple of (path, cached_module, dependencies)
+    cache_entry: Option<(PathBuf, typedlua_core::cache::CachedModule, Vec<PathBuf>)>,
 }
 
 struct CompilationError {
@@ -288,18 +352,21 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
     use std::collections::HashMap;
     use std::sync::Arc;
     use typedlua_core::cache::{CacheManager, CachedModule};
-    use typedlua_core::codegen::CodeGenerator;
-    use typedlua_core::config::CompilerOptions;
+    use typedlua_core::codegen::CodeGeneratorBuilder;
+    use typedlua_core::config::{CompilerConfig, CompilerOptions};
     use typedlua_core::diagnostics::{CollectingDiagnosticHandler, DiagnosticHandler};
-    use typedlua_core::module_resolver::{ModuleId, ModuleRegistry};
+
+    use typedlua_core::module_resolver::{ModuleConfig, ModuleId, ModuleRegistry, ModuleResolver};
     use typedlua_parser::lexer::Lexer;
     use typedlua_parser::parser::Parser;
     use typedlua_parser::string_interner::StringInterner;
 
     info!("Compiling {} file(s)...", cli.files.len());
 
-    // --- Cache setup ---
+    // --- DI Container setup ---
     let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let compiler_config = CompilerConfig::default();
+    let container = typedlua_core::di::Container::new(compiler_config);
     let use_cache = !cli.no_cache;
 
     // Determine which files need recompilation
@@ -323,7 +390,9 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
         // Pre-load cached modules for non-stale files
         let mut loaded = HashMap::new();
         for file_path in &cli.files {
-            let canonical = file_path.canonicalize().unwrap_or_else(|_| file_path.clone());
+            let canonical = file_path
+                .canonicalize()
+                .unwrap_or_else(|_| file_path.clone());
             if !stale_files.contains(&canonical) {
                 if let Ok(Some(cached)) = cache_manager.get_cached_module(&canonical) {
                     loaded.insert(canonical, cached);
@@ -352,17 +421,24 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
         cached_modules = HashMap::new();
     }
 
-    // --- Module registry for cross-file type resolution ---
+    // --- Module registry and resolver for cross-file type resolution ---
     let registry = Arc::new(ModuleRegistry::new());
+
+    // Create module resolver using FileSystem from DI Container
+    let module_config =
+        ModuleConfig::from_compiler_options(&CompilerOptions::default(), &project_root);
+    let resolver = Arc::new(ModuleResolver::new(
+        container.file_system().clone(),
+        module_config,
+        project_root.clone(),
+    ));
 
     // Pre-populate registry with cached exports for non-stale files
     for (canonical, cached) in &cached_modules {
         let module_id = ModuleId::new(canonical.clone());
-        let symbol_table = Arc::new(
-            typedlua_core::typechecker::SymbolTable::from_serializable(
-                cached.symbol_table.clone(),
-            ),
-        );
+        let symbol_table = Arc::new(typedlua_core::typechecker::SymbolTable::from_serializable(
+            cached.symbol_table.clone(),
+        ));
         registry.register_from_cache(module_id, cached.exports.clone(), symbol_table);
     }
 
@@ -371,7 +447,9 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
         .files
         .par_iter()
         .map(|file_path| {
-            let canonical = file_path.canonicalize().unwrap_or_else(|_| file_path.clone());
+            let canonical = file_path
+                .canonicalize()
+                .unwrap_or_else(|_| file_path.clone());
             let is_stale = stale_files.contains(&canonical);
 
             // --- Cache hit: use cached AST, skip parse + type check ---
@@ -392,15 +470,17 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
                     }
 
                     // Reconstruct interner from cached strings
-                    let interner =
-                        std::rc::Rc::new(StringInterner::from_strings(cached.interner_strings.clone()));
+                    let interner = std::rc::Rc::new(StringInterner::from_strings(
+                        cached.interner_strings.clone(),
+                    ));
                     let mut program = cached.ast.clone();
 
-                    let mut generator = CodeGenerator::new(interner).with_target(target);
+                    // Use CodeGeneratorBuilder for fluent configuration
+                    let mut builder = CodeGeneratorBuilder::new(interner).target(target);
                     if cli.source_map || cli.inline_source_map {
-                        generator =
-                            generator.with_source_map(file_path.to_string_lossy().to_string());
+                        builder = builder.source_map(file_path.to_string_lossy().to_string());
                     }
+                    let mut generator = builder.build();
 
                     let lua_code = generator.generate(&mut program);
 
@@ -422,8 +502,8 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
             // --- Cache miss: full compilation ---
             debug!("Compiling {:?}...", file_path);
 
-            // Read input file
-            let source = match std::fs::read_to_string(file_path) {
+            // Read input file using FileSystem abstraction from DI Container
+            let source = match container.file_system().read_file(file_path) {
                 Ok(s) => s,
                 Err(e) => {
                     return CompilationResult {
@@ -487,7 +567,15 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
             // Type check the program (with module support for import resolution)
             use typedlua_core::typechecker::TypeChecker;
 
-            let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids);
+            let module_id = ModuleId::new(canonical.clone());
+            let mut type_checker = TypeChecker::new_with_module_support(
+                handler.clone(),
+                &interner,
+                &common_ids,
+                registry.clone(),
+                module_id.clone(),
+                resolver.clone(),
+            );
 
             if type_checker.check_program(&mut program).is_err() {
                 return CompilationResult {
@@ -512,22 +600,29 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
 
             // Register exports in shared registry for other files
             let exports = type_checker.extract_exports(&program);
-            let module_id = ModuleId::new(canonical.clone());
             let serializable_st = type_checker.symbol_table().to_serializable();
-            let symbol_table_arc = Arc::new(typedlua_core::SymbolTable::from_serializable(serializable_st.clone()));
-            registry.register_from_cache(module_id, exports.clone(), symbol_table_arc);
+            let symbol_table_arc = Arc::new(typedlua_core::SymbolTable::from_serializable(
+                serializable_st.clone(),
+            ));
+            registry.register_from_cache(module_id.clone(), exports.clone(), symbol_table_arc);
 
             // Build cache entry to save after parallel section
             let cache_entry = if use_cache {
+                // Get dependencies for cache invalidation
+                let dependencies: Vec<PathBuf> = type_checker.get_module_dependencies().to_vec();
+
                 Some((
                     canonical,
                     CachedModule::new(
-                        file_path.canonicalize().unwrap_or_else(|_| file_path.clone()),
+                        file_path
+                            .canonicalize()
+                            .unwrap_or_else(|_| file_path.clone()),
                         program.clone(),
                         exports,
                         type_checker.symbol_table().to_serializable(),
                         interner.to_strings(),
                     ),
+                    dependencies,
                 ))
             } else {
                 None
@@ -546,12 +641,14 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
                 };
             }
 
-            let mut generator = CodeGenerator::new(interner.clone()).with_target(target);
+            // Use CodeGeneratorBuilder for fluent configuration
+            let mut builder = CodeGeneratorBuilder::new(interner.clone()).target(target);
 
             if cli.source_map || cli.inline_source_map {
-                generator = generator.with_source_map(file_path.to_string_lossy().to_string());
+                builder = builder.source_map(file_path.to_string_lossy().to_string());
             }
 
+            let mut generator = builder.build();
             let lua_code = generator.generate(&mut program);
 
             let output_path = determine_output_path(file_path, &cli);
@@ -580,8 +677,11 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
 
             for result in &results {
                 if let Ok(output) = &result.result {
-                    if let Some((ref path, ref cached_module)) = output.cache_entry {
-                        let _ = cache_manager.save_module(path, cached_module, vec![]);
+                    if let Some((ref path, ref cached_module, ref dependencies)) =
+                        output.cache_entry
+                    {
+                        let _ =
+                            cache_manager.save_module(path, cached_module, dependencies.clone());
                     }
                 }
             }
@@ -627,6 +727,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
                         &error.source,
                         &result.file_path,
                         cli.pretty,
+                        cli.diagnostics,
                     );
                 }
             }
@@ -637,7 +738,62 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
         std::process::exit(1);
     }
 
+    // Copy plain .lua files to output directory if requested
+    if cli.copy_lua_to_output && !cli.no_emit {
+        copy_lua_files_to_output(&cli)?;
+    }
+
     info!("Compilation completed successfully!");
+
+    Ok(())
+}
+
+/// Copy plain .lua files to the output directory
+fn copy_lua_files_to_output(cli: &Cli) -> anyhow::Result<()> {
+    use std::fs;
+    use walkdir::WalkDir;
+
+    let out_dir = cli.out_dir.clone().unwrap_or_else(|| PathBuf::from("."));
+
+    info!("Copying .lua files to output directory: {:?}", out_dir);
+
+    // Walk the current directory looking for .lua files
+    for entry in WalkDir::new(".")
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        let path = entry.path();
+
+        // Skip if not a .lua file
+        if !path.extension().map(|e| e == "lua").unwrap_or(false) {
+            continue;
+        }
+
+        // Skip files in node_modules, .git, etc.
+        let path_str = path.to_string_lossy();
+        if path_str.contains("node_modules")
+            || path_str.contains(".git")
+            || path_str.contains(".typed-lua-cache")
+            || path_str.contains("target")
+        {
+            continue;
+        }
+
+        // Determine output path
+        let file_name = path.file_name().unwrap_or_default();
+        let output_path = out_dir.join(file_name);
+
+        // Copy the file
+        match fs::copy(path, &output_path) {
+            Ok(_) => {
+                info!("Copied: {:?} -> {:?}", path, output_path);
+            }
+            Err(e) => {
+                warn!("Failed to copy {:?}: {}", path, e);
+            }
+        }
+    }
 
     Ok(())
 }
@@ -664,6 +820,7 @@ fn print_diagnostics_from_vec(
     source: &str,
     file_path: &Path,
     pretty: bool,
+    show_codes: bool,
 ) {
     use typedlua_core::diagnostics::DiagnosticLevel;
 
@@ -674,6 +831,17 @@ fn print_diagnostics_from_vec(
     let file_name = file_path.to_string_lossy();
 
     for diagnostic in diagnostics {
+        // Format diagnostic code if present and requested
+        let code_str = if show_codes {
+            diagnostic
+                .code
+                .as_ref()
+                .map(|c| format!(" [{}]", c.as_str()))
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+
         if pretty {
             // Pretty format with colors and context
             let severity_str = match diagnostic.level {
@@ -683,12 +851,13 @@ fn print_diagnostics_from_vec(
             };
 
             eprintln!(
-                "\n{} [{}:{}:{}]: {}",
+                "\n{} [{}:{}:{}]: {}{}",
                 severity_str,
                 file_name,
                 diagnostic.span.line,
                 diagnostic.span.column,
-                diagnostic.message
+                diagnostic.message,
+                code_str
             );
 
             // Show the source line with a caret pointing to the error
@@ -710,12 +879,13 @@ fn print_diagnostics_from_vec(
             };
 
             eprintln!(
-                "{}:{}:{}: {}: {}",
+                "{}:{}:{}: {}: {}{}",
                 file_name,
                 diagnostic.span.line,
                 diagnostic.span.column,
                 severity_str,
-                diagnostic.message
+                diagnostic.message,
+                code_str
             );
         }
     }
