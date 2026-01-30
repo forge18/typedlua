@@ -1335,6 +1335,7 @@ dependencies = [
  "notify",
  "predicates",
  "rayon",
+ "rustc-hash 2.1.1",
  "serde_json",
  "tempfile",
  "tracing",

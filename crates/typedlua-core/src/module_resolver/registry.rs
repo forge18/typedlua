@@ -96,6 +96,25 @@ impl ModuleRegistry {
         }
     }
 
+    /// Pre-populate registry from cached module data.
+    /// Used at startup to load type info for unchanged files so that
+    /// other files can resolve imports without re-type-checking.
+    pub fn register_from_cache(
+        &self,
+        id: ModuleId,
+        exports: ModuleExports,
+        symbol_table: Arc<SymbolTable>,
+    ) {
+        let module = CompiledModule {
+            id: id.clone(),
+            ast: Arc::new(Program::new(vec![], Default::default())),
+            exports,
+            symbol_table,
+            status: ModuleStatus::TypeChecked,
+        };
+        self.modules.write().unwrap().insert(id, module);
+    }
+
     /// Register a parsed module (before type checking)
     pub fn register_parsed(&self, id: ModuleId, ast: Arc<Program>, symbol_table: Arc<SymbolTable>) {
         let module = CompiledModule {

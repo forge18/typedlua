@@ -20,6 +20,10 @@ pub struct CachedModule {
 
     /// Symbol table (flattened for serialization)
     pub symbol_table: SerializableSymbolTable,
+
+    /// Interned string table — needed to reconstruct a StringInterner
+    /// so that StringId values in the cached AST resolve correctly.
+    pub interner_strings: Vec<String>,
 }
 
 impl CachedModule {
@@ -29,12 +33,14 @@ impl CachedModule {
         ast: Program,
         exports: ModuleExports,
         symbol_table: SerializableSymbolTable,
+        interner_strings: Vec<String>,
     ) -> Self {
         Self {
             path,
             ast,
             exports,
             symbol_table,
+            interner_strings,
         }
     }
 
@@ -73,6 +79,7 @@ mod tests {
             make_test_program(),
             ModuleExports::new(),
             SerializableSymbolTable { symbols: vec![] },
+            vec![],
         );
 
         let bytes = module.to_bytes().unwrap();
@@ -88,6 +95,7 @@ mod tests {
             make_test_program(),
             ModuleExports::new(),
             SerializableSymbolTable { symbols: vec![] },
+            vec![],
         );
 
         let hash1 = module.compute_hash();

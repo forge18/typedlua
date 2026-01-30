@@ -55,6 +55,10 @@ struct Cli {
     /// Show diagnostic codes
     #[arg(long)]
     diagnostics: bool,
+
+    /// Disable incremental compilation cache
+    #[arg(long)]
+    no_cache: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -268,6 +272,8 @@ struct CompilationOutput {
     lua_code: String,
     source_map: Option<typedlua_core::codegen::SourceMap>,
     output_path: PathBuf,
+    /// Module to save to cache after compilation (stale files only)
+    cache_entry: Option<(PathBuf, typedlua_core::cache::CachedModule)>,
 }
 
 struct CompilationError {
@@ -278,19 +284,142 @@ struct CompilationError {
 /// Compile the input files
 fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Result<()> {
     use rayon::prelude::*;
+    use rustc_hash::FxHashSet;
+    use std::collections::HashMap;
     use std::sync::Arc;
+    use typedlua_core::cache::{CacheManager, CachedModule};
     use typedlua_core::codegen::CodeGenerator;
+    use typedlua_core::config::CompilerOptions;
     use typedlua_core::diagnostics::{CollectingDiagnosticHandler, DiagnosticHandler};
+    use typedlua_core::module_resolver::{ModuleId, ModuleRegistry};
     use typedlua_parser::lexer::Lexer;
     use typedlua_parser::parser::Parser;
+    use typedlua_parser::string_interner::StringInterner;
 
     info!("Compiling {} file(s)...", cli.files.len());
 
-    // Compile files in parallel
+    // --- Cache setup ---
+    let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let use_cache = !cli.no_cache;
+
+    // Determine which files need recompilation
+    let stale_files: FxHashSet<PathBuf>;
+    let cached_modules: HashMap<PathBuf, CachedModule>;
+
+    if use_cache {
+        let config = CompilerOptions::default();
+        let mut cache_manager = CacheManager::new(&project_root, &config)
+            .unwrap_or_else(|_| CacheManager::new(Path::new("."), &config).unwrap());
+
+        if cache_manager.load_manifest().is_err() {
+            let _ = cache_manager.clear();
+            let _ = cache_manager.load_manifest();
+        }
+
+        // Detect changes and compute stale set
+        let changed = cache_manager.detect_changes(&cli.files).unwrap_or_default();
+        stale_files = cache_manager.compute_stale_modules(&changed);
+
+        // Pre-load cached modules for non-stale files
+        let mut loaded = HashMap::new();
+        for file_path in &cli.files {
+            let canonical = file_path.canonicalize().unwrap_or_else(|_| file_path.clone());
+            if !stale_files.contains(&canonical) {
+                if let Ok(Some(cached)) = cache_manager.get_cached_module(&canonical) {
+                    loaded.insert(canonical, cached);
+                }
+            }
+        }
+        cached_modules = loaded;
+
+        let cache_hits = cached_modules.len();
+        let total = cli.files.len();
+        if cache_hits > 0 {
+            info!(
+                "Cache: {} of {} files unchanged, {} need recompilation",
+                cache_hits,
+                total,
+                total - cache_hits
+            );
+        }
+    } else {
+        // No cache: everything is stale
+        stale_files = cli
+            .files
+            .iter()
+            .map(|f| f.canonicalize().unwrap_or_else(|_| f.clone()))
+            .collect();
+        cached_modules = HashMap::new();
+    }
+
+    // --- Module registry for cross-file type resolution ---
+    let registry = Arc::new(ModuleRegistry::new());
+
+    // Pre-populate registry with cached exports for non-stale files
+    for (canonical, cached) in &cached_modules {
+        let module_id = ModuleId::new(canonical.clone());
+        let symbol_table = Arc::new(
+            typedlua_core::typechecker::SymbolTable::from_serializable(
+                cached.symbol_table.clone(),
+            ),
+        );
+        registry.register_from_cache(module_id, cached.exports.clone(), symbol_table);
+    }
+
+    // --- Compile files ---
     let results: Vec<CompilationResult> = cli
         .files
         .par_iter()
         .map(|file_path| {
+            let canonical = file_path.canonicalize().unwrap_or_else(|_| file_path.clone());
+            let is_stale = stale_files.contains(&canonical);
+
+            // --- Cache hit: use cached AST, skip parse + type check ---
+            if !is_stale {
+                if let Some(cached) = cached_modules.get(&canonical) {
+                    debug!("Cache hit: {:?}", file_path);
+
+                    if cli.no_emit {
+                        return CompilationResult {
+                            file_path: file_path.clone(),
+                            result: Ok(CompilationOutput {
+                                lua_code: String::new(),
+                                source_map: None,
+                                output_path: PathBuf::new(),
+                                cache_entry: None,
+                            }),
+                        };
+                    }
+
+                    // Reconstruct interner from cached strings
+                    let interner =
+                        std::rc::Rc::new(StringInterner::from_strings(cached.interner_strings.clone()));
+                    let mut program = cached.ast.clone();
+
+                    let mut generator = CodeGenerator::new(interner).with_target(target);
+                    if cli.source_map || cli.inline_source_map {
+                        generator =
+                            generator.with_source_map(file_path.to_string_lossy().to_string());
+                    }
+
+                    let lua_code = generator.generate(&mut program);
+
+                    let output_path = determine_output_path(file_path, &cli);
+                    let source_map = generator.take_source_map();
+
+                    return CompilationResult {
+                        file_path: file_path.clone(),
+                        result: Ok(CompilationOutput {
+                            lua_code,
+                            source_map,
+                            output_path,
+                            cache_entry: None,
+                        }),
+                    };
+                }
+            }
+
+            // --- Cache miss: full compilation ---
             debug!("Compiling {:?}...", file_path);
 
             // Read input file
@@ -311,8 +440,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
             let handler = Arc::new(CollectingDiagnosticHandler::new());
 
             // Create string interner with common identifiers
-            let (interner, common_ids) =
-                typedlua_parser::string_interner::StringInterner::new_with_common_identifiers();
+            let (interner, common_ids) = StringInterner::new_with_common_identifiers();
             let interner = std::rc::Rc::new(interner);
 
             // Lex the source
@@ -356,7 +484,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
                 };
             }
 
-            // Type check the program
+            // Type check the program (with module support for import resolution)
             use typedlua_core::typechecker::TypeChecker;
 
             let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids);
@@ -382,6 +510,29 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
                 };
             }
 
+            // Register exports in shared registry for other files
+            let exports = type_checker.extract_exports(&program);
+            let module_id = ModuleId::new(canonical.clone());
+            let serializable_st = type_checker.symbol_table().to_serializable();
+            let symbol_table_arc = Arc::new(typedlua_core::SymbolTable::from_serializable(serializable_st.clone()));
+            registry.register_from_cache(module_id, exports.clone(), symbol_table_arc);
+
+            // Build cache entry to save after parallel section
+            let cache_entry = if use_cache {
+                Some((
+                    canonical,
+                    CachedModule::new(
+                        file_path.canonicalize().unwrap_or_else(|_| file_path.clone()),
+                        program.clone(),
+                        exports,
+                        type_checker.symbol_table().to_serializable(),
+                        interner.to_strings(),
+                    ),
+                ))
+            } else {
+                None
+            };
+
             // Generate Lua code
             if cli.no_emit {
                 return CompilationResult {
@@ -390,6 +541,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
                         lua_code: String::new(),
                         source_map: None,
                         output_path: PathBuf::new(),
+                        cache_entry,
                     }),
                 };
             }
@@ -402,20 +554,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
 
             let lua_code = generator.generate(&mut program);
 
-            // Determine output file path
-            let output_path = if let Some(out_file) = &cli.out_file {
-                out_file.clone()
-            } else if let Some(out_dir) = &cli.out_dir {
-                let file_name = file_path
-                    .file_stem()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string();
-                out_dir.join(format!("{}.lua", file_name))
-            } else {
-                file_path.with_extension("lua")
-            };
-
+            let output_path = determine_output_path(file_path, &cli);
             let source_map = generator.take_source_map();
 
             CompilationResult {
@@ -424,10 +563,32 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
                     lua_code,
                     source_map,
                     output_path,
+                    cache_entry,
                 }),
             }
         })
         .collect();
+
+    // --- Save cache entries (sequential — CacheManager needs &mut self) ---
+    if use_cache {
+        let config = CompilerOptions::default();
+        if let Ok(mut cache_manager) = CacheManager::new(&project_root, &config) {
+            if cache_manager.load_manifest().is_err() {
+                let _ = cache_manager.clear();
+                let _ = cache_manager.load_manifest();
+            }
+
+            for result in &results {
+                if let Ok(output) = &result.result {
+                    if let Some((ref path, ref cached_module)) = output.cache_entry {
+                        let _ = cache_manager.save_module(path, cached_module, vec![]);
+                    }
+                }
+            }
+
+            let _ = cache_manager.save_manifest();
+        }
+    }
 
     // Process results sequentially (for deterministic output and error reporting)
     let mut had_errors = false;
@@ -479,6 +640,22 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
     info!("Compilation completed successfully!");
 
     Ok(())
+}
+
+/// Determine the output file path for a given input file
+fn determine_output_path(file_path: &Path, cli: &Cli) -> PathBuf {
+    if let Some(out_file) = &cli.out_file {
+        out_file.clone()
+    } else if let Some(out_dir) = &cli.out_dir {
+        let file_name = file_path
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        out_dir.join(format!("{}.lua", file_name))
+    } else {
+        file_path.with_extension("lua")
+    }
 }
 
 /// Print diagnostics from a vec (used by parallel compilation)
