@@ -124,8 +124,19 @@ impl<'a> TypeChecker<'a> {
 
         // Get stdlib files for the target version
         let stdlib_files = stdlib::get_all_stdlib(self.options.target);
+        eprintln!(
+            "DEBUG: Loading stdlib for {:?}, found {} files",
+            self.options.target,
+            stdlib_files.len()
+        );
 
         for (filename, source) in stdlib_files {
+            eprintln!(
+                "DEBUG: Processing stdlib file: {} ({} bytes)",
+                filename,
+                source.len()
+            );
+
             // Parse the stdlib file
             let handler = Arc::new(crate::diagnostics::CollectingDiagnosticHandler::new());
             let mut lexer = Lexer::new(source, handler.clone(), self.interner);
@@ -141,12 +152,32 @@ impl<'a> TypeChecker<'a> {
             }
 
             let mut program = program.unwrap();
+            eprintln!(
+                "DEBUG: Parsed {} statements from {}",
+                program.statements.len(),
+                filename
+            );
+
+            // Check for parser errors
+            let diagnostics = handler.get_diagnostics();
+            for diag in diagnostics.iter() {
+                eprintln!(
+                    "DEBUG: Parser diagnostic: {:?} - {}",
+                    diag.level, diag.message
+                );
+            }
 
             // Process declarations from the stdlib
             // Only process declaration statements - these populate the type environment
-            for statement in program.statements.iter_mut() {
+            for (i, statement) in program.statements.iter_mut().enumerate() {
+                eprintln!("DEBUG: Processing statement {} from {}", i, filename);
                 // Ignore errors from stdlib - we just want to populate the type environment
-                let _ = self.check_statement(statement);
+                if let Err(e) = self.check_statement(statement) {
+                    eprintln!(
+                        "DEBUG: Error processing statement {} from {}: {}",
+                        i, filename, e.message
+                    );
+                }
             }
         }
 
@@ -2446,12 +2477,24 @@ impl<'a> TypeChecker<'a> {
         &mut self,
         ns: &DeclareNamespaceStatement,
     ) -> Result<(), TypeCheckError> {
+        let ns_name = self.interner.resolve(ns.name.node).to_string();
+        eprintln!(
+            "DEBUG: Registering namespace '{}' with {} members",
+            ns_name,
+            ns.members.len()
+        );
+
         // Create object type from namespace members
         let members: Vec<_> = ns
             .members
             .iter()
             .filter_map(|member| match member {
                 Statement::DeclareFunction(func) if func.is_export => {
+                    let func_name = self.interner.resolve(func.name.node).to_string();
+                    eprintln!(
+                        "DEBUG: Adding function '{}' to namespace '{}'",
+                        func_name, ns_name
+                    );
                     // Add as method to the namespace object
                     Some(ObjectTypeMember::Method(MethodSignature {
                         name: func.name.clone(),
@@ -2463,6 +2506,11 @@ impl<'a> TypeChecker<'a> {
                     }))
                 }
                 Statement::DeclareConst(const_decl) if const_decl.is_export => {
+                    let const_name = self.interner.resolve(const_decl.name.node).to_string();
+                    eprintln!(
+                        "DEBUG: Adding const '{}' to namespace '{}'",
+                        const_name, ns_name
+                    );
                     // Add as property to the namespace object
                     Some(ObjectTypeMember::Property(PropertySignature {
                         is_readonly: true, // Constants are readonly

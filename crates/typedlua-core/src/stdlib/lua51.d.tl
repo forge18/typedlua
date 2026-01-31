@@ -54,7 +54,7 @@ declare namespace string {
   -- @param s The string to search in
   -- @param pattern The pattern to match
   -- @returns Iterator function
-  export function gmatch(s: string, pattern: string): () => ...string[]
+  export function gmatch(s: string, pattern: string): () -> ...string[]
 
   ---
   -- Substitutes pattern matches with replacement.
@@ -63,7 +63,7 @@ declare namespace string {
   -- @param repl Replacement string, table, or function
   -- @param n Optional max number of substitutions
   -- @returns Modified string and number of substitutions made
-  export function gsub(s: string, pattern: string, repl: string | table | ((match: string) => string), n?: number): (string, number)
+  export function gsub(s: string, pattern: string, repl: string | table | ((match: string) -> string), n?: number): (string, number)
 
   ---
   -- Reverses a string.
@@ -133,7 +133,7 @@ declare namespace table {
   -- Sorts table elements in place.
   -- @param list The table to sort
   -- @param comp Optional comparison function (default: <)
-  export function sort<T>(list: T[], comp?: (a: T, b: T) => boolean): void
+  export function sort<T>(list: T[], comp?: (a: T, b: T) -> boolean): void
 
   ---
   -- Returns the maximum numeric index.
@@ -147,14 +147,14 @@ declare namespace table {
   -- Deprecated in Lua 5.2+.
   -- @param table The table to iterate
   -- @param func Function to call for each element
-  export function foreach<K, V>(table: { [K]: V }, func: (key: K, value: V) => void): void
+  export function foreach<K, V>(table: { [K]: V }, func: (key: K, value: V) -> void): void
 
   ---
   -- Executes a function for each numeric index.
   -- Deprecated in Lua 5.2+.
   -- @param table The table to iterate
   -- @param func Function to call for each element
-  export function foreachi<T>(table: T[], func: (index: number, value: T) => void): void
+  export function foreachi<T>(table: T[], func: (index: number, value: T) -> void): void
 }
 
 -- ============================================================================
@@ -304,7 +304,7 @@ declare interface File {
 
   ---
   -- Returns an iterator for reading lines.
-  lines(): () => Nullable<string>
+  lines(): () -> Nullable<string>
 
   ---
   -- Reads from file according to format.
@@ -354,7 +354,7 @@ declare namespace io {
 
   ---
   -- Returns an iterator for reading lines from a file.
-  export function lines(filename?: string): () => Nullable<string>
+  export function lines(filename?: string): () -> Nullable<string>
 
   ---
   -- Reads from default input.
@@ -493,7 +493,7 @@ declare namespace coroutine {
 
   ---
   -- Creates a coroutine and returns a function to resume it.
-  export function wrap(func: callable): (...args: unknown[]) => ...unknown[]
+  export function wrap(func: callable): (...args: unknown[]) -> ...unknown[]
 
   ---
   -- Suspends the current coroutine.

@@ -2344,6 +2344,7 @@ fuzz/
 - [ ] Find any code that isn't "wired up"
 - [ ] Update comments to follow best practices
 - [ ] Remove dead code
+- [ ] Remove unnecessary debug loggin
 - [ ] Identify any unimplemented features
 - [ ] Ensure long functions are broken down for cognitive load
 - [ ] Ensure proper tracing is setup in all critical paths with our zero cost tracing

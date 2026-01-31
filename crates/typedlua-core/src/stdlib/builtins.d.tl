@@ -63,14 +63,14 @@ declare function rawlen(value: string | table): number
 -- Returns an iterator function for generic for loops.
 -- @param table The table to iterate
 -- @returns Iterator function, table, and starting key
-declare function pairs<K, V>(table: { [K]: V }): ((table: { [K]: V }, key?: K) => (Nullable<K>, Nullable<V>), { [K]: V }, nil)
+declare function pairs<K, V>(table: { [K]: V }): ((table: { [K]: V }, key?: K) -> (Nullable<K>, Nullable<V>), { [K]: V }, nil)
 
 ---
 -- Returns an iterator function for sequential integer keys.
 -- Iterates from index 1 to the table length.
 -- @param table The table to iterate
 -- @returns Iterator function, table, and starting index
-declare function ipairs<V>(table: V[]): ((table: V[], index: number) => (Nullable<number>, Nullable<V>), V[], 0)
+declare function ipairs<V>(table: V[]): ((table: V[], index: number) -> (Nullable<number>, Nullable<V>), V[], 0)
 
 ---
 -- Returns the next key-value pair in a table.
@@ -134,11 +134,11 @@ declare function select<T>(index: number | "#", ...args: T[]): ...T[] | number
 -- @param env Optional environment table
 -- @returns Compiled function or nil, plus error message
 declare function load(
-    chunk: string | (() => Nullable<string>),
+    chunk: string | (() -> Nullable<string>),
     chunkname?: string,
     mode?: "t" | "b" | "bt",
     env?: table
-): (Nullable<() => unknown>, Nullable<string>)
+): (Nullable<() -> unknown>, Nullable<string>)
 
 ---
 -- Loads a chunk from a file.
@@ -150,7 +150,7 @@ declare function loadfile(
     filename?: string,
     mode?: "t" | "b" | "bt",
     env?: table
-): (Nullable<() => unknown>, Nullable<string>)
+): (Nullable<() -> unknown>, Nullable<string>)
 
 ---
 -- Loads and executes a Lua file.
@@ -173,7 +173,7 @@ declare function loadstring(code: string): ...unknown
 -- @param ...args Arguments to pass to the function
 -- @returns Success status, then results or error message
 declare function pcall<T extends unknown[], R extends unknown[]>(
-    func: (...args: T) => ...R,
+    func: (...args: T) -> ...R,
     ...args: T
 ): (true, ...R) | (false, string)
 
@@ -184,8 +184,8 @@ declare function pcall<T extends unknown[], R extends unknown[]>(
 -- @param ...args Arguments to pass to the function
 -- @returns Results from func, or results from errorHandler
 declare function xpcall<T extends unknown[], R extends unknown[]>(
-    func: (...args: T) => ...R,
-    errorHandler: (error: unknown) => unknown,
+    func: (...args: T) -> ...R,
+    errorHandler: (error: unknown) -> unknown,
     ...args: T
 ): ...unknown
 

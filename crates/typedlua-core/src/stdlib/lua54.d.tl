@@ -32,11 +32,11 @@ declare namespace string {
 
   ---
   -- Returns an iterator for pattern matches.
-  export function gmatch(s: string, pattern: string): () => ...string[]
+  export function gmatch(s: string, pattern: string): () -> ...string[]
 
   ---
   -- Substitutes pattern matches with replacement.
-  export function gsub(s: string, pattern: string, repl: string | table | ((match: string) => string), n?: number): (string, number)
+  export function gsub(s: string, pattern: string, repl: string | table | ((match: string) -> string), n?: number): (string, number)
 
   ---
   -- Reverses a string.
@@ -95,7 +95,7 @@ declare namespace table {
 
   ---
   -- Sorts table elements in place.
-  export function sort<T>(list: T[], comp?: (a: T, b: T) => boolean): void
+  export function sort<T>(list: T[], comp?: (a: T, b: T) -> boolean): void
 
   ---
   -- Packs values into a table with n field.
@@ -167,6 +167,10 @@ declare namespace math {
   ---
   -- Returns the maximum value among arguments.
   export function max(...args: number[]): number
+
+  ---
+  -- Returns x^y.
+  export function pow(x: number, y: number): number
 
   ---
   -- Returns the maximum integer value.
@@ -244,7 +248,7 @@ declare namespace utf8 {
 
   ---
   -- Returns the codepoints of all characters in s.
-  export function codes(s: string, lax?: boolean): () => (number, number)
+  export function codes(s: string, lax?: boolean): () -> (number, number)
 
   ---
   -- Returns the position (in bytes) where encoding of the n-th character starts.
@@ -266,7 +270,7 @@ declare namespace utf8 {
 declare interface File {
   close(): Nullable<(boolean, string, number)>
   flush(): boolean
-  lines(...formats: (string | number)[]): () => ...unknown[]
+  lines(...formats: (string | number)[]): () -> ...unknown[]
   read(...formats: (string | number)[]): ...unknown[]
   seek(whence?: "set" | "cur" | "end", offset?: number): Nullable<(number, string)>
   setvbuf(mode: "no" | "full" | "line", size?: number): void
@@ -279,7 +283,7 @@ declare namespace io {
   export function open(filename: string, mode?: string): Nullable<(File, string, number)>
   export function input(file?: File | string): File
   export function output(file?: File | string): File
-  export function lines(filename?: string, ...formats: (string | number)[]): () => ...unknown[]
+  export function lines(filename?: string, ...formats: (string | number)[]): () -> ...unknown[]
   export function read(...formats: (string | number)[]): ...unknown[]
   export function tmpfile(): Nullable<File>
   export function type(obj: unknown): Nullable<"file" | "closed file">
@@ -332,7 +336,7 @@ declare namespace coroutine {
   export function resume(co: coroutine, ...args: unknown[]): (true, ...unknown[]) | (false, string)
   export function running(): (Nullable<coroutine>, boolean)
   export function status(co: coroutine): "running" | "suspended" | "normal" | "dead"
-  export function wrap(func: callable): (...args: unknown[]) => ...unknown[]
+  export function wrap(func: callable): (...args: unknown[]) -> ...unknown[]
   export function yield(...args: unknown[]): ...unknown[]
   export function isyieldable(): boolean
 
