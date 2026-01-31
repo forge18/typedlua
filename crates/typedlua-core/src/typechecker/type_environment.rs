@@ -23,6 +23,10 @@ pub struct TypeEnvironment {
     builtins: FxHashMap<String, Type>,
     /// Currently resolving types (for cycle detection)
     resolving: std::cell::RefCell<std::collections::HashSet<String>>,
+    /// Type parameter constraints (T -> constraint type)
+    type_param_constraints: FxHashMap<String, Type>,
+    /// Class implements relationships (class name -> list of implemented interface types)
+    class_implements: FxHashMap<String, Vec<Type>>,
 }
 
 impl TypeEnvironment {
@@ -33,6 +37,8 @@ impl TypeEnvironment {
             interfaces: FxHashMap::default(),
             builtins: FxHashMap::default(),
             resolving: std::cell::RefCell::new(std::collections::HashSet::new()),
+            type_param_constraints: FxHashMap::default(),
+            class_implements: FxHashMap::default(),
         };
 
         env.register_builtins();
@@ -155,6 +161,31 @@ impl TypeEnvironment {
     /// Check if a type name is defined
     pub fn is_type_defined(&self, name: &str) -> bool {
         self.lookup_type(name).is_some()
+    }
+
+    /// Register a type parameter constraint (e.g., T extends/implements Identifiable)
+    pub fn register_type_param_constraint(&mut self, name: String, constraint: Type) {
+        self.type_param_constraints.insert(name, constraint);
+    }
+
+    /// Remove a type parameter constraint
+    pub fn remove_type_param_constraint(&mut self, name: &str) {
+        self.type_param_constraints.remove(name);
+    }
+
+    /// Get the constraint for a type parameter
+    pub fn get_type_param_constraint(&self, name: &str) -> Option<&Type> {
+        self.type_param_constraints.get(name)
+    }
+
+    /// Register that a class implements one or more interfaces
+    pub fn register_class_implements(&mut self, class_name: String, interfaces: Vec<Type>) {
+        self.class_implements.insert(class_name, interfaces);
+    }
+
+    /// Get the interfaces a class implements
+    pub fn get_class_implements(&self, class_name: &str) -> Option<&Vec<Type>> {
+        self.class_implements.get(class_name)
     }
 
     /// Resolve a type reference, detecting cycles

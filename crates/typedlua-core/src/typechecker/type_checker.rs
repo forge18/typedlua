@@ -227,10 +227,15 @@ impl<'a> TypeChecker<'a> {
 
             // Check that initializer is assignable to declared type
             if !TypeCompatibility::is_assignable(&deep_init, &deep_ann) {
-                return Err(TypeCheckError::new(
-                    "Type mismatch: cannot assign expression to declared type",
-                    decl.span,
-                ));
+                // Fallback: check if source class implements the target interface.
+                // Use original init_type and type_ann (pre-evaluation) since evaluate_type
+                // resolves interface references to ObjectType, losing the interface name.
+                if !self.check_implements_assignable(&init_type, type_ann) {
+                    return Err(TypeCheckError::new(
+                        "Type mismatch: cannot assign expression to declared type",
+                        decl.span,
+                    ));
+                }
             }
             resolved_type_ann
         } else {
@@ -430,6 +435,7 @@ impl<'a> TypeChecker<'a> {
         // If generic, declare type parameters as types in scope
         if let Some(type_params) = &decl.type_parameters {
             for type_param in type_params {
+                let param_name = self.interner.resolve(type_param.name.node).to_string();
                 // Register each type parameter as a type in the current scope
                 // This allows the function body to reference T, U, etc.
                 let param_type = Type::new(
@@ -443,12 +449,16 @@ impl<'a> TypeChecker<'a> {
 
                 // Type parameters are treated as local types in the function scope
                 // We register them as type aliases for now
+                self.type_env.remove_type_alias(&param_name);
                 self.type_env
-                    .register_type_alias(
-                        self.interner.resolve(type_param.name.node).to_string(),
-                        param_type,
-                    )
+                    .register_type_alias(param_name.clone(), param_type)
                     .map_err(|e| TypeCheckError::new(e, type_param.span))?;
+
+                // Register constraint if present (e.g., T implements Identifiable)
+                if let Some(constraint) = &type_param.constraint {
+                    self.type_env
+                        .register_type_param_constraint(param_name, (**constraint).clone());
+                }
             }
         }
 
@@ -488,16 +498,25 @@ impl<'a> TypeChecker<'a> {
         let old_return_type = self.current_function_return_type.clone();
         self.current_function_return_type = decl.return_type.clone();
 
-        // Check function body
-        self.check_block(&mut decl.body)?;
+        // Check function body (scope-safe: always exit scope even on error)
+        let body_result = self.check_block(&mut decl.body);
 
         // Restore previous return type
         self.current_function_return_type = old_return_type;
 
+        // Clean up type parameter constraints and aliases
+        if let Some(type_params) = &decl.type_parameters {
+            for type_param in type_params {
+                let param_name = self.interner.resolve(type_param.name.node).to_string();
+                self.type_env.remove_type_alias(&param_name);
+                self.type_env.remove_type_param_constraint(&param_name);
+            }
+        }
+
         // Exit function scope (this will remove type parameter registrations)
         self.symbol_table.exit_scope();
 
-        Ok(())
+        body_result
     }
 
     /// Check if statement
@@ -1288,7 +1307,47 @@ impl<'a> TypeChecker<'a> {
             if let TypeKind::Reference(type_ref) = &interface_type.kind {
                 let interface_name = self.interner.resolve(type_ref.name.node);
                 if let Some(interface) = self.type_env.get_interface(&interface_name) {
-                    self.check_class_implements_interface(class_decl, interface)?;
+                    // If the interface has type arguments, instantiate it
+                    let instantiated = if let Some(type_args) = &type_ref.type_arguments {
+                        // Look up interface type parameters from the declaration
+                        // We need to find the interface's type params to map them
+                        let mut instantiated_iface = interface.clone();
+                        if let TypeKind::Object(ref mut obj) = instantiated_iface.kind {
+                            // Build substitution map from interface type params
+                            // For generic interfaces, we stored the raw type with references to T
+                            // We need to substitute T -> type_arg for each type param
+                            for member in &mut obj.members {
+                                match member {
+                                    ObjectTypeMember::Method(method) => {
+                                        // Substitute return type
+                                        method.return_type = self.substitute_type_args_in_type(
+                                            &method.return_type, type_args, &interface_name,
+                                        );
+                                        // Substitute parameter types
+                                        for param in &mut method.parameters {
+                                            if let Some(ref type_ann) = param.type_annotation {
+                                                param.type_annotation = Some(
+                                                    self.substitute_type_args_in_type(
+                                                        type_ann, type_args, &interface_name,
+                                                    ),
+                                                );
+                                            }
+                                        }
+                                    }
+                                    ObjectTypeMember::Property(prop) => {
+                                        prop.type_annotation = self.substitute_type_args_in_type(
+                                            &prop.type_annotation, type_args, &interface_name,
+                                        );
+                                    }
+                                    ObjectTypeMember::Index(_) => {}
+                                }
+                            }
+                        }
+                        instantiated_iface
+                    } else {
+                        interface.clone()
+                    };
+                    self.check_class_implements_interface(class_decl, &instantiated)?;
                 } else {
                     return Err(TypeCheckError::new(
                         format!("Interface '{}' not found", interface_name),
@@ -1301,6 +1360,14 @@ impl<'a> TypeChecker<'a> {
                     class_decl.span,
                 ));
             }
+        }
+
+        // Register class implements relationships for assignability checking
+        if !class_decl.implements.is_empty() {
+            self.type_env.register_class_implements(
+                class_name.clone(),
+                class_decl.implements.clone(),
+            );
         }
 
         // Process primary constructor parameters - they become class properties
@@ -2566,6 +2633,101 @@ impl<'a> TypeChecker<'a> {
                 let resolved: Vec<Type> =
                     elems.iter().map(|e| self.deep_resolve_type(e)).collect();
                 Type::new(TypeKind::Tuple(resolved), typ.span)
+            }
+            _ => typ.clone(),
+        }
+    }
+
+    /// Check if source type is assignable to target type via implements relationship.
+    /// For example, Box<number> is assignable to Storable<number> if Box implements Storable<T>.
+    fn check_implements_assignable(&self, source: &Type, target: &Type) -> bool {
+        if let (TypeKind::Reference(s_ref), TypeKind::Reference(t_ref)) =
+            (&source.kind, &target.kind)
+        {
+            let source_name = self.interner.resolve(s_ref.name.node);
+            let target_name = self.interner.resolve(t_ref.name.node);
+
+            // Check if source class implements the target interface
+            if let Some(implements) = self.type_env.get_class_implements(&source_name) {
+                for iface_type in implements {
+                    if let TypeKind::Reference(iface_ref) = &iface_type.kind {
+                        let iface_name = self.interner.resolve(iface_ref.name.node);
+                        if iface_name == target_name {
+                            // Interface name matches. For generic interfaces, check type arg
+                            // compatibility. The common case is pass-through type params:
+                            // class Box<T> implements Storable<T> means Box<number> -> Storable<number>
+                            match (&s_ref.type_arguments, &t_ref.type_arguments) {
+                                (None, None) => return true,
+                                (Some(s_args), Some(t_args))
+                                    if s_args.len() == t_args.len() =>
+                                {
+                                    if s_args.iter().zip(t_args.iter()).all(|(s, t)| {
+                                        TypeCompatibility::is_assignable(s, t)
+                                    }) {
+                                        return true;
+                                    }
+                                }
+                                _ => {
+                                    // Arity mismatch or partial generics - still allow if names match
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Substitute type parameter references in a type with actual type arguments.
+    /// For a generic interface like Container<T>, given type_args [number],
+    /// replaces references to T with number.
+    fn substitute_type_args_in_type(
+        &self,
+        typ: &Type,
+        type_args: &[Type],
+        interface_name: &str,
+    ) -> Type {
+        match &typ.kind {
+            TypeKind::Reference(type_ref) => {
+                let ref_name = self.interner.resolve(type_ref.name.node).to_string();
+                // Check if this reference matches a type parameter
+                // Type parameters are single-letter or named params registered during
+                // interface declaration. We check if the name is a type alias that
+                // resolves to the same reference (meaning it's a type param, not a concrete type).
+                if let Some(iface_type) = self.type_env.get_interface(interface_name) {
+                    // For now, use a simple heuristic: if the reference name is a single
+                    // uppercase letter or matches a known type param pattern, substitute it.
+                    // Better approach: look up the interface's type params from declarations.
+                    // Since we don't have the declaration here, we use the type_env.
+                    if self.type_env.lookup_type(&ref_name).is_none()
+                        && !self.type_env.lookup_type_alias(&ref_name).is_some()
+                    {
+                        // This is likely a type parameter - substitute with first type arg
+                        // TODO: Map parameter position properly when multiple type params exist
+                        if !type_args.is_empty() {
+                            return type_args[0].clone();
+                        }
+                    }
+                    let _ = iface_type; // suppress unused warning
+                }
+                typ.clone()
+            }
+            TypeKind::Array(elem) => {
+                let subst = self.substitute_type_args_in_type(elem, type_args, interface_name);
+                Type::new(TypeKind::Array(Box::new(subst)), typ.span)
+            }
+            TypeKind::Nullable(inner) => {
+                let subst = self.substitute_type_args_in_type(inner, type_args, interface_name);
+                Type::new(TypeKind::Nullable(Box::new(subst)), typ.span)
+            }
+            TypeKind::Union(members) => {
+                let subst: Vec<Type> = members
+                    .iter()
+                    .map(|m| self.substitute_type_args_in_type(m, type_args, interface_name))
+                    .collect();
+                Type::new(TypeKind::Union(subst), typ.span)
             }
             _ => typ.clone(),
         }

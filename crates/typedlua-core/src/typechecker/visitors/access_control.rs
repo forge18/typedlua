@@ -97,6 +97,34 @@ impl AccessControl {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// Find a member by walking the class hierarchy (current class, then parent, etc.)
+    fn find_member_in_hierarchy(&self, class_name: &str, member_name: &str) -> Option<&ClassMemberInfo> {
+        let mut current = class_name;
+        loop {
+            if let Some(members) = self.class_members.get(current) {
+                if let Some(info) = members.iter().find(|m| m.name == member_name) {
+                    return Some(info);
+                }
+            }
+            // Walk to parent class
+            if let Some(Some(parent_name)) = self.class_parents.get(current) {
+                // Strip generic arguments from parent name (e.g., "DataStore<number>" -> "DataStore")
+                let base_name = if let Some(idx) = parent_name.find('<') {
+                    &parent_name[..idx]
+                } else {
+                    parent_name.as_str()
+                };
+                if base_name == current {
+                    break; // Prevent infinite loop
+                }
+                current = base_name;
+            } else {
+                break;
+            }
+        }
+        None
+    }
 }
 
 impl TypeCheckVisitor for AccessControl {
@@ -113,11 +141,8 @@ impl AccessControlVisitor for AccessControl {
         member_name: &str,
         span: Span,
     ) -> Result<(), TypeCheckError> {
-        // Get the member info
-        let member_info = self
-            .class_members
-            .get(class_name)
-            .and_then(|members| members.iter().find(|m| m.name == member_name));
+        // Get the member info - check current class and parent classes
+        let member_info = self.find_member_in_hierarchy(class_name, member_name);
 
         if let Some(info) = member_info {
             match &info.access {

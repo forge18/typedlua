@@ -83,6 +83,7 @@ mod tests {
         let current_class = Some(ClassContext {
             name: "MyClass".to_string(),
             parent: None,
+            extends_type: None,
         });
         let result = access_control.check_member_access(
             &current_class,
@@ -112,6 +113,7 @@ mod tests {
         let current_class = Some(ClassContext {
             name: "OtherClass".to_string(),
             parent: None,
+            extends_type: None,
         });
         let result = access_control.check_member_access(
             &current_class,
@@ -176,6 +178,7 @@ mod tests {
         let current_class = Some(ClassContext {
             name: "MyClass".to_string(),
             parent: None,
+            extends_type: None,
         });
         let result = access_control.check_member_access(
             &current_class,
@@ -208,6 +211,7 @@ mod tests {
         let current_class = Some(ClassContext {
             name: "ChildClass".to_string(),
             parent: Some("ParentClass".to_string()),
+            extends_type: None,
         });
 
         // Set the current class for is_subclass check
@@ -241,6 +245,7 @@ mod tests {
         let current_class = Some(ClassContext {
             name: "OtherClass".to_string(),
             parent: None,
+            extends_type: None,
         });
         let result = access_control.check_member_access(
             &current_class,
@@ -355,6 +360,7 @@ mod tests {
         let context = Some(ClassContext {
             name: "MyClass".to_string(),
             parent: Some("ParentClass".to_string()),
+            extends_type: None,
         });
         access_control.set_current_class(context.clone());
 
@@ -391,6 +397,7 @@ mod tests {
         access_control.set_current_class(Some(ClassContext {
             name: "ChildClass".to_string(),
             parent: Some("ParentClass".to_string()),
+            extends_type: None,
         }));
 
         assert!(
@@ -413,6 +420,7 @@ mod tests {
         access_control.set_current_class(Some(ClassContext {
             name: "ClassA".to_string(),
             parent: None,
+            extends_type: None,
         }));
 
         assert!(
@@ -460,6 +468,7 @@ mod tests {
         let current_class = Some(ClassContext {
             name: "MyClass".to_string(),
             parent: None,
+            extends_type: None,
         });
 
         // Public method should be accessible
@@ -497,6 +506,7 @@ mod tests {
         let current_class = Some(ClassContext {
             name: "OtherClass".to_string(),
             parent: None,
+            extends_type: None,
         });
 
         let result = access_control.check_member_access(
@@ -545,6 +555,7 @@ mod tests {
         let current_class = Some(ClassContext {
             name: "Child".to_string(),
             parent: Some("GrandParent".to_string()), // Directly set to GrandParent for test
+            extends_type: None,
         });
         access_control.set_current_class(current_class.clone());
 
@@ -580,6 +591,7 @@ mod tests {
         let current_class = Some(ClassContext {
             name: "Child2".to_string(),
             parent: Some("Parent".to_string()),
+            extends_type: None,
         });
         access_control.set_current_class(current_class.clone());
 
@@ -657,6 +669,7 @@ mod tests {
         let current_class = Some(ClassContext {
             name: "MyClass".to_string(),
             parent: None,
+            extends_type: None,
         });
 
         let result = access_control.check_member_access(
@@ -696,6 +709,7 @@ mod tests {
         let current_class = Some(ClassContext {
             name: "OtherClass".to_string(),
             parent: None,
+            extends_type: None,
         });
 
         let result = access_control.check_member_access(
@@ -721,6 +735,7 @@ mod tests {
         let current_class = Some(ClassContext {
             name: "MyClass".to_string(),
             parent: None,
+            extends_type: None,
         });
 
         let result = access_control.check_member_access(
@@ -764,6 +779,7 @@ mod tests {
         let context = Some(ClassContext {
             name: "ClassA".to_string(),
             parent: None,
+            extends_type: None,
         });
         access_control.set_current_class(context);
 
@@ -855,6 +871,7 @@ mod tests {
         let context = Some(ClassContext {
             name: "MyClass".to_string(),
             parent: None,
+            extends_type: None,
         });
         access_control.set_current_class(context.clone());
 

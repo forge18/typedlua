@@ -130,6 +130,7 @@ mod tests {
                 span: Span::dummy(),
             }),
             methods: vec![],
+            implements: vec![],
             span: Span::dummy(),
         };
 
@@ -153,6 +154,7 @@ mod tests {
             fields: vec![],
             constructor: None,
             methods: vec![],
+            implements: vec![],
             span: Span::dummy(),
         };
 

@@ -666,6 +666,12 @@ impl TypeInferenceVisitor for TypeInferrer<'_> {
                     }
                 }
 
+                // Check if this is a type parameter with a constraint
+                // If so, resolve member access on the constraint type
+                if let Some(constraint) = self.type_env.get_type_param_constraint(&type_name) {
+                    return self.infer_member(constraint, member, span);
+                }
+
                 // Check access modifiers for class members (only for actual classes)
                 self.check_member_access(&type_name, member, span)?;
 

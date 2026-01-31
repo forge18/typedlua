@@ -949,7 +949,7 @@ fn test_interface_default_with_generics() {
         interface Container<T> {
             getValue(): T
             setValue(val: T): void {
-                // default implementation
+                -- default implementation
             }
         }
         
