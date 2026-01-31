@@ -17,6 +17,9 @@ pub const LUA53: &str = include_str!("lua53.d.tl");
 /// Lua 5.4 standard library
 pub const LUA54: &str = include_str!("lua54.d.tl");
 
+/// Reflection runtime module (available in all Lua versions)
+pub const REFLECTION: &str = include_str!("reflection.d.tl");
+
 /// Get the appropriate stdlib content based on Lua version
 pub fn get_stdlib(version: LuaVersion) -> &'static str {
     match version {
@@ -27,7 +30,7 @@ pub fn get_stdlib(version: LuaVersion) -> &'static str {
     }
 }
 
-/// Get all stdlib sources (builtins + version-specific)
+/// Get all stdlib sources (builtins + version-specific + reflection)
 pub fn get_all_stdlib(version: LuaVersion) -> Vec<(&'static str, &'static str)> {
     vec![
         ("builtins.d.tl", BUILTINS),
@@ -40,6 +43,7 @@ pub fn get_all_stdlib(version: LuaVersion) -> Vec<(&'static str, &'static str)> 
             },
             get_stdlib(version),
         ),
+        ("reflection.d.tl", REFLECTION),
     ]
 }
 
@@ -94,8 +98,9 @@ mod tests {
     #[test]
     fn test_get_all_stdlib() {
         let stdlib = get_all_stdlib(LuaVersion::Lua54);
-        assert_eq!(stdlib.len(), 2);
+        assert_eq!(stdlib.len(), 3);
         assert_eq!(stdlib[0].0, "builtins.d.tl");
         assert_eq!(stdlib[1].0, "lua54.d.tl");
+        assert_eq!(stdlib[2].0, "reflection.d.tl");
     }
 }

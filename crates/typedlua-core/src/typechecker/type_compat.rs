@@ -40,6 +40,15 @@ impl TypeCompatibility {
                 Self::is_literal_assignable_to_primitive(lit, *prim)
             }
 
+            // Primitive to literal (reverse direction - primitive nil can satisfy literal nil)
+            (TypeKind::Primitive(PrimitiveType::Nil), TypeKind::Literal(Literal::Nil)) => true,
+
+            // Also handle the case where source is a union containing nil and target expects literal nil
+            (TypeKind::Union(sources), TypeKind::Literal(Literal::Nil)) => {
+                // Check if any source member is nil
+                sources.iter().any(|s| Self::is_assignable(s, target))
+            }
+
             // Union types
             (_, TypeKind::Union(targets)) => {
                 // Source is assignable to union if assignable to any member

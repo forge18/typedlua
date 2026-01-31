@@ -95,6 +95,11 @@ impl TypeEnvironment {
         Ok(())
     }
 
+    /// Remove a type alias (used for cleaning up scoped type parameters)
+    pub fn remove_type_alias(&mut self, name: &str) {
+        self.type_aliases.remove(name);
+    }
+
     /// Register a generic type alias
     pub fn register_generic_type_alias(
         &mut self,
@@ -120,7 +125,7 @@ impl TypeEnvironment {
         if self.interfaces.contains_key(&name) {
             return Err(format!("Interface '{}' already defined", name));
         }
-        self.interfaces.insert(name, typ);
+        self.interfaces.insert(name.clone(), typ);
         Ok(())
     }
 

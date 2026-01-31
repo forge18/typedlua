@@ -170,7 +170,57 @@ fn substitute_type(typ: &Type, substitutions: &FxHashMap<StringId, Type>) -> Res
             ))
         }
 
-        // Object types, conditional types, mapped types, etc. would need similar handling
+        // Object type: substitute property type annotations
+        TypeKind::Object(obj_type) => {
+            use typedlua_parser::ast::statement::{MethodSignature, PropertySignature};
+            use typedlua_parser::ast::types::ObjectTypeMember;
+
+            let mut substituted_members: Vec<ObjectTypeMember> = Vec::new();
+            for member in &obj_type.members {
+                let substituted = match member {
+                    ObjectTypeMember::Property(prop) => {
+                        let substituted_type =
+                            substitute_type(&prop.type_annotation, substitutions)?;
+                        ObjectTypeMember::Property(PropertySignature {
+                            type_annotation: substituted_type,
+                            ..prop.clone()
+                        })
+                    }
+                    ObjectTypeMember::Method(method) => {
+                        // For methods, substitute the return type
+                        // Note: method parameters are handled separately during function type checking
+                        let substituted_return =
+                            substitute_type(&method.return_type, substitutions)?;
+
+                        ObjectTypeMember::Method(MethodSignature {
+                            return_type: substituted_return,
+                            ..method.clone()
+                        })
+                    }
+                    ObjectTypeMember::Index(index) => {
+                        // Index signatures have key_type and value_type
+                        // key_type is IndexKeyType (String or Number), not Type
+                        let substituted_value = substitute_type(&index.value_type, substitutions)?;
+
+                        ObjectTypeMember::Index(typedlua_parser::ast::statement::IndexSignature {
+                            value_type: substituted_value,
+                            ..index.clone()
+                        })
+                    }
+                };
+                substituted_members.push(substituted);
+            }
+
+            Ok(Type::new(
+                TypeKind::Object(typedlua_parser::ast::types::ObjectType {
+                    members: substituted_members,
+                    ..obj_type.clone()
+                }),
+                typ.span,
+            ))
+        }
+
+        // Conditional types, mapped types, etc. would need similar handling
         // For now, just clone types that don't contain type parameters
         _ => Ok(typ.clone()),
     }

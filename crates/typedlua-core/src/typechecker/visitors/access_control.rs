@@ -44,6 +44,8 @@ pub enum ClassMemberKind {
 pub struct ClassContext {
     pub(crate) name: String,
     pub(crate) parent: Option<String>,
+    /// The full extends type (preserves type arguments for generic parent classes)
+    pub(crate) extends_type: Option<typedlua_parser::ast::types::Type>,
 }
 
 /// Trait for access control checks on class members

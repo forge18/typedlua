@@ -137,11 +137,11 @@ fn test_final_generic_class() {
             private value: T
             
             constructor(val: T) {
-                this.value = val
+                self.value = val
             }
             
             final getValue(): T {
-                return this.value
+                return self.value
             }
         }
         
@@ -164,15 +164,15 @@ fn test_final_generic_methods() {
             private value: T
             
             constructor(val: T) {
-                this.value = val
+                self.value = val
             }
             
             final getValue(): T {
-                return this.value
+                return self.value
             }
             
             final setValue(val: T): void {
-                this.value = val
+                self.value = val
             }
         }
         
@@ -201,15 +201,15 @@ fn test_generic_class_with_final_methods() {
             private data: T[]
             
             constructor() {
-                this.data = []
+                self.data = []
             }
             
             final add(item: T): void {
-                this.data.push(item)
+                self.data.push(item)
             }
             
             final getAll(): T[] {
-                return this.data
+                return self.data
             }
             
             process(item: T): T {
@@ -246,7 +246,7 @@ fn test_generic_primary_constructor() {
     let source = r#"
         class Container<T>(public value: T) {
             getValue(): T {
-                return this.value
+                return self.value
             }
         }
         
@@ -274,11 +274,11 @@ fn test_primary_constructor_generic_interface() {
         
         class Box<T>(private value: T) implements Storable<T> {
             getValue(): T {
-                return this.value
+                return self.value
             }
             
             setValue(val: T): void {
-                this.value = val
+                self.value = val
             }
         }
         
@@ -299,11 +299,11 @@ fn test_primary_constructor_with_multiple_generic_params() {
     let source = r#"
         class Pair<K, V>(public key: K, public value: V) {
             getKey(): K {
-                return this.key
+                return self.key
             }
             
             getValue(): V {
-                return this.value
+                return self.value
             }
         }
         
@@ -332,17 +332,17 @@ fn test_pattern_matching_generic_union_types() {
             private isOk: boolean
             
             constructor(val: T | E, ok: boolean) {
-                this.value = val
-                this.isOk = ok
+                self.value = val
+                self.isOk = ok
             }
             
-            match<R>(okHandler: (T) => R, errHandler: (E) => R): R {
-                if (this.isOk) {
-                    return okHandler(this.value as T)
-                } else {
-                    return errHandler(this.value as E)
-                }
-            }
+            match<R>(okHandler: (T) => R, errHandler: (E) => R): R
+                if self.isOk then
+                    return okHandler(self.value as T)
+                else
+                    return errHandler(self.value as E)
+                end
+            end
         }
         
         const success = new Result<number, string>(42, true)
@@ -367,21 +367,21 @@ fn test_pattern_guards_with_generic_constraints() {
             id: number
         }
         
-        function process<T implements Identifiable>(item: T): string {
-            if (item.id > 0) {
+        function process<T implements Identifiable>(item: T): string
+            if item.id > 0 then
                 return `Valid: ${item.id}`
-            } else {
+            else
                 return "Invalid"
-            }
-        }
+            end
+        end
         
         class User implements Identifiable {
             id: number
             name: string
             
             constructor(id: number, name: string) {
-                this.id = id
-                this.name = name
+                self.id = id
+                self.name = name
             }
         }
         
@@ -407,7 +407,7 @@ fn test_class_decorator_on_primary_constructor() {
         @sealed
         class User(public name: string, public age: number) {
             greet(): string {
-                return `Hello, ${this.name}`
+                return `Hello, ${self.name}`
             }
         }
         
@@ -430,7 +430,7 @@ fn test_decorator_on_primary_constructor_params() {
             @readonly public port: number
         ) {
             getUrl(): string {
-                return `${this.host}:${this.port}`
+                return `${self.host}:${self.port}`
             }
         }
         
@@ -453,7 +453,7 @@ fn test_multiple_decorators_primary_constructor() {
         @sealed
         class Service(public name: string) {
             run(): void {
-                print(`Running ${this.name}`)
+                print(`Running ${self.name}`)
             }
         }
         
@@ -485,12 +485,12 @@ fn test_safe_navigation_with_type_narrowing() {
             address: Address | nil
         }
         
-        function getCity(user: User): string | nil {
-            if (user?.address) {
+        function getCity(user: User): string | nil
+            if user?.address then
                 return user.address.city
-            }
+            end
             return nil
-        }
+        end
         
         const user: User = { name: "Alice", address: { street: "123 Main", city: "NYC" } }
         const city = getCity(user)
@@ -553,12 +553,12 @@ fn test_safe_navigation_in_conditional() {
             items: string[]
         }
         
-        function processResponse(response: Response): number {
-            if (response?.data?.items) {
+        function processResponse(response: Response): number
+            if response?.data?.items then
                 return response.data.items.length
-            }
+            end
             return 0
-        }
+        end
         
         const response: Response = { data: { items: ["a", "b", "c"] } }
         const count = processResponse(response)
@@ -631,11 +631,11 @@ fn test_null_coalescing_with_method_call() {
             private value: T | nil
             
             constructor(val: T | nil) {
-                this.value = val
+                self.value = val
             }
             
             getOrDefault(defaultValue: T): T {
-                return this.value ?? defaultValue
+                return self.value ?? defaultValue
             }
         }
         
@@ -661,7 +661,7 @@ fn test_reflect_getfields_inherited() {
         class Animal {
             species: string
             constructor(species: string) {
-                this.species = species
+                self.species = species
             }
         }
         
@@ -669,7 +669,7 @@ fn test_reflect_getfields_inherited() {
             breed: string
             constructor(species: string, breed: string) {
                 super(species)
-                this.breed = breed
+                self.breed = breed
             }
         }
         
@@ -725,11 +725,11 @@ fn test_reflect_isinstance_with_inheritance() {
             radius: number
             constructor(r: number) {
                 super()
-                this.radius = r
+                self.radius = r
             }
             
             override area(): number {
-                return 3.14159 * this.radius * this.radius
+                return 3.14159 * self.radius * self.radius
             }
         }
         
@@ -738,12 +738,12 @@ fn test_reflect_isinstance_with_inheritance() {
             height: number
             constructor(w: number, h: number) {
                 super()
-                this.width = w
-                this.height = h
+                self.width = w
+                self.height = h
             }
             
             override area(): number {
-                return this.width * this.height
+                return self.width * self.height
             }
         }
         
@@ -820,16 +820,16 @@ fn test_method_to_function_chained_calls() {
             
             constructor(next: Processor | nil = nil) {
                 super()
-                this.next = next
+                self.next = next
             }
             
-            override process(input: string): string {
+            override process(input: string): string
                 const result = super.process(input)
-                if (this.next) {
-                    return this.next.process(result)
-                }
+                if self.next then
+                    return self.next.process(result)
+                end
                 return result
-            }
+            end
         }
         
         const processor = new ChainProcessor(new Processor())
@@ -856,11 +856,11 @@ fn test_generics_with_decorators_and_override() {
             protected data: T
             
             constructor(data: T) {
-                this.data = data
+                self.data = data
             }
             
             getData(): T {
-                return this.data
+                return self.data
             }
             
             process(item: T): T {
@@ -921,12 +921,12 @@ fn test_pattern_matching_with_null_coalescing() {
     let source = r#"
         type Result<T> = { ok: true, value: T } | { ok: false, error: string }
         
-        function unwrapOrDefault<T>(result: Result<T>, defaultValue: T): T {
-            if (result.ok) {
+        function unwrapOrDefault<T>(result: Result<T>, defaultValue: T): T
+            if result.ok then
                 return result.value
-            }
+            end
             return defaultValue
-        }
+        end
         
         const success: Result<number> = { ok: true, value: 42 }
         const failure: Result<number> = { ok: false, error: "failed" }
@@ -957,11 +957,11 @@ fn test_interface_default_with_generics() {
             private value: number
             
             constructor(val: number) {
-                this.value = val
+                self.value = val
             }
             
             getValue(): number {
-                return this.value
+                return self.value
             }
         }
         
@@ -990,7 +990,7 @@ fn test_rich_enum_with_interface() {
             Completed
             
             print(): void {
-                print(`Status: ${this.name()}`)
+                print(`Status: ${self.name()}`)
             }
         }
         

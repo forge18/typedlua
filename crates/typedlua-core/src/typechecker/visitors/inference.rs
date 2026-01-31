@@ -499,6 +499,29 @@ impl TypeInferenceVisitor for TypeInferrer<'_> {
                 self.infer_expression(right_expr)
             }
 
+            ExpressionKind::New(callee, _args) => {
+                // Infer the class type from the callee expression
+                // For `new ClassName(args)`, callee is Identifier("ClassName")
+                match &callee.kind {
+                    ExpressionKind::Identifier(name) => {
+                        // Return a Reference type to the class
+                        Ok(Type::new(
+                            TypeKind::Reference(TypeReference {
+                                name: typedlua_parser::ast::Spanned::new(*name, span),
+                                type_arguments: None,
+                                span,
+                            }),
+                            span,
+                        ))
+                    }
+                    _ => {
+                        // For complex callee expressions, infer the callee type
+                        // and use it as the result type
+                        Ok(Type::new(TypeKind::Primitive(PrimitiveType::Unknown), span))
+                    }
+                }
+            }
+
             _ => {
                 // For unimplemented expression types, return unknown
                 Ok(Type::new(TypeKind::Primitive(PrimitiveType::Unknown), span))
@@ -626,12 +649,29 @@ impl TypeInferenceVisitor for TypeInferrer<'_> {
     ) -> Result<Type, TypeCheckError> {
         match &obj_type.kind {
             TypeKind::Reference(type_ref) => {
-                // Check access modifiers for class members
                 let type_name = self.interner.resolve(type_ref.name.node);
+
+                // Check if this is a generic type alias with type arguments
+                if let Some(type_args) = &type_ref.type_arguments {
+                    if let Some(generic_alias) = self.type_env.get_generic_type_alias(&type_name) {
+                        // Instantiate the generic type alias with the provided type arguments
+                        use super::super::generics::instantiate_type;
+                        let instantiated = instantiate_type(
+                            &generic_alias.typ,
+                            &generic_alias.type_parameters,
+                            type_args,
+                        )
+                        .map_err(|e| TypeCheckError::new(e, span))?;
+                        return self.infer_member(&instantiated, member, span);
+                    }
+                }
+
+                // Check access modifiers for class members (only for actual classes)
                 self.check_member_access(&type_name, member, span)?;
 
                 // Try to resolve the type reference to get the actual type
-                if let Some(resolved) = self.type_env.lookup_type_alias(&type_name) {
+                // Use lookup_type to check both type aliases and interfaces
+                if let Some(resolved) = self.type_env.lookup_type(&type_name) {
                     // Check for infinite recursion - if resolved type is the same as input, avoid loop
                     if matches!(resolved.kind, TypeKind::Reference(_)) {
                         // If resolved is still a reference, check if it's the same reference
@@ -680,6 +720,32 @@ impl TypeInferenceVisitor for TypeInferrer<'_> {
                     format!("Property '{}' does not exist", member),
                     span,
                 ))
+            }
+            TypeKind::Union(types) => {
+                // For union types, try to find the member in each non-nil variant
+                let non_nil_types: Vec<&Type> = types.iter().filter(|t| !self.is_nil(t)).collect();
+
+                if non_nil_types.is_empty() {
+                    // All types are nil - member access on nil returns nil
+                    Ok(Type::new(TypeKind::Primitive(PrimitiveType::Nil), span))
+                } else if non_nil_types.len() == 1 {
+                    // Single non-nil type - look up member on that
+                    self.infer_member(non_nil_types[0], member, span)
+                } else {
+                    // Multiple non-nil types - try to look up member on first valid one
+                    // For simplicity, we try each type and return the first successful lookup
+                    for typ in non_nil_types {
+                        if let Ok(member_type) = self.infer_member(typ, member, span) {
+                            return Ok(member_type);
+                        }
+                    }
+                    // If none succeeded, return unknown
+                    Ok(Type::new(TypeKind::Primitive(PrimitiveType::Unknown), span))
+                }
+            }
+            TypeKind::Nullable(inner) => {
+                // For nullable types, look up member on the inner type
+                self.infer_member(inner, member, span)
             }
             _ => {
                 // Non-object member access - return unknown
@@ -770,6 +836,11 @@ impl TypeInferenceVisitor for TypeInferrer<'_> {
     fn check_match(&mut self, match_expr: &mut MatchExpression) -> Result<Type, TypeCheckError> {
         // Type check the value being matched
         let value_type = self.infer_expression(&mut match_expr.value)?;
+        eprintln!(
+            "DEBUG check_match: value_type = {:?}, arms = {}",
+            value_type.kind,
+            match_expr.arms.len()
+        );
 
         if match_expr.arms.is_empty() {
             return Err(TypeCheckError::new(
@@ -1025,21 +1096,38 @@ impl TypeInferrer<'_> {
     ) -> Result<(), TypeCheckError> {
         // If there's a wildcard or identifier pattern without a guard, it's exhaustive
         let has_wildcard = arms.iter().any(|arm| {
-            matches!(arm.pattern, Pattern::Wildcard(_) | Pattern::Identifier(_))
-                && arm.guard.is_none()
+            let is_wildcard = matches!(arm.pattern, Pattern::Wildcard(_) | Pattern::Identifier(_))
+                && arm.guard.is_none();
+            eprintln!(
+                "DEBUG check_exhaustiveness: arm pattern = {:?}, is_wildcard = {}",
+                arm.pattern, is_wildcard
+            );
+            is_wildcard
         });
+        eprintln!(
+            "DEBUG check_exhaustiveness: has_wildcard = {}",
+            has_wildcard
+        );
 
         if has_wildcard {
             return Ok(());
         }
 
         // Check exhaustiveness based on type
+        eprintln!(
+            "DEBUG check_exhaustiveness: value_type.kind = {:?}",
+            value_type.kind
+        );
         match &value_type.kind {
             TypeKind::Primitive(PrimitiveType::Boolean) => {
                 // Boolean must match both true and false
                 let mut has_true = false;
                 let mut has_false = false;
 
+                eprintln!(
+                    "DEBUG exhaustiveness: checking {} arms for boolean",
+                    arms.len()
+                );
                 for arm in arms {
                     if let Pattern::Literal(Literal::Boolean(b), _) = &arm.pattern {
                         if *b {
@@ -1049,6 +1137,10 @@ impl TypeInferrer<'_> {
                         }
                     }
                 }
+                eprintln!(
+                    "DEBUG exhaustiveness: has_true={}, has_false={}",
+                    has_true, has_false
+                );
 
                 if !has_true || !has_false {
                     return Err(TypeCheckError::new(

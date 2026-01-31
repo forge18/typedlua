@@ -1,3 +1,4 @@
+use super::generics;
 use super::symbol_table::{Symbol, SymbolKind, SymbolTable};
 use super::type_compat::TypeCompatibility;
 use super::type_environment::TypeEnvironment;
@@ -39,6 +40,8 @@ pub struct TypeChecker<'a> {
     in_catch_block: Vec<bool>,
     /// Current namespace path for this module
     current_namespace: Option<Vec<String>>,
+    /// Type parameters for each generic class (needed for override checking)
+    class_type_params: FxHashMap<String, Vec<typedlua_parser::ast::statement::TypeParameter>>,
     diagnostic_handler: Arc<dyn DiagnosticHandler>,
     interner: &'a typedlua_parser::string_interner::StringInterner,
     common: &'a typedlua_parser::string_interner::CommonIdentifiers,
@@ -63,6 +66,7 @@ impl<'a> TypeChecker<'a> {
             module_dependencies: Vec::new(),
             in_catch_block: Vec::new(),
             current_namespace: None,
+            class_type_params: FxHashMap::default(),
             diagnostic_handler,
             interner,
             common,
@@ -90,6 +94,7 @@ impl<'a> TypeChecker<'a> {
             self.symbol_table = SymbolTable::new();
             self.type_env = TypeEnvironment::new();
             self.access_control = AccessControl::new();
+            self.class_type_params = FxHashMap::default();
 
             // Reload stdlib with the new target version
             if let Err(e) = self.load_stdlib() {
@@ -122,22 +127,9 @@ impl<'a> TypeChecker<'a> {
         use typedlua_parser::lexer::Lexer;
         use typedlua_parser::parser::Parser;
 
-        // Get stdlib files for the target version
         let stdlib_files = stdlib::get_all_stdlib(self.options.target);
-        eprintln!(
-            "DEBUG: Loading stdlib for {:?}, found {} files",
-            self.options.target,
-            stdlib_files.len()
-        );
 
         for (filename, source) in stdlib_files {
-            eprintln!(
-                "DEBUG: Processing stdlib file: {} ({} bytes)",
-                filename,
-                source.len()
-            );
-
-            // Parse the stdlib file
             let handler = Arc::new(crate::diagnostics::CollectingDiagnosticHandler::new());
             let mut lexer = Lexer::new(source, handler.clone(), self.interner);
             let tokens = lexer
@@ -145,39 +137,14 @@ impl<'a> TypeChecker<'a> {
                 .map_err(|e| format!("Failed to lex {}: {:?}", filename, e))?;
 
             let mut parser = Parser::new(tokens, handler.clone(), self.interner, self.common);
-            let program = parser.parse();
+            let mut program = parser
+                .parse()
+                .map_err(|e| format!("Failed to parse {}: {:?}", filename, e))?;
 
-            if let Err(ref e) = program {
-                return Err(format!("Failed to parse {}: {:?}", filename, e));
-            }
-
-            let mut program = program.unwrap();
-            eprintln!(
-                "DEBUG: Parsed {} statements from {}",
-                program.statements.len(),
-                filename
-            );
-
-            // Check for parser errors
-            let diagnostics = handler.get_diagnostics();
-            for diag in diagnostics.iter() {
-                eprintln!(
-                    "DEBUG: Parser diagnostic: {:?} - {}",
-                    diag.level, diag.message
-                );
-            }
-
-            // Process declarations from the stdlib
-            // Only process declaration statements - these populate the type environment
-            for (i, statement) in program.statements.iter_mut().enumerate() {
-                eprintln!("DEBUG: Processing statement {} from {}", i, filename);
-                // Ignore errors from stdlib - we just want to populate the type environment
-                if let Err(e) = self.check_statement(statement) {
-                    eprintln!(
-                        "DEBUG: Error processing statement {} from {}: {}",
-                        i, filename, e.message
-                    );
-                }
+            // Process declarations from the stdlib to populate the type environment
+            for statement in program.statements.iter_mut() {
+                // Ignore errors from stdlib - best-effort population
+                let _ = self.check_statement(statement);
             }
         }
 
@@ -186,10 +153,19 @@ impl<'a> TypeChecker<'a> {
 
     /// Type check a program
     pub fn check_program(&mut self, program: &mut Program) -> Result<(), TypeCheckError> {
+        let mut first_error: Option<TypeCheckError> = None;
         for statement in program.statements.iter_mut() {
-            self.check_statement(statement)?;
+            if let Err(e) = self.check_statement(statement) {
+                if first_error.is_none() {
+                    first_error = Some(e);
+                }
+            }
         }
-        Ok(())
+        if let Some(err) = first_error {
+            Err(err)
+        } else {
+            Ok(())
+        }
     }
 
     /// Type check a statement
@@ -235,12 +211,7 @@ impl<'a> TypeChecker<'a> {
         decl: &mut VariableDeclaration,
     ) -> Result<(), TypeCheckError> {
         // Infer the type of the initializer
-        let init_type = self
-            .infer_expression_type(&mut decl.initializer)
-            .map_err(|e| {
-                eprintln!("DEBUG: Error inferring initializer type: {}", e.message);
-                e
-            })?;
+        let init_type = self.infer_expression_type(&mut decl.initializer)?;
 
         // Get the declared type or use inferred type
         let var_type = if let Some(type_ann) = &decl.type_annotation {
@@ -249,8 +220,13 @@ impl<'a> TypeChecker<'a> {
                 .evaluate_type(type_ann)
                 .map_err(|e| TypeCheckError::new(e, decl.span))?;
 
+            // Deep-resolve both types so nested references (e.g., Address | nil in an
+            // interface property) are resolved before structural comparison
+            let deep_init = self.deep_resolve_type(&init_type);
+            let deep_ann = self.deep_resolve_type(&resolved_type_ann);
+
             // Check that initializer is assignable to declared type
-            if !TypeCompatibility::is_assignable(&init_type, &resolved_type_ann) {
+            if !TypeCompatibility::is_assignable(&deep_init, &deep_ann) {
                 return Err(TypeCheckError::new(
                     "Type mismatch: cannot assign expression to declared type",
                     decl.span,
@@ -724,11 +700,20 @@ impl<'a> TypeChecker<'a> {
     /// Check block
     fn check_block(&mut self, block: &mut Block) -> Result<(), TypeCheckError> {
         self.symbol_table.enter_scope();
+        let mut first_error: Option<TypeCheckError> = None;
         for stmt in &mut block.statements {
-            self.check_statement(stmt)?;
+            if let Err(e) = self.check_statement(stmt) {
+                if first_error.is_none() {
+                    first_error = Some(e);
+                }
+            }
         }
         self.symbol_table.exit_scope();
-        Ok(())
+        if let Some(err) = first_error {
+            Err(err)
+        } else {
+            Ok(())
+        }
     }
 
     /// Check interface declaration
@@ -978,17 +963,7 @@ impl<'a> TypeChecker<'a> {
             is_exported: true,
             references: Vec::new(),
         };
-        if let Err(e) = self.symbol_table.declare(symbol) {
-            eprintln!(
-                "DEBUG: Failed to declare type alias '{}': {}",
-                alias_name, e
-            );
-        } else {
-            eprintln!(
-                "DEBUG: Successfully declared type alias '{}' in symbol table",
-                alias_name
-            );
-        }
+        let _ = self.symbol_table.declare(symbol);
 
         Ok(())
     }
@@ -1043,6 +1018,23 @@ impl<'a> TypeChecker<'a> {
         enum_decl: &mut EnumDeclaration,
     ) -> Result<(), TypeCheckError> {
         let enum_name = self.interner.resolve(enum_decl.name.node).to_string();
+
+        // Register enum name as a symbol so it can be referenced as a value
+        let enum_ref_type = Type::new(
+            TypeKind::Reference(TypeReference {
+                name: enum_decl.name.clone(),
+                type_arguments: None,
+                span: enum_decl.span,
+            }),
+            enum_decl.span,
+        );
+        let enum_symbol = Symbol::new(
+            enum_name.clone(),
+            SymbolKind::Enum,
+            enum_ref_type,
+            enum_decl.span,
+        );
+        let _ = self.symbol_table.declare(enum_symbol);
 
         if enum_decl.fields.is_empty()
             && enum_decl.constructor.is_none()
@@ -1144,10 +1136,8 @@ impl<'a> TypeChecker<'a> {
                 enum_self_type.clone(),
                 constructor.span,
             );
-            self.symbol_table
-                .declare(self_symbol)
-                .map_err(|e| TypeCheckError::new(e, constructor.span))?;
-            self.check_block(&mut constructor.body)?;
+            let _ = self.symbol_table.declare(self_symbol);
+            let _ = self.check_block(&mut constructor.body);
             self.symbol_table.exit_scope();
         }
 
@@ -1159,10 +1149,8 @@ impl<'a> TypeChecker<'a> {
                 enum_self_type.clone(),
                 method.span,
             );
-            self.symbol_table
-                .declare(self_symbol)
-                .map_err(|e| TypeCheckError::new(e, method.span))?;
-            self.check_block(&mut method.body)?;
+            let _ = self.symbol_table.declare(self_symbol);
+            let _ = self.check_block(&mut method.body);
             self.symbol_table.exit_scope();
         }
 
@@ -1224,12 +1212,38 @@ impl<'a> TypeChecker<'a> {
         // Check decorators
         self.check_decorators(&mut class_decl.decorators)?;
 
+        let class_name = self.interner.resolve(class_decl.name.node).to_string();
+
+        // Register the class name as a symbol in the symbol table so `new ClassName()` works
+        let class_type = Type::new(
+            TypeKind::Reference(TypeReference {
+                name: class_decl.name.clone(),
+                type_arguments: None,
+                span: class_decl.span,
+            }),
+            class_decl.span,
+        );
+        let class_symbol = Symbol::new(
+            class_name.clone(),
+            SymbolKind::Class,
+            class_type,
+            class_decl.span,
+        );
+        let _ = self.symbol_table.declare(class_symbol);
+
+        // Store type parameters for this class (needed for generic override checking)
+        if let Some(type_params) = &class_decl.type_parameters {
+            self.class_type_params
+                .insert(class_name.clone(), type_params.clone());
+        }
+
         // Enter a new scope for the class
         self.symbol_table.enter_scope();
 
         // Register type parameters if this is a generic class
         if let Some(type_params) = &class_decl.type_parameters {
             for type_param in type_params {
+                let param_name = self.interner.resolve(type_param.name.node).to_string();
                 let param_type = Type::new(
                     TypeKind::Reference(typedlua_parser::ast::types::TypeReference {
                         name: type_param.name.clone(),
@@ -1239,11 +1253,11 @@ impl<'a> TypeChecker<'a> {
                     type_param.span,
                 );
 
+                // Remove any existing type alias with this name (from a previous generic class)
+                // then register fresh. Type params are scoped to the class body.
+                self.type_env.remove_type_alias(&param_name);
                 self.type_env
-                    .register_type_alias(
-                        self.interner.resolve(type_param.name.node).to_string(),
-                        param_type,
-                    )
+                    .register_type_alias(param_name, param_type)
                     .map_err(|e| TypeCheckError::new(e, type_param.span))?;
             }
         }
@@ -1429,7 +1443,6 @@ impl<'a> TypeChecker<'a> {
         });
 
         // Register class and all its members with access control visitor
-        let class_name = self.interner.resolve(class_decl.name.node).to_string();
         self.access_control
             .register_class(&class_name, parent.clone());
         for member_info in member_infos {
@@ -1446,50 +1459,58 @@ impl<'a> TypeChecker<'a> {
         self.access_control.set_current_class(Some(ClassContext {
             name: self.interner.resolve(class_decl.name.node).to_string(),
             parent,
+            extends_type: class_decl.extends.clone(),
         }));
 
         // Check all class members
+        // Use soft error handling for member bodies so the class is still
+        // registered even if individual members have type errors. This prevents
+        // cascading "undefined variable" errors for code that uses the class.
         let mut has_constructor = false;
         let mut abstract_methods = Vec::new();
+        let mut first_member_error: Option<TypeCheckError> = None;
 
         for member in class_decl.members.iter_mut() {
-            match member {
-                ClassMember::Property(prop) => {
-                    self.check_class_property(prop)?;
-                }
+            let result = match member {
+                ClassMember::Property(prop) => self.check_class_property(prop),
                 ClassMember::Constructor(ctor) => {
                     if has_constructor {
-                        return Err(TypeCheckError::new(
+                        Err(TypeCheckError::new(
                             "Class can only have one constructor",
                             ctor.span,
-                        ));
+                        ))
+                    } else {
+                        has_constructor = true;
+                        self.check_constructor(ctor)
                     }
-                    has_constructor = true;
-                    self.check_constructor(ctor)?;
                 }
                 ClassMember::Method(method) => {
                     if method.is_abstract {
                         if !class_decl.is_abstract {
-                            return Err(TypeCheckError::new(
+                            Err(TypeCheckError::new(
                                 format!(
                                     "Abstract method '{}' can only be in abstract class",
                                     method.name.node
                                 ),
                                 method.span,
-                            ));
+                            ))
+                        } else {
+                            abstract_methods
+                                .push(self.interner.resolve(method.name.node).to_string());
+                            self.check_class_method(method)
                         }
-                        abstract_methods.push(self.interner.resolve(method.name.node).to_string());
+                    } else {
+                        self.check_class_method(method)
                     }
-                    self.check_class_method(method)?;
                 }
-                ClassMember::Getter(getter) => {
-                    self.check_class_getter(getter)?;
-                }
-                ClassMember::Setter(setter) => {
-                    self.check_class_setter(setter)?;
-                }
-                ClassMember::Operator(op) => {
-                    self.check_operator_declaration(op)?;
+                ClassMember::Getter(getter) => self.check_class_getter(getter),
+                ClassMember::Setter(setter) => self.check_class_setter(setter),
+                ClassMember::Operator(op) => self.check_operator_declaration(op),
+            };
+
+            if let Err(e) = result {
+                if first_member_error.is_none() {
+                    first_member_error = Some(e);
                 }
             }
         }
@@ -1499,6 +1520,24 @@ impl<'a> TypeChecker<'a> {
 
         // Exit class scope
         self.symbol_table.exit_scope();
+
+        // Clean up type parameters from type environment after class scope
+        if let Some(type_params) = &class_decl.type_parameters {
+            for type_param in type_params {
+                let param_name = self.interner.resolve(type_param.name.node).to_string();
+                self.type_env.remove_type_alias(&param_name);
+            }
+        }
+
+        // Report class member errors as warnings rather than hard failures.
+        // The class is still registered and usable - this prevents cascading
+        // "undefined variable" errors for code that uses the class.
+        if let Some(err) = first_member_error {
+            self.diagnostic_handler.warning(
+                class_decl.span,
+                &format!("Error in class '{}' member: {}", class_name, err.message),
+            );
+        }
 
         Ok(())
     }
@@ -1759,51 +1798,56 @@ impl<'a> TypeChecker<'a> {
         // Enter constructor scope
         self.symbol_table.enter_scope();
 
-        // Declare 'self' parameter (implicit in constructors)
-        if let Some(class_ctx) = self.access_control.get_current_class() {
-            let self_type = Type::new(
-                TypeKind::Reference(typedlua_parser::ast::types::TypeReference {
-                    name: typedlua_parser::ast::Spanned::new(
-                        self.interner.intern(&class_ctx.name),
-                        ctor.span,
-                    ),
-                    type_arguments: None,
-                    span: ctor.span,
-                }),
-                ctor.span,
-            );
-            let symbol = crate::typechecker::symbol_table::Symbol::new(
-                "self".to_string(),
-                crate::typechecker::symbol_table::SymbolKind::Parameter,
-                self_type,
-                ctor.span,
-            );
-            self.symbol_table
-                .declare(symbol)
-                .map_err(|e| TypeCheckError::new(e, ctor.span))?;
-        }
+        // Inner function to do the actual checking, so we can ensure scope cleanup
+        let result = (|| -> Result<(), TypeCheckError> {
+            // Declare 'self' parameter (implicit in constructors)
+            if let Some(class_ctx) = self.access_control.get_current_class() {
+                let self_type = Type::new(
+                    TypeKind::Reference(typedlua_parser::ast::types::TypeReference {
+                        name: typedlua_parser::ast::Spanned::new(
+                            self.interner.intern(&class_ctx.name),
+                            ctor.span,
+                        ),
+                        type_arguments: None,
+                        span: ctor.span,
+                    }),
+                    ctor.span,
+                );
+                let symbol = crate::typechecker::symbol_table::Symbol::new(
+                    "self".to_string(),
+                    crate::typechecker::symbol_table::SymbolKind::Parameter,
+                    self_type,
+                    ctor.span,
+                );
+                self.symbol_table
+                    .declare(symbol)
+                    .map_err(|e| TypeCheckError::new(e, ctor.span))?;
+            }
 
-        // Declare parameters
-        for param in &ctor.parameters {
-            let param_type = param.type_annotation.clone().unwrap_or_else(|| {
-                Type::new(TypeKind::Primitive(PrimitiveType::Unknown), param.span)
-            });
+            // Declare parameters
+            for param in &ctor.parameters {
+                let param_type = param.type_annotation.clone().unwrap_or_else(|| {
+                    Type::new(TypeKind::Primitive(PrimitiveType::Unknown), param.span)
+                });
 
-            self.declare_pattern(
-                &param.pattern,
-                param_type,
-                SymbolKind::Parameter,
-                param.span,
-            )?;
-        }
+                self.declare_pattern(
+                    &param.pattern,
+                    param_type,
+                    SymbolKind::Parameter,
+                    param.span,
+                )?;
+            }
 
-        // Check constructor body
-        self.check_block(&mut ctor.body)?;
+            // Check constructor body
+            self.check_block(&mut ctor.body)?;
 
-        // Exit constructor scope
+            Ok(())
+        })();
+
+        // Always exit scope, even on error
         self.symbol_table.exit_scope();
 
-        Ok(())
+        result
     }
 
     /// Check class method
@@ -1858,83 +1902,93 @@ impl<'a> TypeChecker<'a> {
         // Enter method scope
         self.symbol_table.enter_scope();
 
-        // Declare 'self' parameter for non-static methods
-        if !method.is_static {
-            if let Some(class_ctx) = self.access_control.get_current_class() {
-                let self_type = Type::new(
-                    TypeKind::Reference(typedlua_parser::ast::types::TypeReference {
-                        name: typedlua_parser::ast::Spanned::new(
-                            self.interner.intern(&class_ctx.name),
-                            method.span,
-                        ),
-                        type_arguments: None,
-                        span: method.span,
-                    }),
-                    method.span,
-                );
-                let symbol = crate::typechecker::symbol_table::Symbol::new(
-                    "self".to_string(),
-                    crate::typechecker::symbol_table::SymbolKind::Parameter,
-                    self_type,
-                    method.span,
-                );
-                self.symbol_table
-                    .declare(symbol)
-                    .map_err(|e| TypeCheckError::new(e, method.span))?;
-            }
-        }
-
-        // Register type parameters if generic
-        if let Some(type_params) = &method.type_parameters {
-            for type_param in type_params {
-                let param_type = Type::new(
-                    TypeKind::Reference(typedlua_parser::ast::types::TypeReference {
-                        name: type_param.name.clone(),
-                        type_arguments: None,
-                        span: type_param.span,
-                    }),
-                    type_param.span,
-                );
-
-                self.type_env
-                    .register_type_alias(
-                        self.interner.resolve(type_param.name.node).to_string(),
-                        param_type,
-                    )
-                    .map_err(|e| TypeCheckError::new(e, type_param.span))?;
-            }
-        }
-
-        // Declare parameters
-        for param in &method.parameters {
-            let param_type = param.type_annotation.clone().unwrap_or_else(|| {
-                Type::new(TypeKind::Primitive(PrimitiveType::Unknown), param.span)
-            });
-
-            self.declare_pattern(
-                &param.pattern,
-                param_type,
-                SymbolKind::Parameter,
-                param.span,
-            )?;
-        }
-
-        // Set current function return type for return statement checking
+        // Do all method body work in a closure to ensure scope cleanup on error
         let old_return_type = self.current_function_return_type.clone();
-        self.current_function_return_type = method.return_type.clone();
+        let result = (|| -> Result<(), TypeCheckError> {
+            // Declare 'self' parameter for non-static methods
+            if !method.is_static {
+                if let Some(class_ctx) = self.access_control.get_current_class() {
+                    let self_type = Type::new(
+                        TypeKind::Reference(typedlua_parser::ast::types::TypeReference {
+                            name: typedlua_parser::ast::Spanned::new(
+                                self.interner.intern(&class_ctx.name),
+                                method.span,
+                            ),
+                            type_arguments: None,
+                            span: method.span,
+                        }),
+                        method.span,
+                    );
+                    let symbol = crate::typechecker::symbol_table::Symbol::new(
+                        "self".to_string(),
+                        crate::typechecker::symbol_table::SymbolKind::Parameter,
+                        self_type,
+                        method.span,
+                    );
+                    self.symbol_table
+                        .declare(symbol)
+                        .map_err(|e| TypeCheckError::new(e, method.span))?;
+                }
+            }
 
-        // Check method body
-        if let Some(body) = &mut method.body {
-            self.check_block(body)?;
-        }
+            // Register type parameters if generic
+            if let Some(type_params) = &method.type_parameters {
+                for type_param in type_params {
+                    let param_name = self.interner.resolve(type_param.name.node).to_string();
+                    let param_type = Type::new(
+                        TypeKind::Reference(typedlua_parser::ast::types::TypeReference {
+                            name: type_param.name.clone(),
+                            type_arguments: None,
+                            span: type_param.span,
+                        }),
+                        type_param.span,
+                    );
 
-        // Restore previous return type
+                    self.type_env.remove_type_alias(&param_name);
+                    self.type_env
+                        .register_type_alias(param_name, param_type)
+                        .map_err(|e| TypeCheckError::new(e, type_param.span))?;
+                }
+            }
+
+            // Declare parameters
+            for param in &method.parameters {
+                let param_type = param.type_annotation.clone().unwrap_or_else(|| {
+                    Type::new(TypeKind::Primitive(PrimitiveType::Unknown), param.span)
+                });
+
+                self.declare_pattern(
+                    &param.pattern,
+                    param_type,
+                    SymbolKind::Parameter,
+                    param.span,
+                )?;
+            }
+
+            // Set current function return type for return statement checking
+            self.current_function_return_type = method.return_type.clone();
+
+            // Check method body
+            if let Some(body) = &mut method.body {
+                self.check_block(body)?;
+            }
+
+            Ok(())
+        })();
+
+        // Always restore return type and exit scope, even on error
         self.current_function_return_type = old_return_type;
-
-        // Exit method scope
         self.symbol_table.exit_scope();
 
-        Ok(())
+        // Clean up method type parameters from type environment
+        if let Some(type_params) = &method.type_parameters {
+            for type_param in type_params {
+                let param_name = self.interner.resolve(type_param.name.node).to_string();
+                self.type_env.remove_type_alias(&param_name);
+            }
+        }
+
+        result
     }
 
     /// Check class getter
@@ -2257,6 +2311,18 @@ impl<'a> TypeChecker<'a> {
             ));
         }
 
+        // Get extends clause type arguments for generic parent instantiation
+        let extends_type_args = class_ctx.extends_type.as_ref().and_then(|ext| {
+            if let TypeKind::Reference(type_ref) = &ext.kind {
+                type_ref.type_arguments.clone()
+            } else {
+                None
+            }
+        });
+
+        // Get parent class type parameters (if the parent is generic)
+        let parent_type_params = self.class_type_params.get(parent_name).cloned();
+
         match &parent_method.kind {
             ClassMemberKind::Method {
                 parameters: parent_params,
@@ -2289,7 +2355,7 @@ impl<'a> TypeChecker<'a> {
                             child_param.span,
                         ))?;
 
-                    let parent_type = parent_param.type_annotation.as_ref().ok_or_else(|| {
+                    let raw_parent_type = parent_param.type_annotation.as_ref().ok_or_else(|| {
                         TypeCheckError::new(
                             format!(
                                 "Parent method '{}' parameter {} has no type annotation",
@@ -2300,9 +2366,23 @@ impl<'a> TypeChecker<'a> {
                         )
                     })?;
 
+                    // Instantiate parent type if the parent class is generic
+                    let parent_type = if let (Some(ref type_params), Some(ref type_args)) =
+                        (&parent_type_params, &extends_type_args)
+                    {
+                        generics::instantiate_type(raw_parent_type, type_params, type_args)
+                            .unwrap_or_else(|_| raw_parent_type.clone())
+                    } else {
+                        raw_parent_type.clone()
+                    };
+
+                    // Deep-resolve both types for comparison
+                    let resolved_child = self.deep_resolve_type(child_type);
+                    let resolved_parent = self.deep_resolve_type(&parent_type);
+
                     // Parameters should have the same type (we could allow contravariance here)
-                    if !TypeCompatibility::is_assignable(parent_type, child_type)
-                        || !TypeCompatibility::is_assignable(child_type, parent_type)
+                    if !TypeCompatibility::is_assignable(&resolved_parent, &resolved_child)
+                        || !TypeCompatibility::is_assignable(&resolved_child, &resolved_parent)
                     {
                         return Err(TypeCheckError::new(
                             format!("Method '{}' parameter {} type '{}' is incompatible with parent parameter type",
@@ -2314,9 +2394,25 @@ impl<'a> TypeChecker<'a> {
 
                 // Check return type (covariance)
                 if let Some(child_return) = &method.return_type {
-                    if let Some(parent_ret) = parent_return {
+                    if let Some(raw_parent_ret) = parent_return {
+                        // Instantiate parent return type if generic
+                        let parent_ret = if let (Some(ref type_params), Some(ref type_args)) =
+                            (&parent_type_params, &extends_type_args)
+                        {
+                            generics::instantiate_type(raw_parent_ret, type_params, type_args)
+                                .unwrap_or_else(|_| raw_parent_ret.clone())
+                        } else {
+                            raw_parent_ret.clone()
+                        };
+
+                        let resolved_child_ret = self.deep_resolve_type(child_return);
+                        let resolved_parent_ret = self.deep_resolve_type(&parent_ret);
+
                         // Child return type must be assignable to parent return type
-                        if !TypeCompatibility::is_assignable(parent_ret, child_return) {
+                        if !TypeCompatibility::is_assignable(
+                            &resolved_parent_ret,
+                            &resolved_child_ret,
+                        ) {
                             return Err(TypeCheckError::new(
                                 format!("Method '{}' return type is incompatible with parent return type",
                                     method.name.node),
@@ -2410,6 +2506,71 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    /// Deeply resolve all type references within a type tree.
+    /// Unlike evaluate_type which only resolves top-level references,
+    /// this recursively walks Object, Union, Nullable, Array, etc.
+    /// and resolves any nested TypeKind::Reference nodes.
+    fn deep_resolve_type(&self, typ: &Type) -> Type {
+        match &typ.kind {
+            TypeKind::Reference(type_ref) => {
+                match self.resolve_type_reference(type_ref) {
+                    Ok(resolved) => {
+                        // Avoid infinite recursion if resolution returns same reference
+                        if matches!(&resolved.kind, TypeKind::Reference(r) if r.name.node == type_ref.name.node) {
+                            resolved
+                        } else {
+                            self.deep_resolve_type(&resolved)
+                        }
+                    }
+                    Err(_) => typ.clone(),
+                }
+            }
+            TypeKind::Object(obj_type) => {
+                use typedlua_parser::ast::types::ObjectTypeMember;
+                let resolved_members: Vec<ObjectTypeMember> = obj_type
+                    .members
+                    .iter()
+                    .map(|member| match member {
+                        ObjectTypeMember::Property(prop) => {
+                            ObjectTypeMember::Property(PropertySignature {
+                                type_annotation: self
+                                    .deep_resolve_type(&prop.type_annotation),
+                                ..prop.clone()
+                            })
+                        }
+                        other => other.clone(),
+                    })
+                    .collect();
+                Type::new(
+                    TypeKind::Object(typedlua_parser::ast::types::ObjectType {
+                        members: resolved_members,
+                        span: obj_type.span,
+                    }),
+                    typ.span,
+                )
+            }
+            TypeKind::Union(members) => {
+                let resolved: Vec<Type> =
+                    members.iter().map(|m| self.deep_resolve_type(m)).collect();
+                Type::new(TypeKind::Union(resolved), typ.span)
+            }
+            TypeKind::Nullable(inner) => {
+                let resolved = self.deep_resolve_type(inner);
+                Type::new(TypeKind::Nullable(Box::new(resolved)), typ.span)
+            }
+            TypeKind::Array(elem) => {
+                let resolved = self.deep_resolve_type(elem);
+                Type::new(TypeKind::Array(Box::new(resolved)), typ.span)
+            }
+            TypeKind::Tuple(elems) => {
+                let resolved: Vec<Type> =
+                    elems.iter().map(|e| self.deep_resolve_type(e)).collect();
+                Type::new(TypeKind::Tuple(resolved), typ.span)
+            }
+            _ => typ.clone(),
+        }
+    }
+
     /// Widen literal types to their base primitive types
     fn widen_type(&self, typ: Type) -> Type {
         match typ.kind {
@@ -2482,25 +2643,12 @@ impl<'a> TypeChecker<'a> {
         &mut self,
         ns: &DeclareNamespaceStatement,
     ) -> Result<(), TypeCheckError> {
-        let ns_name = self.interner.resolve(ns.name.node).to_string();
-        eprintln!(
-            "DEBUG: Registering namespace '{}' with {} members",
-            ns_name,
-            ns.members.len()
-        );
-
         // Create object type from namespace members
         let members: Vec<_> = ns
             .members
             .iter()
             .filter_map(|member| match member {
                 Statement::DeclareFunction(func) if func.is_export => {
-                    let func_name = self.interner.resolve(func.name.node).to_string();
-                    eprintln!(
-                        "DEBUG: Adding function '{}' to namespace '{}'",
-                        func_name, ns_name
-                    );
-                    // Add as method to the namespace object
                     Some(ObjectTypeMember::Method(MethodSignature {
                         name: func.name.clone(),
                         type_parameters: func.type_parameters.clone(),
@@ -2511,12 +2659,6 @@ impl<'a> TypeChecker<'a> {
                     }))
                 }
                 Statement::DeclareConst(const_decl) if const_decl.is_export => {
-                    let const_name = self.interner.resolve(const_decl.name.node).to_string();
-                    eprintln!(
-                        "DEBUG: Adding const '{}' to namespace '{}'",
-                        const_name, ns_name
-                    );
-                    // Add as property to the namespace object
                     Some(ObjectTypeMember::Property(PropertySignature {
                         is_readonly: true, // Constants are readonly
                         name: const_decl.name.clone(),
@@ -2688,22 +2830,10 @@ impl<'a> TypeChecker<'a> {
         use crate::module_resolver::{ExportedSymbol, ModuleExports};
 
         let mut exports = ModuleExports::new();
-
-        eprintln!(
-            "DEBUG: extract_exports called with {} statements, current_module: {:?}",
-            program.statements.len(),
-            self.current_module_id
-        );
-        for (i, stmt) in program.statements.iter().enumerate() {
-            eprintln!("DEBUG: Statement {}: {:?}", i, std::mem::discriminant(stmt));
+        for stmt in program.statements.iter() {
             if let Statement::Export(export_decl) = stmt {
                 match &export_decl.kind {
                     ExportKind::Declaration(decl) => {
-                        // Extract symbol(s) from the declaration
-                        eprintln!(
-                            "DEBUG: ExportKind::Declaration, decl type: {:?}",
-                            std::mem::discriminant(&**decl)
-                        );
                         match &**decl {
                             Statement::Variable(var_decl) => {
                                 // Extract identifier from pattern
@@ -2737,20 +2867,10 @@ impl<'a> TypeChecker<'a> {
                             }
                             Statement::TypeAlias(type_alias) => {
                                 let alias_name = self.interner.resolve(type_alias.name.node);
-                                eprintln!("DEBUG: Found TypeAlias export: {}", alias_name);
                                 if let Some(symbol) = self.symbol_table.lookup(&alias_name) {
-                                    eprintln!(
-                                        "DEBUG: Found symbol for {}, adding to exports",
-                                        alias_name
-                                    );
                                     exports.add_named(
                                         alias_name,
                                         ExportedSymbol::new(symbol.clone(), true),
-                                    );
-                                } else {
-                                    eprintln!(
-                                        "DEBUG: Symbol not found in symbol table: {}",
-                                        alias_name
                                     );
                                 }
                             }
@@ -2786,46 +2906,22 @@ impl<'a> TypeChecker<'a> {
                                     &self.module_resolver,
                                     &self.current_module_id,
                                 ) {
-                                    // Resolve the source path to a module ID
-                                    match resolver.resolve(source_path, current_id.path()) {
-                                        Ok(source_module_id) => {
-                                            eprintln!("DEBUG: Resolved source path '{}' to module id: {:?}", source_path, source_module_id);
-                                            // Get exports from the source module
-                                            match registry.get_exports(&source_module_id) {
-                                                Ok(source_exports) => {
-                                                    eprintln!(
-                                                        "DEBUG: Source module has {} named exports",
-                                                        source_exports.named.len()
-                                                    );
-                                                    for name in source_exports.named.keys() {
-                                                        eprintln!("DEBUG:   - {}", name);
-                                                    }
-                                                    // Look up the symbol by local_name in source exports
-                                                    if let Some(exported_sym) =
-                                                        source_exports.get_named(&local_name)
-                                                    {
-                                                        exports.add_named(
-                                                            export_name,
-                                                            exported_sym.clone(),
-                                                        );
-                                                    } else {
-                                                        eprintln!("DEBUG: Symbol '{}' not found in source module exports", local_name);
-                                                    }
-                                                }
-                                                Err(e) => {
-                                                    eprintln!("DEBUG: Failed to get exports from source module: {:?}", e);
-                                                }
+                                    if let Ok(source_module_id) =
+                                        resolver.resolve(source_path, current_id.path())
+                                    {
+                                        if let Ok(source_exports) =
+                                            registry.get_exports(&source_module_id)
+                                        {
+                                            if let Some(exported_sym) =
+                                                source_exports.get_named(&local_name)
+                                            {
+                                                exports.add_named(
+                                                    export_name,
+                                                    exported_sym.clone(),
+                                                );
                                             }
                                         }
-                                        Err(e) => {
-                                            eprintln!(
-                                                "DEBUG: Failed to resolve source path '{}': {:?}",
-                                                source_path, e
-                                            );
-                                        }
                                     }
-                                } else {
-                                    eprintln!("DEBUG: Missing module_registry, module_resolver, or current_module_id");
                                 }
                             } else {
                                 // Local export - look up in symbol table

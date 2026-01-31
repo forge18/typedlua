@@ -1,6 +1,6 @@
 # TypedLua TODO
 
-**Last Updated:** 2026-01-30 (Section 7.1 IN PROGRESS - Added comprehensive test coverage plan, created 78 new unit tests for SymbolTable, TypeEnvironment, NarrowingContext, and Generics Engine. All 1,081 tests pass)
+**Last Updated:** 2026-01-30 (Section 7.1.2 IN PROGRESS - Fixed generic type alias instantiation, improved test pass rate from 12/30 to 13/30. Added object type substitution in generics.rs for Property/Method/Index members)
 
 ---
 
@@ -2038,24 +2038,25 @@ fuzz/
   - [x] **Coroutine Library:** `create`, `resume`, `yield`, `wrap`, `status`
   - [x] **Debug Library:** `getinfo`, `traceback`
 
-- [x] **Feature Interaction Tests** (`tests/feature_interactions_tests.rs`) - **7 of 30 tests passing**
-  - [x] **Override + Generics:** (blocked by `this` keyword)
-  - [x] **Final + Generics:** (blocked by `this` keyword)
-  - [x] **Primary Constructor + Generics:** (blocked by `this` keyword)
-  - [x] **Pattern Matching + Generics:** (blocked by pattern matching implementation)
-  - [x] **Decorators + Primary Constructor:** (blocked by `this` keyword)
-  - [x] **Safe Navigation + Type Narrowing:** (blocked by interface implementation)
+- [ ] **Feature Interaction Tests** (`tests/feature_interactions_tests.rs`) - **13 of 30 tests passing** (was 7)
+  - [ ] **Override + Generics:** (failing - needs generic class inheritance support)
+  - [ ] **Final + Generics:** (failing - needs generic class final method support)
+  - [ ] **Primary Constructor + Generics:** (failing - needs generic primary constructor support)
+  - [x] **Pattern Matching + Generics:** ✅ **FIXED** - Generic type alias instantiation now works
+  - [ ] **Decorators + Primary Constructor:** (failing - needs decorator on generic class support)
+  - [x] **Safe Navigation + Type Narrowing:** ✅ **FIXED** - Added union type resolution in `is_type_assignable()`
+  - [x] **Safe Navigation Chains:** ✅ **FIXED** - `infer_member()` now handles union types and type references
   - [x] **Null Coalescing + Type Inference:** ✅ **FIXED** - `is_nil()` now handles `Literal(Nil)`
-  - [x] **Reflect + Inheritance:** (blocked by `this` keyword)
-  - [x] **Method-to-Function + Virtual Dispatch:** (blocked by `this` keyword)
+  - [x] **Reflect + Inheritance:**
+  - [ ] **Method-to-Function + Virtual Dispatch:** (failing - needs method-to-function conversion)
 
-- [x] **Module System Edge Cases** (`tests/module_edge_cases_tests.rs`) - **22 of 31 tests passing**
-  - [x] **Circular Dependencies:** (syntax supported, full module system not implemented)
+- [ ] **Module System Edge Cases** (`tests/module_edge_cases_tests.rs`) - **22 of 31 tests passing**
+  - [ ] **Circular Dependencies:** (syntax supported, full module system not implemented)
   - [x] **Dynamic Imports:** `require()` supported
-  - [x] **Type-Only Imports:** (not fully implemented)
-  - [x] **Default Export + Named Exports:** (not fully implemented)
-  - [x] **Namespace Enforcement:** (not fully implemented)
-  - [x] **Multiple Files:** (not fully implemented)
+  - [ ] **Type-Only Imports:** (not fully implemented)
+  - [ ] **Default Export + Named Exports:** (not fully implemented)
+  - [ ] **Namespace Enforcement:** (not fully implemented)
+  - [ ] **Multiple Files:** (not fully implemented)
 
 **Parser Fixes Implemented:**
 
@@ -2069,6 +2070,32 @@ fuzz/
 - [x] Added `Thread` primitive type for coroutines
 - [x] Fixed null coalescing type inference to handle `Literal(Nil)`
 - [x] Fixed stdlib arrow syntax: `->` instead of `=>`
+- [x] **Fixed boolean literal patterns in match arms** - Moved `TokenKind::True` and `TokenKind::False` before keyword check in `parse_pattern()` to properly parse `true`/`false` as literals instead of identifiers
+
+**Type Checker Fixes Implemented:**
+
+- [x] **Structural typing for interface support** - `is_type_assignable()` now resolves type references in union types
+  - Object literals can now be assigned to interface types with union properties (e.g., `Profile | nil`)
+  - Fixed: `const user: User = { profile: { name: "Alice" } }` where `User.profile: Profile | nil`
+- [x] **Safe navigation chain support** - `infer_member()` now handles:
+  - Union types with type references (e.g., `Person | nil`)
+  - Nullable types
+  - Type reference resolution via `lookup_type()` instead of `lookup_type_alias()`
+- [x] **Type compatibility for nil** - `TypeCompatibility::is_assignable()` now handles:
+  - `Primitive(Nil)` to `Literal(Nil)` assignment
+  - Union-to-union compatibility with proper nil handling
+- [x] **Generic type alias instantiation** - Fixed type checking for generic type aliases like `Result<T>`:
+  - `infer_member()` now instantiates generic type aliases when resolving member access
+  - `is_type_assignable()` now handles generic type references with type arguments
+  - `substitute_type()` in generics.rs now handles Object types (Property, Method, Index members)
+  - Fixed: `const success: Result<number> = { ok: true, value: 42 }` where `Result<T>` is a union type
+- [x] **Test fixes** - Changed TypeScript-style `if (cond) {` to Lua-style `if cond then` in integration tests
+- [x] **Convention fixes** - Changed `this` to `self` in all test files per Lua convention
+- [x] **Debug cleanup** - Removed all DEBUG eprintln! statements from type checker and inference modules
+
+**LSP Fixes Implemented:**
+
+- [x] Added `Thread` primitive type to hover provider (`crates/typedlua-lsp/src/providers/hover.rs`)
 
 #### 7.1.3 Edge Cases and Error Conditions
 
