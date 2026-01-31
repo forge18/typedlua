@@ -123,7 +123,7 @@ declare function rawequal<T>(v1: T, v2: T): boolean
 -- @param index The starting index or "#"
 -- @param ...args The arguments
 -- @returns Selected arguments
-declare function select<T>(index: number | "#", ...args: T[]): ...T[] | number
+declare function select<T>(index: number | "#", ...args: T[]): unknown
 
 ---
 -- Loads a chunk from a string or function.

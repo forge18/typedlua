@@ -337,7 +337,7 @@ fn test_select_count() {
 #[test]
 fn test_select_index() {
     let source = r#"
-        function getThird(...): any {
+        function getThird(...) {
             return select(3, ...)
         }
         
@@ -499,7 +499,7 @@ fn test_lua53_integer_ops() {
 #[test]
 fn test_lua53_utf8() {
     let source = r#"
-        const len = utf8.len("hello")
+        const utf8len = utf8.len("hello")
         const codepoint = utf8.codepoint("hello", 1)
         const offset = utf8.offset("hello", 2)
         const char = utf8.char(65, 66, 67)
@@ -677,7 +677,7 @@ fn test_math_trigonometric() {
         const asin = math.asin(1)
         const acos = math.acos(1)
         const atan = math.atan(1)
-        const atan2 = math.atan2(1, 1)
+        const atan2 = math.atan(1, 1)
     "#;
 
     let result = compile_and_check(source);
@@ -864,7 +864,7 @@ fn test_os_date() {
     let source = r#"
         const now = os.date()
         const formatted = os.date("%Y-%m-%d")
-        const table = os.date("*t")
+        const dateTable = os.date("*t")
     "#;
 
     let result = compile_and_check(source);
@@ -970,9 +970,9 @@ fn test_coroutine_yield() {
 #[test]
 fn test_coroutine_wrap() {
     let source = r#"
-        const wrapped = coroutine.wrap(function(n: number): number {
+        const wrapped = coroutine.wrap(function(n: number): number
             return n * 2
-        })
+        end)
         
         const result = wrapped(21)
     "#;

@@ -235,7 +235,12 @@ impl<'a> TypeChecker<'a> {
         decl: &mut VariableDeclaration,
     ) -> Result<(), TypeCheckError> {
         // Infer the type of the initializer
-        let init_type = self.infer_expression_type(&mut decl.initializer)?;
+        let init_type = self
+            .infer_expression_type(&mut decl.initializer)
+            .map_err(|e| {
+                eprintln!("DEBUG: Error inferring initializer type: {}", e.message);
+                e
+            })?;
 
         // Get the declared type or use inferred type
         let var_type = if let Some(type_ann) = &decl.type_annotation {

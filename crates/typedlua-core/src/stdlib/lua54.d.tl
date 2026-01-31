@@ -329,8 +329,6 @@ declare namespace os {
 -- Coroutine Library
 -- ============================================================================
 
-declare type coroutine = thread
-
 declare namespace coroutine {
   export function create(func: callable): coroutine
   export function resume(co: coroutine, ...args: unknown[]): (true, ...unknown[]) | (false, string)
