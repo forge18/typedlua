@@ -1036,7 +1036,53 @@ impl<'a> TypeChecker<'a> {
                 // For now, only handle TypeAlias which takes &TypeAliasDeclaration
                 match &**decl {
                     Statement::TypeAlias(alias) => self.check_type_alias(alias),
-                    // TODO: Handle other declaration types (Function, Class, Interface, Variable, Enum)
+                    Statement::Interface(iface) => {
+                        // Register interface in both type_env and symbol_table
+                        // This is a subset of what check_interface_declaration does
+                        let iface_name = self.interner.resolve(iface.name.node).to_string();
+
+                        // Create object type from interface members
+                        let obj_type = Type::new(
+                            TypeKind::Object(ObjectType {
+                                members: iface
+                                    .members
+                                    .iter()
+                                    .map(|member| match member {
+                                        InterfaceMember::Property(prop) => {
+                                            ObjectTypeMember::Property(prop.clone())
+                                        }
+                                        InterfaceMember::Method(method) => {
+                                            ObjectTypeMember::Method(method.clone())
+                                        }
+                                        InterfaceMember::Index(index) => {
+                                            ObjectTypeMember::Index(index.clone())
+                                        }
+                                    })
+                                    .collect(),
+                                span: iface.span,
+                            }),
+                            iface.span,
+                        );
+
+                        // Register in type_env
+                        self.type_env
+                            .register_interface(iface_name.clone(), obj_type.clone())
+                            .map_err(|e| TypeCheckError::new(e, iface.span))?;
+
+                        // Also register in symbol table for export extraction
+                        let symbol = Symbol {
+                            name: iface_name,
+                            typ: obj_type,
+                            kind: SymbolKind::Interface,
+                            span: iface.span,
+                            is_exported: true,
+                            references: Vec::new(),
+                        };
+                        let _ = self.symbol_table.declare(symbol);
+
+                        Ok(())
+                    }
+                    // TODO: Handle other declaration types (Function, Class, Variable, Enum)
                     // These require mutable references and would need the ExportDeclaration to be mutable
                     _ => Ok(()),
                 }
@@ -3064,10 +3110,8 @@ impl<'a> TypeChecker<'a> {
         let mut exports = ModuleExports::new();
         for stmt in program.statements.iter() {
             if let Statement::Export(export_decl) = stmt {
-                eprintln!("[EXPORT] Found export statement");
                 match &export_decl.kind {
                     ExportKind::Declaration(decl) => {
-                        eprintln!("[EXPORT] Export kind: Declaration");
                         match &**decl {
                             Statement::Variable(var_decl) => {
                                 // Extract identifier from pattern
@@ -3111,15 +3155,11 @@ impl<'a> TypeChecker<'a> {
                             Statement::Interface(interface_decl) => {
                                 let interface_name =
                                     self.interner.resolve(interface_decl.name.node);
-                                eprintln!("[EXPORT] Exporting interface: {}", interface_name);
                                 if let Some(symbol) = self.symbol_table.lookup(&interface_name) {
-                                    eprintln!("[EXPORT] Found symbol for interface: {}", interface_name);
                                     exports.add_named(
                                         interface_name,
                                         ExportedSymbol::new(symbol.clone(), true),
                                     );
-                                } else {
-                                    eprintln!("[EXPORT] Symbol not found for interface: {}", interface_name);
                                 }
                             }
                             _ => {}

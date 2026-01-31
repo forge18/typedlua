@@ -2064,7 +2064,7 @@ fuzz/
   - [x] **Circular Dependencies:** ✅ All tests passing
   - [x] **Dynamic Imports:** ✅ `require()` fully supported
   - [x] **Function Hoisting:** ✅ Two-pass type checking enables calling functions before definition
-  - [ ] **Type-Only Imports:** ✅ Implemented (1 test failing- requires module registry infrastructure)
+  - [ ] **Type-Only Imports:** ⚠️ 1 test failing - imports resolve correctly but access control needs to register imported types
   - [ ] **Default Export + Named Exports:** ⚠️ 3 tests failing - needs parser + typechecker updates
   - [x] **Namespace Enforcement:** ✅ All tests passing
   - [x] **Declare Namespace:** ✅ Tests passing
@@ -2121,8 +2121,21 @@ fuzz/
 - [x] **Test fixes** - Changed TypeScript-style `if (cond) {` to Lua-style `if cond then` in integration tests
 - [x] **Convention fixes** - Changed `this` to `self` in all test files per Lua convention
 - [x] **Debug cleanup** - Removed all DEBUG eprintln! statements from type checker and inference modules
+- [x] **Module registry infrastructure** - Created `compile_modules_with_registry()` helper for multi-module compilation tests
+  - Sets up MockFileSystem, ModuleResolver, and ModuleRegistry
+  - Two-pass compilation: parse all modules, then type-check with shared registry
+  - Enables cross-module type resolution for import statements
+- [x] **Interface export extraction** - Fixed `check_export_statement()` to register exported interfaces in symbol table
+  - Interfaces now registered in both `type_env` and `symbol_table` (like type aliases)
+  - `extract_exports()` can now find and export interface types
+  - Import resolution successfully retrieves interface types from module registry
 
-**Remaining Work (3 failing tests):**
+**Remaining Work (4 failing tests):**
+
+- [ ] **Type-Only Import Access Control** - 1 test failing (`test_type_only_import_basic`)
+  - Imports resolve correctly and types are retrieved from module registry
+  - Issue: Access control system checks `class_members` map which doesn't include imported types
+  - Solution: Register imported interfaces/types in access control when processing import statements
 
 - [ ] **Default Export/Import Support** - 3 tests failing (`test_default_export_class`, `test_default_import_alias`, `test_mixed_imports`)
   - [ ] Parser: Add `ImportClause::Mixed { default, named }` variant for mixed syntax `import Foo, { bar } from "./module"`

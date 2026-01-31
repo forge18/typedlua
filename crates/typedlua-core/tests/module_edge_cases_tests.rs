@@ -110,12 +110,7 @@ fn compile_modules_with_registry(modules: Vec<(&str, &str)>) -> Result<Vec<Strin
             .map_err(|e| format!("Type checking failed for {}: {}", path, e.message))?;
 
         // Extract and register exports IMMEDIATELY so next module can use them
-        eprintln!("[DEBUG] Program has {} statements for {}", program.statements.len(), path);
-        for (i, stmt) in program.statements.iter().enumerate() {
-            eprintln!("[DEBUG]   Statement {}: {:?}", i, std::mem::discriminant(stmt));
-        }
         let exports = type_checker.extract_exports(&program);
-        eprintln!("[DEBUG] Extracted exports from {}: {:?}", path, exports);
         registry
             .register_exports(&module_id, exports)
             .map_err(|e| format!("Failed to register exports for {}: {:?}", path, e))?;
