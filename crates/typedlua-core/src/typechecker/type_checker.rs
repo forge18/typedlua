@@ -42,6 +42,10 @@ pub struct TypeChecker<'a> {
     current_namespace: Option<Vec<String>>,
     /// Type parameters for each generic class (needed for override checking)
     class_type_params: FxHashMap<String, Vec<typedlua_parser::ast::statement::TypeParameter>>,
+    /// Track class inheritance for circular dependency detection
+    class_parents: FxHashMap<String, String>,
+    /// Track exported names to detect duplicates
+    exported_names: std::collections::HashSet<String>,
     diagnostic_handler: Arc<dyn DiagnosticHandler>,
     interner: &'a typedlua_parser::string_interner::StringInterner,
     common: &'a typedlua_parser::string_interner::CommonIdentifiers,
@@ -67,6 +71,8 @@ impl<'a> TypeChecker<'a> {
             in_catch_block: Vec::new(),
             current_namespace: None,
             class_type_params: FxHashMap::default(),
+            class_parents: FxHashMap::default(),
+            exported_names: std::collections::HashSet::new(),
             diagnostic_handler,
             interner,
             common,
@@ -95,6 +101,7 @@ impl<'a> TypeChecker<'a> {
             self.type_env = TypeEnvironment::new();
             self.access_control = AccessControl::new();
             self.class_type_params = FxHashMap::default();
+            self.exported_names = std::collections::HashSet::new();
 
             // Reload stdlib with the new target version
             if let Err(e) = self.load_stdlib() {
@@ -298,10 +305,13 @@ impl<'a> TypeChecker<'a> {
                 // Use original init_type and type_ann (pre-evaluation) since evaluate_type
                 // resolves interface references to ObjectType, losing the interface name.
                 if !self.check_implements_assignable(&init_type, type_ann) {
-                    return Err(TypeCheckError::new(
-                        "Type mismatch: cannot assign expression to declared type",
+                    self.diagnostic_handler.error(
                         decl.span,
-                    ));
+                        &format!(
+                            "Type mismatch in variable declaration: cannot assign type '{:?}' to type '{:?}'",
+                            deep_init.kind, deep_ann.kind
+                        ),
+                    );
                 }
             }
             resolved_type_ann
@@ -435,6 +445,14 @@ impl<'a> TypeChecker<'a> {
                 // Literals and wildcards don't declare symbols
                 Ok(())
             }
+            Pattern::Or(or_pattern) => {
+                // For or-patterns, binding consistency is verified during type checking in check_pattern
+                // All alternatives are guaranteed to bind the same variables, so we declare from the first
+                if let Some(first) = or_pattern.alternatives.first() {
+                    self.declare_pattern(first, typ, kind, span)?;
+                }
+                Ok(())
+            }
         }
     }
 
@@ -452,6 +470,18 @@ impl<'a> TypeChecker<'a> {
 
         // If generic, declare type parameters as types in scope
         if let Some(type_params) = &decl.type_parameters {
+            // Check for duplicate type parameters
+            let mut seen_params = std::collections::HashSet::new();
+            for type_param in type_params {
+                let param_name = self.interner.resolve(type_param.name.node).to_string();
+                if !seen_params.insert(param_name.clone()) {
+                    return Err(TypeCheckError::new(
+                        format!("Duplicate type parameter '{}'", param_name),
+                        type_param.span,
+                    ));
+                }
+            }
+
             for type_param in type_params {
                 let param_name = self.interner.resolve(type_param.name.node).to_string();
                 // Register each type parameter as a type in the current scope
@@ -518,6 +548,28 @@ impl<'a> TypeChecker<'a> {
 
         // Check function body (scope-safe: always exit scope even on error)
         let body_result = self.check_block(&mut decl.body);
+
+        // Check that non-void functions have a return statement on all code paths
+        if body_result.is_ok() {
+            if let Some(ref return_type) = decl.return_type {
+                // Only check if return type is not void/nil
+                let is_void = matches!(
+                    return_type.kind,
+                    TypeKind::Primitive(PrimitiveType::Void)
+                        | TypeKind::Primitive(PrimitiveType::Nil)
+                );
+                if !is_void && !self.block_always_returns(&decl.body) {
+                    return Err(TypeCheckError::new(
+                        format!(
+                            "Function '{}' must return a value of type '{}' on all code paths",
+                            self.interner.resolve(decl.name.node),
+                            self.type_to_string(return_type)
+                        ),
+                        decl.span,
+                    ));
+                }
+            }
+        }
 
         // Restore previous return type
         self.current_function_return_type = old_return_type;
@@ -782,6 +834,7 @@ impl<'a> TypeChecker<'a> {
                     kind: ClassMemberKind::Method {
                         parameters: method.parameters.clone(),
                         return_type: Some(method.return_type.clone()),
+                        is_abstract: false,
                     },
                     is_final: false,
                 },
@@ -1029,6 +1082,76 @@ impl<'a> TypeChecker<'a> {
 
     /// Check export statement and register exported symbols
     fn check_export_statement(&mut self, export: &ExportDeclaration) -> Result<(), TypeCheckError> {
+        // Extract export names and check for duplicates
+        match &export.kind {
+            ExportKind::Declaration(decl) => {
+                // Extract the name being exported
+                let export_name = match &**decl {
+                    Statement::Variable(var_decl) => {
+                        // Extract variable name from pattern
+                        match &var_decl.pattern {
+                            typedlua_parser::ast::pattern::Pattern::Identifier(name) => {
+                                Some(self.interner.resolve(name.node).to_string())
+                            }
+                            _ => None, // Complex patterns - skip for now
+                        }
+                    }
+                    Statement::Function(func_decl) => {
+                        Some(self.interner.resolve(func_decl.name.node).to_string())
+                    }
+                    Statement::Class(class_decl) => {
+                        Some(self.interner.resolve(class_decl.name.node).to_string())
+                    }
+                    Statement::Interface(iface_decl) => {
+                        Some(self.interner.resolve(iface_decl.name.node).to_string())
+                    }
+                    Statement::TypeAlias(alias_decl) => {
+                        Some(self.interner.resolve(alias_decl.name.node).to_string())
+                    }
+                    Statement::Enum(enum_decl) => {
+                        Some(self.interner.resolve(enum_decl.name.node).to_string())
+                    }
+                    _ => None,
+                };
+
+                // Check for duplicate export
+                if let Some(name) = &export_name {
+                    if !self.exported_names.insert(name.clone()) {
+                        return Err(TypeCheckError::new(
+                            format!("Duplicate export '{}'", name),
+                            export.span,
+                        ));
+                    }
+                }
+            }
+            ExportKind::Named { specifiers, .. } => {
+                // Check each specifier for duplicates
+                for spec in specifiers {
+                    let export_name = if let Some(exported) = &spec.exported {
+                        self.interner.resolve(exported.node).to_string()
+                    } else {
+                        self.interner.resolve(spec.local.node).to_string()
+                    };
+                    if !self.exported_names.insert(export_name.clone()) {
+                        return Err(TypeCheckError::new(
+                            format!("Duplicate export '{}'", export_name),
+                            export.span,
+                        ));
+                    }
+                }
+            }
+            ExportKind::Default(_) => {
+                // Check for duplicate default export
+                if !self.exported_names.insert("default".to_string()) {
+                    return Err(TypeCheckError::new(
+                        "Duplicate default export".to_string(),
+                        export.span,
+                    ));
+                }
+            }
+        }
+
+        // Now process the export declaration
         match &export.kind {
             ExportKind::Declaration(decl) => {
                 // Process the declaration to register it in the symbol table
@@ -1242,6 +1365,7 @@ impl<'a> TypeChecker<'a> {
                     kind: ClassMemberKind::Method {
                         parameters: method.parameters.clone(),
                         return_type: method.return_type.clone(),
+                        is_abstract: false,
                     },
                     is_final: false,
                 },
@@ -1366,6 +1490,11 @@ impl<'a> TypeChecker<'a> {
         );
         let _ = self.symbol_table.declare(class_symbol);
 
+        // Register abstract class
+        if class_decl.is_abstract {
+            self.type_env.register_abstract_class(class_name.clone());
+        }
+
         // Store type parameters for this class (needed for generic override checking)
         if let Some(type_params) = &class_decl.type_parameters {
             self.class_type_params
@@ -1408,6 +1537,17 @@ impl<'a> TypeChecker<'a> {
                         class_decl.span,
                     ));
                 }
+
+                // Check for circular inheritance
+                self.class_parents
+                    .insert(class_name.clone(), parent_name.to_string());
+                if self.has_circular_inheritance(&class_name) {
+                    return Err(TypeCheckError::new(
+                        format!("Circular inheritance detected: class '{}' inherits from itself through the inheritance chain", class_name),
+                        class_decl.span,
+                    ));
+                }
+
                 // Verify the base class exists
                 // For now, we'll just ensure it's a valid type reference
             } else {
@@ -1437,22 +1577,27 @@ impl<'a> TypeChecker<'a> {
                                     ObjectTypeMember::Method(method) => {
                                         // Substitute return type
                                         method.return_type = self.substitute_type_args_in_type(
-                                            &method.return_type, type_args, &interface_name,
+                                            &method.return_type,
+                                            type_args,
+                                            &interface_name,
                                         );
                                         // Substitute parameter types
                                         for param in &mut method.parameters {
                                             if let Some(ref type_ann) = param.type_annotation {
-                                                param.type_annotation = Some(
-                                                    self.substitute_type_args_in_type(
-                                                        type_ann, type_args, &interface_name,
-                                                    ),
-                                                );
+                                                param.type_annotation =
+                                                    Some(self.substitute_type_args_in_type(
+                                                        type_ann,
+                                                        type_args,
+                                                        &interface_name,
+                                                    ));
                                             }
                                         }
                                     }
                                     ObjectTypeMember::Property(prop) => {
                                         prop.type_annotation = self.substitute_type_args_in_type(
-                                            &prop.type_annotation, type_args, &interface_name,
+                                            &prop.type_annotation,
+                                            type_args,
+                                            &interface_name,
                                         );
                                     }
                                     ObjectTypeMember::Index(_) => {}
@@ -1480,10 +1625,8 @@ impl<'a> TypeChecker<'a> {
 
         // Register class implements relationships for assignability checking
         if !class_decl.implements.is_empty() {
-            self.type_env.register_class_implements(
-                class_name.clone(),
-                class_decl.implements.clone(),
-            );
+            self.type_env
+                .register_class_implements(class_name.clone(), class_decl.implements.clone());
         }
 
         // Process primary constructor parameters - they become class properties
@@ -1561,6 +1704,7 @@ impl<'a> TypeChecker<'a> {
                         kind: ClassMemberKind::Method {
                             parameters: method.parameters.clone(),
                             return_type: method.return_type.clone(),
+                            is_abstract: method.is_abstract,
                         },
                         is_final: method.is_final,
                     });
@@ -1712,14 +1856,49 @@ impl<'a> TypeChecker<'a> {
             }
         }
 
-        // Report class member errors as warnings rather than hard failures.
-        // The class is still registered and usable - this prevents cascading
-        // "undefined variable" errors for code that uses the class.
+        // Check that concrete classes implement all inherited abstract methods
+        if !class_decl.is_abstract {
+            if let Some(extends_type) = &class_decl.extends {
+                if let TypeKind::Reference(type_ref) = &extends_type.kind {
+                    let parent_name = self.interner.resolve(type_ref.name.node);
+                    // Check for abstract methods in parent class
+                    self.check_abstract_methods_implemented(
+                        &class_name,
+                        &parent_name,
+                        &class_decl.members,
+                    )?;
+                }
+            }
+        }
+
+        // Handle member errors based on severity.
+        // Critical errors (abstract methods in non-abstract class, multiple constructors)
+        // should fail hard. Other errors become warnings to prevent cascading failures.
         if let Some(err) = first_member_error {
-            self.diagnostic_handler.warning(
-                class_decl.span,
-                &format!("Error in class '{}' member: {}", class_name, err.message),
-            );
+            // Check if this is a critical error that should fail the compilation
+            let is_critical_error = (err.message.contains("Abstract method")
+                && err.message.contains("abstract class"))
+                || err.message.contains("one constructor")
+                || err
+                    .message
+                    .contains("Decorators require decorator features")
+                || err.message.contains("Cannot override final method")
+                || err.message.contains("is incompatible with parent")
+                || err.message.contains("must implement abstract method")
+                || err.message.contains("marked as override but parent class")
+                || err.message.contains("Return type mismatch")
+                || err.message.contains("is private and only accessible")
+                || err.message.contains("is protected and only accessible");
+
+            if is_critical_error {
+                return Err(err);
+            } else {
+                // Non-critical errors become warnings
+                self.diagnostic_handler.warning(
+                    class_decl.span,
+                    &format!("Error in class '{}' member: {}", class_name, err.message),
+                );
+            }
         }
 
         Ok(())
@@ -1880,6 +2059,47 @@ impl<'a> TypeChecker<'a> {
         Ok(())
     }
 
+    /// Check that a class implements all abstract methods from its parent class
+    fn check_abstract_methods_implemented(
+        &self,
+        class_name: &str,
+        parent_name: &str,
+        class_members: &[ClassMember],
+    ) -> Result<(), TypeCheckError> {
+        // Get the parent class members
+        if let Some(parent_members) = self.access_control.get_class_members(parent_name) {
+            for member in parent_members {
+                if let ClassMemberKind::Method {
+                    is_abstract: true, ..
+                } = &member.kind
+                {
+                    // Check if this class implements the abstract method
+                    let method_name = &member.name;
+                    let implemented = class_members.iter().any(|m| {
+                        if let ClassMember::Method(method) = m {
+                            method.name.node.as_u32()
+                                == self.interner.get_or_intern(method_name).as_u32()
+                        } else {
+                            false
+                        }
+                    });
+
+                    if !implemented {
+                        return Err(TypeCheckError::new(
+                            format!(
+                                "Class '{}' must implement abstract method '{}' from parent class '{}'",
+                                class_name, method_name, parent_name
+                            ),
+                            Span::dummy(),
+                        ));
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Check decorators
     fn check_decorators(
         &mut self,
@@ -1891,6 +2111,37 @@ impl<'a> TypeChecker<'a> {
                 "Decorators require decorator features to be enabled. Enable 'enableDecorators' in your configuration.".to_string(),
                 decorators[0].span,
             ));
+        }
+
+        // Check for duplicate decorators
+        let mut seen_decorators = std::collections::HashSet::new();
+        for decorator in decorators.iter() {
+            // Get decorator name for comparison
+            let decorator_name = match &decorator.expression {
+                typedlua_parser::ast::statement::DecoratorExpression::Identifier(name) => {
+                    self.interner.resolve(name.node).to_string()
+                }
+                typedlua_parser::ast::statement::DecoratorExpression::Call { callee, .. } => {
+                    // For calls, use the callee name
+                    if let typedlua_parser::ast::statement::DecoratorExpression::Identifier(name) =
+                        &**callee
+                    {
+                        self.interner.resolve(name.node).to_string()
+                    } else {
+                        continue; // Skip complex expressions
+                    }
+                }
+                typedlua_parser::ast::statement::DecoratorExpression::Member { .. } => {
+                    continue; // Skip member expressions for duplicate checking
+                }
+            };
+
+            if !seen_decorators.insert(decorator_name.clone()) {
+                self.diagnostic_handler.warning(
+                    decorator.span,
+                    &format!("Duplicate decorator '@{}'", decorator_name),
+                );
+            }
         }
 
         // For now, we just validate that decorator expressions are valid
@@ -2510,6 +2761,7 @@ impl<'a> TypeChecker<'a> {
             ClassMemberKind::Method {
                 parameters: parent_params,
                 return_type: parent_return,
+                ..
             } => {
                 // Check parameter count
                 if method.parameters.len() != parent_params.len() {
@@ -2538,16 +2790,17 @@ impl<'a> TypeChecker<'a> {
                             child_param.span,
                         ))?;
 
-                    let raw_parent_type = parent_param.type_annotation.as_ref().ok_or_else(|| {
-                        TypeCheckError::new(
-                            format!(
-                                "Parent method '{}' parameter {} has no type annotation",
-                                method.name.node,
-                                i + 1
-                            ),
-                            parent_param.span,
-                        )
-                    })?;
+                    let raw_parent_type =
+                        parent_param.type_annotation.as_ref().ok_or_else(|| {
+                            TypeCheckError::new(
+                                format!(
+                                    "Parent method '{}' parameter {} has no type annotation",
+                                    method.name.node,
+                                    i + 1
+                                ),
+                                parent_param.span,
+                            )
+                        })?;
 
                     // Instantiate parent type if the parent class is generic
                     let parent_type = if let (Some(ref type_params), Some(ref type_args)) =
@@ -2651,6 +2904,7 @@ impl<'a> TypeChecker<'a> {
             self.narrowing.get_context_mut(),
             &self.access_control,
             self.interner,
+            &self.diagnostic_handler,
         );
         inferrer.infer_expression(expr)
     }
@@ -2699,7 +2953,8 @@ impl<'a> TypeChecker<'a> {
                 match self.resolve_type_reference(type_ref) {
                     Ok(resolved) => {
                         // Avoid infinite recursion if resolution returns same reference
-                        if matches!(&resolved.kind, TypeKind::Reference(r) if r.name.node == type_ref.name.node) {
+                        if matches!(&resolved.kind, TypeKind::Reference(r) if r.name.node == type_ref.name.node)
+                        {
                             resolved
                         } else {
                             self.deep_resolve_type(&resolved)
@@ -2716,8 +2971,7 @@ impl<'a> TypeChecker<'a> {
                     .map(|member| match member {
                         ObjectTypeMember::Property(prop) => {
                             ObjectTypeMember::Property(PropertySignature {
-                                type_annotation: self
-                                    .deep_resolve_type(&prop.type_annotation),
+                                type_annotation: self.deep_resolve_type(&prop.type_annotation),
                                 ..prop.clone()
                             })
                         }
@@ -2746,8 +3000,7 @@ impl<'a> TypeChecker<'a> {
                 Type::new(TypeKind::Array(Box::new(resolved)), typ.span)
             }
             TypeKind::Tuple(elems) => {
-                let resolved: Vec<Type> =
-                    elems.iter().map(|e| self.deep_resolve_type(e)).collect();
+                let resolved: Vec<Type> = elems.iter().map(|e| self.deep_resolve_type(e)).collect();
                 Type::new(TypeKind::Tuple(resolved), typ.span)
             }
             _ => typ.clone(),
@@ -2774,12 +3027,12 @@ impl<'a> TypeChecker<'a> {
                             // class Box<T> implements Storable<T> means Box<number> -> Storable<number>
                             match (&s_ref.type_arguments, &t_ref.type_arguments) {
                                 (None, None) => return true,
-                                (Some(s_args), Some(t_args))
-                                    if s_args.len() == t_args.len() =>
-                                {
-                                    if s_args.iter().zip(t_args.iter()).all(|(s, t)| {
-                                        TypeCompatibility::is_assignable(s, t)
-                                    }) {
+                                (Some(s_args), Some(t_args)) if s_args.len() == t_args.len() => {
+                                    if s_args
+                                        .iter()
+                                        .zip(t_args.iter())
+                                        .all(|(s, t)| TypeCompatibility::is_assignable(s, t))
+                                    {
                                         return true;
                                     }
                                 }
@@ -3193,10 +3446,8 @@ impl<'a> TypeChecker<'a> {
                                             if let Some(exported_sym) =
                                                 source_exports.get_named(&local_name)
                                             {
-                                                exports.add_named(
-                                                    export_name,
-                                                    exported_sym.clone(),
-                                                );
+                                                exports
+                                                    .add_named(export_name, exported_sym.clone());
                                             }
                                         }
                                     }
@@ -3337,6 +3588,7 @@ impl<'a> TypeChecker<'a> {
                                     kind: ClassMemberKind::Method {
                                         parameters: method.parameters.clone(),
                                         return_type: Some(method.return_type.clone()),
+                                        is_abstract: false,
                                     },
                                     is_final: false,
                                 },
@@ -3427,10 +3679,20 @@ impl<'a> TypeChecker<'a> {
                         }
                     }
                 }
-                Err(_) => {
-                    // Import resolution failed - will be reported as error elsewhere
+                Err(e) => {
+                    // Import resolution failed - report error
+                    self.diagnostic_handler.error(
+                        span,
+                        &format!("Failed to resolve module '{}': {}", source, e),
+                    );
                 }
             }
+        } else {
+            // No module support - report error for missing module
+            self.diagnostic_handler.error(
+                span,
+                &format!("Module '{}' not found (module resolution not configured)", source),
+            );
         }
 
         // Fallback: return Unknown type
@@ -3555,6 +3817,67 @@ impl<'a> TypeChecker<'a> {
 
         result
     }
+
+    /// Check if a class has circular inheritance by walking up the parent chain
+    fn has_circular_inheritance(&self, class_name: &str) -> bool {
+        let mut visited = std::collections::HashSet::new();
+        let mut current = class_name.to_string();
+
+        visited.insert(current.clone());
+
+        while let Some(parent) = self.class_parents.get(&current) {
+            if visited.contains(parent) {
+                return true; // Found a cycle
+            }
+            visited.insert(parent.clone());
+            current = parent.clone();
+        }
+
+        false
+    }
+
+    /// Check if a block always returns (has a return statement on all code paths)
+    fn block_always_returns(&self, block: &Block) -> bool {
+        for stmt in &block.statements {
+            if self.statement_always_returns(stmt) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if a statement always returns
+    fn statement_always_returns(&self, stmt: &Statement) -> bool {
+        match stmt {
+            Statement::Return(_) => true,
+            Statement::If(if_stmt) => {
+                // If statement always returns if both branches always return
+                let then_returns = self.block_always_returns(&if_stmt.then_block);
+                let else_returns = if_stmt
+                    .else_block
+                    .as_ref()
+                    .map(|b| self.block_always_returns(b))
+                    .unwrap_or(false);
+                then_returns && else_returns
+            }
+            Statement::Throw(_) => true,
+            Statement::Expression(expr) => {
+                // Check if the expression is a call to a function that never returns
+                // (like unreachable(), error(), throw)
+                if let ExpressionKind::Call(callee, _, _) = &expr.kind {
+                    if let ExpressionKind::Identifier(string_id) = &callee.kind {
+                        let name = self.interner.resolve(*string_id);
+                        name == "unreachable" || name == "error" || name == "throw"
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -3573,8 +3896,20 @@ mod tests {
         let mut parser = Parser::new(tokens, handler.clone(), &interner, &common);
         let mut program = parser.parse().expect("Parsing failed");
 
-        let mut type_checker = TypeChecker::new(handler, &interner, &common);
-        type_checker.check_program(&mut program)
+        let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common);
+        let result = type_checker.check_program(&mut program);
+
+        // Check if there are errors in the diagnostic handler
+        let has_errors = handler
+            .get_diagnostics()
+            .iter()
+            .any(|d| d.level == crate::diagnostics::DiagnosticLevel::Error);
+
+        if has_errors {
+            Err(TypeCheckError::new("Type checking failed with errors", Default::default()))
+        } else {
+            result
+        }
     }
 
     #[test]

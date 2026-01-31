@@ -1267,7 +1267,7 @@ mod tests {
         let number_type = Type::new(TypeKind::Primitive(PrimitiveType::Number), span);
 
         // Provide wrong number of type arguments
-        let result = build_substitutions(&[type_param.clone()], &[]);
+        let result = build_substitutions(std::slice::from_ref(&type_param), &[]);
         assert!(result.is_err());
 
         let result = build_substitutions(&[type_param], &[number_type.clone(), number_type]);
@@ -1737,7 +1737,7 @@ mod tests {
         let number_type = Type::new(TypeKind::Primitive(PrimitiveType::Number), span);
 
         // Wrong number of arguments
-        let result = infer_type_arguments(&[type_param.clone()], &[param_a.clone()], &[]);
+        let result = infer_type_arguments(std::slice::from_ref(&type_param), std::slice::from_ref(&param_a), &[]);
         assert!(result.is_err());
 
         let result = infer_type_arguments(

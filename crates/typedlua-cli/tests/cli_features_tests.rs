@@ -184,7 +184,7 @@ fn test_inline_source_map() {
 
     let output = fs::read_to_string(&output_file).unwrap();
     // Inline source maps are embedded as comments
-    assert!(output.contains("sourceMappingURL") || output.len() > 0);
+    assert!(output.contains("sourceMappingURL") || !output.is_empty());
 }
 
 // ============================================================================

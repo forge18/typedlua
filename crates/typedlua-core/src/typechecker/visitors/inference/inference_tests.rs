@@ -5,6 +5,8 @@ mod tests {
     use super::super::super::super::visitors::{
         AccessControl, TypeCheckVisitor, TypeInferenceVisitor, TypeInferrer,
     };
+    use crate::diagnostics::{CollectingDiagnosticHandler, DiagnosticHandler};
+    use std::sync::Arc;
     use typedlua_parser::ast::expression::*;
     use typedlua_parser::ast::types::*;
     use typedlua_parser::ast::Ident;
@@ -17,6 +19,7 @@ mod tests {
         narrowing_context: &'a mut super::super::super::super::narrowing::NarrowingContext,
         access_control: &'a AccessControl,
         interner: &'a StringInterner,
+        diagnostic_handler: &'a Arc<dyn DiagnosticHandler>,
     ) -> TypeInferrer<'a> {
         TypeInferrer::new(
             symbol_table,
@@ -24,6 +27,7 @@ mod tests {
             narrowing_context,
             access_control,
             interner,
+            diagnostic_handler,
         )
     }
 
@@ -34,6 +38,8 @@ mod tests {
         let mut type_env = TypeEnvironment::new();
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
 
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
@@ -41,6 +47,7 @@ mod tests {
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let mut expr = Expression {
@@ -64,12 +71,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let mut expr = Expression {
@@ -93,12 +104,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let mut expr = Expression {
@@ -125,12 +140,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let left = Box::new(Expression {
@@ -170,12 +189,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let left = Box::new(Expression {
@@ -215,12 +238,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let operand = Box::new(Expression {
@@ -254,12 +281,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let operand = Box::new(Expression {
@@ -293,12 +324,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let elements = vec![
@@ -337,12 +372,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let mut expr = Expression {
@@ -366,12 +405,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let cond = Box::new(Expression {
@@ -415,12 +458,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let left = Box::new(Expression {
@@ -459,6 +506,8 @@ mod tests {
         let mut type_env = TypeEnvironment::new();
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
 
         let inferrer = create_test_inferrer(
             &mut symbol_table,
@@ -466,6 +515,7 @@ mod tests {
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         assert_eq!(inferrer.name(), "TypeInferrer");
@@ -483,12 +533,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let mut expr = Expression {
@@ -512,12 +566,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         // Array of numbers: [1, 2, 3]
@@ -562,12 +620,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         // Empty array: []
@@ -593,12 +655,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let left = Box::new(Expression {
@@ -638,12 +704,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let left = Box::new(Expression {
@@ -683,12 +753,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let left = Box::new(Expression {
@@ -728,12 +802,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let left = Box::new(Expression {
@@ -773,12 +851,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let left = Box::new(Expression {
@@ -818,12 +900,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let left = Box::new(Expression {
@@ -864,12 +950,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let left = Box::new(Expression {
@@ -910,12 +1000,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let operand = Box::new(Expression {
@@ -950,12 +1044,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let inner = Box::new(Expression {
@@ -975,11 +1073,8 @@ mod tests {
         let result = inferrer.infer_expression(&mut expr);
         assert!(result.is_ok());
         let typ = result.unwrap();
-        // Parenthesized expressions currently return Unknown (not yet fully implemented)
-        assert!(matches!(
-            typ.kind,
-            TypeKind::Primitive(PrimitiveType::Unknown)
-        ));
+        // Parenthesized expressions now correctly infer the type of their inner expression
+        assert!(matches!(typ.kind, TypeKind::Literal(Literal::Number(n)) if (n - 42.0).abs() < f64::EPSILON));
     }
 
     #[test]
@@ -990,12 +1085,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let inner = Box::new(Expression {
@@ -1035,12 +1134,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         // Object literal: { x: 1, y: 2 }
@@ -1090,12 +1193,16 @@ mod tests {
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
 
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
+
         let mut inferrer = create_test_inferrer(
             &mut symbol_table,
             &mut type_env,
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let x_id = interner.intern("x");
@@ -1118,6 +1225,8 @@ mod tests {
         let mut type_env = TypeEnvironment::new();
         let mut narrowing_context = super::super::super::super::narrowing::NarrowingContext::new();
         let access_control = AccessControl::new();
+        let diagnostic_handler: Arc<dyn DiagnosticHandler> =
+            Arc::new(CollectingDiagnosticHandler::new());
 
         // Register a variable with a type
         let x_id = interner.intern("x");
@@ -1141,6 +1250,7 @@ mod tests {
             &mut narrowing_context,
             &access_control,
             &interner,
+            &diagnostic_handler,
         );
 
         let mut expr = Expression {

@@ -80,6 +80,15 @@ impl CodeGenerator {
                 self.generate_expression(&decl.initializer);
                 self.writeln("");
             }
+            Pattern::Or(_) => {
+                // Or-patterns should not appear in variable declarations
+                // They are only valid in match expressions
+                // Treat as wildcard (defensive programming)
+                self.write_indent();
+                self.write("local _ = ");
+                self.generate_expression(&decl.initializer);
+                self.writeln("");
+            }
         }
     }
 
@@ -120,6 +129,10 @@ impl CodeGenerator {
                             self.generate_object_destructuring(nested_obj, &temp_var);
                         }
                         Pattern::Wildcard(_) | Pattern::Literal(_, _) => {
+                            // Skip - don't bind anything
+                        }
+                        Pattern::Or(_) => {
+                            // Or-patterns should not appear in destructuring
                             // Skip - don't bind anything
                         }
                     }
@@ -182,6 +195,10 @@ impl CodeGenerator {
                         self.generate_object_destructuring(nested_obj, &temp_var);
                     }
                     Pattern::Wildcard(_) | Pattern::Literal(_, _) => {
+                        // Skip - don't bind anything
+                    }
+                    Pattern::Or(_) => {
+                        // Or-patterns should not appear in destructuring
                         // Skip - don't bind anything
                     }
                 }

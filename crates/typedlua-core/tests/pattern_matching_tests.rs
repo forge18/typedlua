@@ -240,3 +240,334 @@ fn test_match_non_boolean_guard_error() {
     let error = result.unwrap_err();
     assert!(error.contains("guard must be boolean"));
 }
+
+#[test]
+fn test_or_pattern_simple_literals() {
+    let source = r#"
+        const x = 2
+        const result = match x {
+            1 | 2 | 3 => "small",
+            4 | 5 => "medium",
+            _ => "large"
+        }
+    "#;
+
+    let result = compile_and_check(source);
+    if let Err(e) = &result {
+        eprintln!("Error: {}", e);
+    }
+    assert!(
+        result.is_ok(),
+        "Or-pattern with simple literals should compile"
+    );
+    let output = result.unwrap();
+
+    // Should generate: (__match_value == 1 or __match_value == 2 or __match_value == 3)
+    assert!(output.contains("or"));
+    assert!(output.contains("__match_value == 1"));
+    assert!(output.contains("__match_value == 2"));
+    assert!(output.contains("__match_value == 3"));
+}
+
+#[test]
+fn test_or_pattern_with_guard() {
+    let source = r#"
+        const x = 2
+        const result = match x {
+            1 | 2 | 3 when x > 1 => "big small",
+            _ => "other"
+        }
+    "#;
+
+    let result = compile_and_check(source);
+    assert!(result.is_ok(), "Or-pattern with guard should compile");
+    let output = result.unwrap();
+
+    // Should combine or-pattern condition with guard
+    assert!(output.contains("or"));
+    assert!(output.contains("and"));
+}
+
+#[test]
+fn test_or_pattern_boolean_exhaustive() {
+    let source = r#"
+        const x: boolean = true
+        const result = match x {
+            true | false => "covered"
+        }
+    "#;
+
+    let result = compile_and_check(source);
+    assert!(
+        result.is_ok(),
+        "Or-pattern covering all booleans should be exhaustive"
+    );
+}
+
+#[test]
+fn test_or_pattern_nested_in_array() {
+    let source = r#"
+        const x = {1, 2}
+        const result = match x {
+            {1 | 2, 3} => "matched",
+            _ => "no match"
+        }
+    "#;
+
+    let result = compile_and_check(source);
+    if let Err(e) = &result {
+        eprintln!("Error: {}", e);
+    }
+    assert!(result.is_ok(), "Or-pattern nested in array should compile");
+}
+
+#[test]
+fn test_or_pattern_in_object() {
+    let source = r#"
+        const x = {tag = "a", value = 1}
+        const result = match x {
+            {tag: "a" | "b", value} => value,
+            _ => 0
+        }
+    "#;
+
+    let result = compile_and_check(source);
+    if let Err(e) = &result {
+        eprintln!("Error: {}", e);
+    }
+    assert!(
+        result.is_ok(),
+        "Or-pattern in object pattern should compile"
+    );
+}
+
+// ========================================
+// Or-Pattern Binding Consistency Tests
+// ========================================
+
+#[test]
+fn test_or_pattern_inconsistent_bindings_missing_variable() {
+    let source = r#"
+        const x: {a: number, b: number} = {a: 1, b: 2}
+        const result = match x {
+            {a} | {b} => 0,
+            _ => 1
+        }
+    "#;
+
+    let result = compile_and_check(source);
+    match &result {
+        Ok(_) => {
+            eprintln!("Test passed successfully - no error was detected!");
+        }
+        Err(e) => {
+            eprintln!("Test failed as expected with error: {}", e);
+        }
+    }
+    assert!(
+        result.is_err(),
+        "Should error when second alternative doesn't bind 'a'"
+    );
+    let error = result.unwrap_err();
+    assert!(
+        error.contains("does not bind variable")
+            || error.contains("inconsistent")
+            || error.contains("binds variable"),
+        "Error message should mention binding inconsistency. Got: {}",
+        error
+    );
+}
+
+#[test]
+fn test_or_pattern_inconsistent_bindings_extra_variable() {
+    let source = r#"
+        const x: {a: number, b: number} = {a: 1, b: 2}
+        const result = match x {
+            {a} | {a, b} => 0,
+            _ => 1
+        }
+    "#;
+
+    let result = compile_and_check(source);
+    assert!(
+        result.is_err(),
+        "Should error when second alternative binds extra variable"
+    );
+    let error = result.unwrap_err();
+    assert!(
+        error.contains("binds variable") && error.contains("not present"),
+        "Error message should mention extra variable. Got: {}",
+        error
+    );
+}
+
+#[test]
+fn test_or_pattern_valid_same_bindings() {
+    let source = r#"
+        const x = {1, 2}
+        const result = match x {
+            {a, 1} | {a, 2} => a,
+            _ => 0
+        }
+    "#;
+
+    let result = compile_and_check(source);
+    if let Err(e) = &result {
+        eprintln!("Error: {}", e);
+    }
+    assert!(
+        result.is_ok(),
+        "Should compile when both alternatives bind 'a'"
+    );
+}
+
+#[test]
+fn test_or_pattern_nested_consistent() {
+    let source = r#"
+        const x = {{1, 2}, 3}
+        const result = match x {
+            {{a, 1}, 3} | {{a, 2}, 3} => a,
+            _ => 0
+        }
+    "#;
+
+    let result = compile_and_check(source);
+    if let Err(e) = &result {
+        eprintln!("Error: {}", e);
+    }
+    assert!(
+        result.is_ok(),
+        "Should compile when nested alternatives have consistent bindings"
+    );
+}
+
+#[test]
+fn test_or_pattern_nested_inconsistent() {
+    let source = r#"
+        const x = {a: {a: 1}, b: {a: 1}}
+        const result = match x {
+            {a: {a}} | {b: {}} => 0,
+            _ => 1
+        }
+    "#;
+
+    let result = compile_and_check(source);
+    assert!(
+        result.is_err(),
+        "Should error when nested second alternative doesn't bind 'a'"
+    );
+}
+
+#[test]
+fn test_or_pattern_no_bindings_valid() {
+    let source = r#"
+        const x = 5
+        const result = match x {
+            1 | 2 | 3 => "small",
+            _ => "large"
+        }
+    "#;
+
+    let result = compile_and_check(source);
+    if let Err(e) = &result {
+        eprintln!("Error: {}", e);
+    }
+    assert!(
+        result.is_ok(),
+        "Should compile when no alternatives bind variables"
+    );
+}
+
+#[test]
+fn test_or_pattern_all_wildcard_valid() {
+    let source = r#"
+        const x = {1, 2}
+        const result = match x {
+            {_, 1} | {_, 2} => "matched",
+            _ => "no match"
+        }
+    "#;
+
+    let result = compile_and_check(source);
+    if let Err(e) = &result {
+        eprintln!("Error: {}", e);
+    }
+    assert!(
+        result.is_ok(),
+        "Should compile when all wildcards don't bind variables"
+    );
+}
+
+#[test]
+fn test_or_pattern_object_consistent() {
+    let source = r#"
+        const x = {tag: "a", value: 1}
+        const result = match x {
+            {tag: "a", value} | {tag: "b", value} => value,
+            _ => 0
+        }
+    "#;
+
+    let result = compile_and_check(source);
+    if let Err(e) = &result {
+        eprintln!("Error: {}", e);
+    }
+    assert!(
+        result.is_ok(),
+        "Should compile when object patterns have consistent bindings"
+    );
+}
+
+#[test]
+fn test_or_pattern_object_inconsistent() {
+    let source = r#"
+        const x = {tag: "a", value: 1}
+        const result = match x {
+            {tag: "a", value} | {tag: "b"} => value,
+            _ => 0
+        }
+    "#;
+
+    let result = compile_and_check(source);
+    assert!(
+        result.is_err(),
+        "Should error when second object alternative missing 'value'"
+    );
+}
+
+#[test]
+fn test_or_pattern_three_alternatives_consistent() {
+    let source = r#"
+        const x = {1, 2, 3}
+        const result = match x {
+            {a, 1, 3} | {a, 2, 3} | {a, 3, 3} => a,
+            _ => 0
+        }
+    "#;
+
+    let result = compile_and_check(source);
+    if let Err(e) = &result {
+        eprintln!("Error: {}", e);
+    }
+    assert!(
+        result.is_ok(),
+        "Should compile when three alternatives consistently bind 'a'"
+    );
+}
+
+#[test]
+fn test_or_pattern_three_alternatives_inconsistent_middle() {
+    let source = r#"
+        const x: {a: number, b: number, c: number} = {a: 1, b: 2, c: 3}
+        const result = match x {
+            {a} | {b} | {a} => 0,
+            _ => 1
+        }
+    "#;
+
+    let result = compile_and_check(source);
+    assert!(
+        result.is_err(),
+        "Should error when middle alternative doesn't bind 'a'"
+    );
+}

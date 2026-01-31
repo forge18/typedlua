@@ -904,6 +904,17 @@ impl CodeGenerator {
                 self.write(value_var);
                 self.write(") == \"table\"");
             }
+            Pattern::Or(or_pattern) => {
+                // Generate: (cond1 or cond2 or cond3 ...)
+                self.write("(");
+                for (i, alt) in or_pattern.alternatives.iter().enumerate() {
+                    if i > 0 {
+                        self.write(" or ");
+                    }
+                    self.generate_pattern_match(alt, value_var);
+                }
+                self.write(")");
+            }
         }
     }
 
@@ -961,6 +972,13 @@ impl CodeGenerator {
                 }
             }
             Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
+            Pattern::Or(or_pattern) => {
+                // All alternatives bind same variables (verified by type checker during checking)
+                // Therefore we can safely use the first alternative for binding generation
+                if let Some(first) = or_pattern.alternatives.first() {
+                    self.generate_pattern_bindings(first, value_var);
+                }
+            }
         }
     }
 }

@@ -137,7 +137,7 @@ fn test_watch_mode_multiple_files() {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     // Should have watched and compiled both files
-    assert!(stdout.len() > 0); // Got some output
+    assert!(!stdout.is_empty()); // Got some output
 }
 
 /// Test watch mode exits cleanly on Ctrl+C simulation
@@ -235,7 +235,7 @@ fn test_watch_mode_handles_errors() {
 
     // Should have shown error but kept running
     assert!(
-        stderr.contains("error") || stderr.contains("Error") || stderr.len() > 0,
+        stderr.contains("error") || stderr.contains("Error") || !stderr.is_empty(),
         "Watch mode should report errors"
     );
 }
@@ -285,7 +285,7 @@ fn test_watch_mode_debouncing() {
     // The watch mode should handle all changes without crashing or missing files
     // Accept up to 6 compilations (initial + up to 5 for changes) as valid
     assert!(
-        recompile_count >= 1 && recompile_count <= 6,
+        (1..=6).contains(&recompile_count),
         "Watch mode should handle rapid changes, got {} 'Compiling' messages (expected 1-6)",
         recompile_count
     );

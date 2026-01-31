@@ -2,10 +2,12 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use typedlua_core::codegen::CodeGenerator;
-use typedlua_core::config::{CompilerOptions, OptimizationLevel};
+use typedlua_core::config::CompilerOptions;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::fs::MockFileSystem;
-use typedlua_core::module_resolver::{ModuleConfig, ModuleId, ModuleRegistry, ModuleResolver, LuaFilePolicy};
+use typedlua_core::module_resolver::{
+    LuaFilePolicy, ModuleConfig, ModuleId, ModuleRegistry, ModuleResolver,
+};
 use typedlua_core::typechecker::TypeChecker;
 use typedlua_parser::lexer::Lexer;
 use typedlua_parser::parser::Parser;

@@ -745,6 +745,13 @@ impl GlobalLocalizationPass {
                 }
             }
             Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
+            Pattern::Or(or_pattern) => {
+                // All alternatives bind the same variables (guaranteed by type checker)
+                // So we can collect from just the first alternative
+                if let Some(first) = or_pattern.alternatives.first() {
+                    self.collect_pattern_names(first, locals);
+                }
+            }
         }
     }
 
@@ -2528,6 +2535,13 @@ impl LoopOptimizationPass {
                 }
             }
             Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
+            Pattern::Or(or_pattern) => {
+                // All alternatives bind the same variables (guaranteed by type checker)
+                // So we can collect from just the first alternative
+                if let Some(first) = or_pattern.alternatives.first() {
+                    self.collect_modified_in_pattern(first, modified);
+                }
+            }
         }
     }
 
@@ -3512,6 +3526,13 @@ impl DeadStoreEliminationPass {
                 }
             }
             Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
+            Pattern::Or(or_pattern) => {
+                // All alternatives bind the same variables (guaranteed by type checker)
+                // So we can collect from just the first alternative
+                if let Some(first) = or_pattern.alternatives.first() {
+                    self.collect_names_from_pattern(first, names);
+                }
+            }
         }
     }
 

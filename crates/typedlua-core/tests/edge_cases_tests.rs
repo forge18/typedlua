@@ -280,3 +280,60 @@ fn test_pipe_operator() {
         assert!(lex_and_parse(input), "Should parse pipe: {}", input);
     }
 }
+
+// ============================================================================
+// General Edge Cases (Section 7.1.3)
+// ============================================================================
+
+#[test]
+fn test_very_long_identifier() {
+    let long_name = "a".repeat(100);
+    let input = format!("const {} = 42", long_name);
+    assert!(lex_and_parse(&input), "Should handle very long identifier");
+}
+
+#[test]
+fn test_deeply_nested_expressions() {
+    let input = "const x = ".to_string() + &"((((1 + ".repeat(10) + "2" + &"))))".repeat(10);
+    assert!(
+        lex_and_parse(&input),
+        "Should handle deeply nested expressions"
+    );
+}
+
+#[test]
+fn test_huge_number_literal() {
+    let input = "const x = 999999999999999999999";
+    assert!(lex_only(input), "Should handle huge number literal");
+}
+
+#[test]
+fn test_empty_union_type() {
+    let input = "type Never = never";
+    assert!(lex_and_parse(input), "Should parse empty/never type");
+}
+
+#[test]
+fn test_recursive_type_alias() {
+    let input = "type LinkedList<T> = { value: T, next: LinkedList<T>? }";
+    assert!(lex_and_parse(input), "Should parse recursive type alias");
+}
+
+#[test]
+fn test_self_referential_class() {
+    let input = "class Node { value: number, next: Node? }";
+    assert!(lex_and_parse(input), "Should parse self-referential class");
+}
+
+#[test]
+fn test_tuple_length_extremes() {
+    let inputs = vec![
+        "type Empty = []",
+        "type Single = [number]",
+        "type Pair = [number, string]",
+        "type Ten = [number, number, number, number, number, number, number, number, number, number]",
+    ];
+    for input in inputs {
+        assert!(lex_and_parse(input), "Should parse tuple: {}", input);
+    }
+}

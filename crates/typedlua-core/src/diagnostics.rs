@@ -440,6 +440,15 @@ pub mod error_codes {
     /// Access to protected member
     pub const PROTECTED_ACCESS: DiagnosticCode = DiagnosticCode::new('E', 3025);
 
+    /// Or-pattern alternatives bind different variables
+    pub const INCONSISTENT_OR_PATTERN_BINDINGS: DiagnosticCode = DiagnosticCode::new('E', 3026);
+
+    /// Or-pattern alternatives bind variables with incompatible types
+    pub const INCOMPATIBLE_OR_PATTERN_TYPES: DiagnosticCode = DiagnosticCode::new('E', 3027);
+
+    /// Or-pattern has no alternatives
+    pub const EMPTY_OR_PATTERN: DiagnosticCode = DiagnosticCode::new('E', 3028);
+
     // ========================================
     // Code Generator Errors (E4000-E4999)
     // ========================================
@@ -493,6 +502,9 @@ pub mod error_codes {
 
     /// Type could be narrower
     pub const TYPE_TOO_WIDE: DiagnosticCode = DiagnosticCode::new('W', 1009);
+
+    /// Pattern is unreachable
+    pub const UNREACHABLE_PATTERN: DiagnosticCode = DiagnosticCode::new('W', 1010);
 }
 
 /// Collecting diagnostic handler for testing
@@ -924,6 +936,9 @@ mod tests {
             READONLY_PROPERTY,
             PRIVATE_ACCESS,
             PROTECTED_ACCESS,
+            INCONSISTENT_OR_PATTERN_BINDINGS,
+            INCOMPATIBLE_OR_PATTERN_TYPES,
+            EMPTY_OR_PATTERN,
             // Code generator
             UNSUPPORTED_FEATURE,
             SOURCE_MAP_ERROR,
@@ -941,6 +956,7 @@ mod tests {
             SHADOWED_VARIABLE,
             EMPTY_BLOCK,
             TYPE_TOO_WIDE,
+            UNREACHABLE_PATTERN,
         ];
 
         // Check all codes are unique

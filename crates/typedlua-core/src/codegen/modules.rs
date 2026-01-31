@@ -67,6 +67,46 @@ impl CodeGenerator {
                 self.write(&module_path);
                 self.writeln("\")");
             }
+            typedlua_parser::ast::statement::ImportClause::Mixed { default, named } => {
+                // Load module once
+                self.write_indent();
+                self.write("local _mod = ");
+                self.write(require_fn);
+                self.write("(\"");
+                self.write(&module_path);
+                self.writeln("\")");
+
+                // Assign default export to the default identifier
+                self.write_indent();
+                self.write("local ");
+                let default_str = self.resolve(default.node);
+                self.write(&default_str);
+                self.writeln(" = _mod");
+
+                // Extract named imports
+                if !named.is_empty() {
+                    self.write_indent();
+                    self.write("local ");
+                    for (i, spec) in named.iter().enumerate() {
+                        if i > 0 {
+                            self.write(", ");
+                        }
+                        let local_name = spec.local.as_ref().unwrap_or(&spec.imported);
+                        let name_str = self.resolve(local_name.node);
+                        self.write(&name_str);
+                    }
+                    self.write(" = ");
+                    for (i, spec) in named.iter().enumerate() {
+                        if i > 0 {
+                            self.write(", ");
+                        }
+                        self.write("_mod.");
+                        let imported_str = self.resolve(spec.imported.node);
+                        self.write(&imported_str);
+                    }
+                    self.writeln("");
+                }
+            }
         }
     }
 

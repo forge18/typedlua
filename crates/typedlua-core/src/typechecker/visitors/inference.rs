@@ -5,6 +5,9 @@ use super::super::type_environment::TypeEnvironment;
 use super::super::visitors::{AccessControl, AccessControlVisitor, ClassMemberKind};
 use super::super::TypeCheckError;
 use super::TypeCheckVisitor;
+use crate::diagnostics::DiagnosticHandler;
+use rustc_hash::FxHashMap;
+use std::sync::Arc;
 use typedlua_parser::ast::expression::*;
 use typedlua_parser::ast::pattern::{ArrayPatternElement, Pattern};
 use typedlua_parser::ast::types::*;
@@ -13,6 +16,19 @@ use typedlua_parser::prelude::{
 };
 use typedlua_parser::span::Span;
 use typedlua_parser::string_interner::StringInterner;
+
+/// Represents a variable binding from a pattern
+#[derive(Debug, Clone)]
+struct PatternBinding {
+    typ: Type,
+    span: Span,
+}
+
+/// Collection of bindings from a pattern
+#[derive(Debug, Clone)]
+struct PatternBindings {
+    bindings: FxHashMap<String, PatternBinding>,
+}
 
 /// Trait for type inference operations
 pub trait TypeInferenceVisitor: TypeCheckVisitor {
@@ -38,9 +54,9 @@ pub trait TypeInferenceVisitor: TypeCheckVisitor {
 
     /// Infer type of function call
     fn infer_call(
-        &self,
+        &mut self,
         callee_type: &Type,
-        _args: &[Argument],
+        args: &mut [Argument],
         span: Span,
     ) -> Result<Type, TypeCheckError>;
 
@@ -99,6 +115,7 @@ pub struct TypeInferrer<'a> {
     narrowing_context: &'a mut super::NarrowingContext,
     access_control: &'a AccessControl,
     interner: &'a StringInterner,
+    diagnostic_handler: &'a Arc<dyn DiagnosticHandler>,
 }
 
 impl<'a> TypeInferrer<'a> {
@@ -108,6 +125,7 @@ impl<'a> TypeInferrer<'a> {
         narrowing_context: &'a mut super::NarrowingContext,
         access_control: &'a AccessControl,
         interner: &'a StringInterner,
+        diagnostic_handler: &'a Arc<dyn DiagnosticHandler>,
     ) -> Self {
         Self {
             symbol_table,
@@ -115,6 +133,7 @@ impl<'a> TypeInferrer<'a> {
             narrowing_context,
             access_control,
             interner,
+            diagnostic_handler,
         }
     }
 }
@@ -445,7 +464,66 @@ impl TypeInferenceVisitor for TypeInferrer<'_> {
                 ))
             }
 
-            ExpressionKind::Function(_) | ExpressionKind::Arrow(_) => {
+            ExpressionKind::Function(_) => {
+                // Function expressions not fully supported yet
+                Ok(Type::new(TypeKind::Primitive(PrimitiveType::Unknown), span))
+            }
+
+            ExpressionKind::Arrow(arrow_fn) => {
+                // Enter a new scope for the arrow function
+                self.symbol_table.enter_scope();
+
+                // Register parameters in the scope
+                for param in &arrow_fn.parameters {
+                    if let Pattern::Identifier(ident) = &param.pattern {
+                        let param_type = if let Some(type_ann) = &param.type_annotation {
+                            // Use the declared type
+                            type_ann.clone()
+                        } else {
+                            // No type annotation - use unknown
+                            Type::new(TypeKind::Primitive(PrimitiveType::Unknown), param.span)
+                        };
+
+                        let symbol = Symbol::new(
+                            self.interner.resolve(ident.node).to_string(),
+                            SymbolKind::Variable,
+                            param_type,
+                            ident.span,
+                        );
+                        let _ = self.symbol_table.declare(symbol);
+                    }
+                }
+
+                // Infer the body type
+                let body_type = match &arrow_fn.body {
+                    ArrowBody::Expression(expr_box) => {
+                        // Make a mutable copy to infer
+                        let mut expr_copy = (**expr_box).clone();
+                        self.infer_expression(&mut expr_copy)?
+                    }
+                    ArrowBody::Block(_block) => {
+                        // Block bodies not fully supported yet
+                        Type::new(TypeKind::Primitive(PrimitiveType::Unknown), span)
+                    }
+                };
+
+                // Check return type if specified
+                if let Some(declared_return_type) = &arrow_fn.return_type {
+                    if !TypeCompatibility::is_assignable(&body_type, declared_return_type) {
+                        self.diagnostic_handler.error(
+                            span,
+                            &format!(
+                                "Arrow function return type mismatch: expected '{:?}', found '{:?}'",
+                                declared_return_type.kind, body_type.kind
+                            ),
+                        );
+                    }
+                }
+
+                // Exit the arrow function scope
+                self.symbol_table.exit_scope();
+
+                // Return a function type
                 Ok(Type::new(TypeKind::Primitive(PrimitiveType::Unknown), span))
             }
 
@@ -504,6 +582,16 @@ impl TypeInferenceVisitor for TypeInferrer<'_> {
                 // For `new ClassName(args)`, callee is Identifier("ClassName")
                 match &callee.kind {
                     ExpressionKind::Identifier(name) => {
+                        let class_name = self.interner.resolve(*name);
+
+                        // Check if the class is abstract
+                        if self.type_env.is_abstract_class(&class_name) {
+                            return Err(TypeCheckError::new(
+                                format!("Cannot instantiate abstract class '{}'", class_name),
+                                span,
+                            ));
+                        }
+
                         // Return a Reference type to the class
                         Ok(Type::new(
                             TypeKind::Reference(TypeReference {
@@ -520,6 +608,11 @@ impl TypeInferenceVisitor for TypeInferrer<'_> {
                         Ok(Type::new(TypeKind::Primitive(PrimitiveType::Unknown), span))
                     }
                 }
+            }
+
+            ExpressionKind::Parenthesized(inner) => {
+                // Parenthesized expressions have the same type as their inner expression
+                self.infer_expression(inner)
             }
 
             _ => {
@@ -544,6 +637,23 @@ impl TypeInferenceVisitor for TypeInferrer<'_> {
             | BinaryOp::Modulo
             | BinaryOp::Power
             | BinaryOp::IntegerDivide => {
+                // Check that both operands are numbers
+                let left_is_number = matches!(left.kind, TypeKind::Primitive(PrimitiveType::Number) | TypeKind::Literal(Literal::Number(_)));
+                let right_is_number = matches!(right.kind, TypeKind::Primitive(PrimitiveType::Number) | TypeKind::Literal(Literal::Number(_)));
+
+                if !left_is_number {
+                    self.diagnostic_handler.error(
+                        span,
+                        &format!("Left operand of arithmetic operation must be a number, found {:?}", left.kind),
+                    );
+                }
+                if !right_is_number {
+                    self.diagnostic_handler.error(
+                        span,
+                        &format!("Right operand of arithmetic operation must be a number, found {:?}", right.kind),
+                    );
+                }
+
                 Ok(Type::new(TypeKind::Primitive(PrimitiveType::Number), span))
             }
             BinaryOp::Concatenate => {
@@ -587,13 +697,92 @@ impl TypeInferenceVisitor for TypeInferrer<'_> {
     }
 
     fn infer_call(
-        &self,
+        &mut self,
         callee_type: &Type,
-        _args: &[Argument],
+        args: &mut [Argument],
         span: Span,
     ) -> Result<Type, TypeCheckError> {
         match &callee_type.kind {
-            TypeKind::Function(func_type) => Ok((*func_type.return_type).clone()),
+            TypeKind::Function(func_type) => {
+                // Check argument count
+                let actual_args = args.len();
+
+                // Count required parameters (non-optional, non-rest)
+                let required_params = func_type
+                    .parameters
+                    .iter()
+                    .filter(|p| !p.is_rest && !p.is_optional)
+                    .count();
+
+                // Check if the last parameter is a rest parameter
+                let has_rest_param = func_type
+                    .parameters
+                    .last()
+                    .map(|p| p.is_rest)
+                    .unwrap_or(false);
+
+                // Count optional parameters
+                let optional_params = func_type
+                    .parameters
+                    .iter()
+                    .filter(|p| p.is_optional && !p.is_rest)
+                    .count();
+
+                let max_params = if has_rest_param {
+                    usize::MAX
+                } else {
+                    required_params + optional_params
+                };
+
+                // Check minimum required arguments
+                if actual_args < required_params {
+                    return Err(TypeCheckError::new(
+                        format!(
+                            "Function expects at least {} arguments but received {}",
+                            required_params, actual_args
+                        ),
+                        span,
+                    ));
+                }
+
+                // Check maximum allowed arguments (unless rest parameter)
+                if !has_rest_param && actual_args > max_params {
+                    return Err(TypeCheckError::new(
+                        format!(
+                            "Function expects at most {} arguments but received {}",
+                            max_params, actual_args
+                        ),
+                        span,
+                    ));
+                }
+
+                // Check argument types match parameter types
+                for (i, arg) in args.iter_mut().enumerate() {
+                    if i < func_type.parameters.len() {
+                        let param = &func_type.parameters[i];
+
+                        // Infer the argument type
+                        if let Ok(arg_type) = self.infer_expression(&mut arg.value) {
+                            if let Some(param_type) = &param.type_annotation {
+                                // Check if argument type is assignable to parameter type
+                                if !TypeCompatibility::is_assignable(&arg_type, param_type) {
+                                    self.diagnostic_handler.error(
+                                        arg.value.span,
+                                        &format!(
+                                            "Type mismatch in function call: argument {} has type '{:?}' which is not assignable to parameter type '{:?}'",
+                                            i + 1,
+                                            arg_type.kind,
+                                            param_type.kind
+                                        ),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Ok((*func_type.return_type).clone())
+            }
             _ => {
                 // Non-function called - return unknown
                 Ok(Type::new(TypeKind::Primitive(PrimitiveType::Unknown), span))
@@ -842,11 +1031,6 @@ impl TypeInferenceVisitor for TypeInferrer<'_> {
     fn check_match(&mut self, match_expr: &mut MatchExpression) -> Result<Type, TypeCheckError> {
         // Type check the value being matched
         let value_type = self.infer_expression(&mut match_expr.value)?;
-        eprintln!(
-            "DEBUG check_match: value_type = {:?}, arms = {}",
-            value_type.kind,
-            match_expr.arms.len()
-        );
 
         if match_expr.arms.is_empty() {
             return Err(TypeCheckError::new(
@@ -858,6 +1042,9 @@ impl TypeInferenceVisitor for TypeInferrer<'_> {
         // Check exhaustiveness
         self.check_exhaustiveness(&match_expr.arms, &value_type, match_expr.span)?;
 
+        // Check for unreachable patterns
+        self.check_unreachable_patterns(&match_expr.arms);
+
         // Type check each arm and collect result types
         let mut arm_types = Vec::new();
 
@@ -865,11 +1052,11 @@ impl TypeInferenceVisitor for TypeInferrer<'_> {
             // Enter a new scope for this arm
             self.symbol_table.enter_scope();
 
-            // Narrow the type based on the pattern
-            let narrowed_type = self.narrow_type_by_pattern(&arm.pattern, &value_type)?;
+            // First check that the pattern is compatible with the value type
+            self.check_pattern(&arm.pattern, &value_type)?;
 
-            // Check the pattern and bind variables with the narrowed type
-            self.check_pattern(&arm.pattern, &narrowed_type)?;
+            // Then narrow the type based on the pattern for variable bindings
+            let narrowed_type = self.narrow_type_by_pattern(&arm.pattern, &value_type)?;
 
             // Check the guard if present
             if let Some(guard) = &mut arm.guard {
@@ -960,10 +1147,45 @@ impl TypeInferenceVisitor for TypeInferrer<'_> {
                     .map_err(|e| TypeCheckError::new(e, ident.span))?;
                 Ok(())
             }
-            Pattern::Literal(_lit, _span) => {
-                // Literal patterns are allowed as long as they match the general type
-                // We don't enforce exact literal matching at type check time
-                // The pattern match will handle the runtime check
+            Pattern::Literal(lit, span) => {
+                // Check that the literal pattern type is compatible with the expected type
+                // For example, a string literal pattern should not match a number value
+                let pattern_is_number = matches!(lit, Literal::Number(_) | Literal::Integer(_));
+                let pattern_is_string = matches!(lit, Literal::String(_));
+                let pattern_is_boolean = matches!(lit, Literal::Boolean(_));
+                let pattern_is_nil = matches!(lit, Literal::Nil);
+
+                let expected_is_number = matches!(expected_type.kind,
+                    TypeKind::Primitive(PrimitiveType::Number | PrimitiveType::Integer) |
+                    TypeKind::Literal(Literal::Number(_) | Literal::Integer(_))
+                );
+                let expected_is_string = matches!(expected_type.kind,
+                    TypeKind::Primitive(PrimitiveType::String) |
+                    TypeKind::Literal(Literal::String(_))
+                );
+                let expected_is_boolean = matches!(expected_type.kind,
+                    TypeKind::Primitive(PrimitiveType::Boolean) |
+                    TypeKind::Literal(Literal::Boolean(_))
+                );
+                let expected_is_nil = matches!(expected_type.kind,
+                    TypeKind::Primitive(PrimitiveType::Nil) |
+                    TypeKind::Literal(Literal::Nil)
+                );
+
+                let is_compatible = (pattern_is_number && expected_is_number)
+                    || (pattern_is_string && expected_is_string)
+                    || (pattern_is_boolean && expected_is_boolean)
+                    || (pattern_is_nil && expected_is_nil);
+
+                if !is_compatible {
+                    self.diagnostic_handler.error(
+                        *span,
+                        &format!(
+                            "Pattern type mismatch: cannot match literal '{:?}' against type '{:?}'",
+                            lit, expected_type.kind
+                        ),
+                    );
+                }
                 Ok(())
             }
             Pattern::Wildcard(_) => {
@@ -1073,11 +1295,425 @@ impl TypeInferenceVisitor for TypeInferrer<'_> {
                     }
                 }
             }
+            Pattern::Or(or_pattern) => {
+                // Validate that all alternatives bind the same variables with compatible types
+                self.validate_or_pattern_bindings(or_pattern, expected_type)?;
+
+                // Type check and declare symbols from the first alternative only
+                // All alternatives are guaranteed to have the same bindings due to validation above
+                if let Some(first) = or_pattern.alternatives.first() {
+                    self.check_pattern(first, expected_type)?;
+                }
+
+                Ok(())
+            }
         }
     }
 }
 
 impl TypeInferrer<'_> {
+    /// Extract all variable bindings from a pattern
+    fn extract_pattern_bindings(
+        &self,
+        pattern: &Pattern,
+        expected_type: &Type,
+    ) -> Result<PatternBindings, TypeCheckError> {
+        let mut bindings = PatternBindings {
+            bindings: FxHashMap::default(),
+        };
+        self.extract_pattern_bindings_recursive(pattern, expected_type, &mut bindings)?;
+        Ok(bindings)
+    }
+
+    /// Recursive helper for extracting bindings from a pattern
+    fn extract_pattern_bindings_recursive(
+        &self,
+        pattern: &Pattern,
+        expected_type: &Type,
+        bindings: &mut PatternBindings,
+    ) -> Result<(), TypeCheckError> {
+        match pattern {
+            Pattern::Identifier(ident) => {
+                // Add binding for the identifier
+                let name = self.interner.resolve(ident.node).to_string();
+                let binding = PatternBinding {
+                    typ: expected_type.clone(),
+                    span: ident.span,
+                };
+                bindings.bindings.insert(name, binding);
+                Ok(())
+            }
+            Pattern::Array(array_pattern) => {
+                // Extract element type and recurse into elements
+                let elem_type_box: Box<Type> = match &expected_type.kind {
+                    TypeKind::Array(et) => et.clone(),
+                    _ => {
+                        // If expected type is not an array, use Unknown as element type
+                        // This allows us to extract bindings even when type info is incomplete
+                        Box::new(Type::new(
+                            TypeKind::Primitive(PrimitiveType::Unknown),
+                            expected_type.span,
+                        ))
+                    }
+                };
+
+                for elem in &array_pattern.elements {
+                    match elem {
+                        ArrayPatternElement::Pattern(pat) => {
+                            self.extract_pattern_bindings_recursive(pat, &elem_type_box, bindings)?;
+                        }
+                        ArrayPatternElement::Rest(ident) => {
+                            let name = self.interner.resolve(ident.node).to_string();
+                            let binding = PatternBinding {
+                                typ: expected_type.clone(),
+                                span: ident.span,
+                            };
+                            bindings.bindings.insert(name, binding);
+                        }
+                        ArrayPatternElement::Hole => {
+                            // Hole doesn't bind anything
+                        }
+                    }
+                }
+                Ok(())
+            }
+            Pattern::Object(object_pattern) => {
+                // Extract property types and recurse
+                for prop in &object_pattern.properties {
+                    let prop_type = match &expected_type.kind {
+                        TypeKind::Object(obj_type) => obj_type
+                            .members
+                            .iter()
+                            .find_map(|member| {
+                                if let ObjectTypeMember::Property(prop_sig) = member {
+                                    if prop_sig.name.node == prop.key.node {
+                                        return Some(prop_sig.type_annotation.clone());
+                                    }
+                                }
+                                None
+                            })
+                            .unwrap_or_else(|| {
+                                Type::new(TypeKind::Primitive(PrimitiveType::Unknown), prop.span)
+                            }),
+                        _ => {
+                            // If expected type is not an object, use Unknown for property type
+                            Type::new(TypeKind::Primitive(PrimitiveType::Unknown), prop.span)
+                        }
+                    };
+
+                    if let Some(value_pattern) = &prop.value {
+                        self.extract_pattern_bindings_recursive(
+                            value_pattern,
+                            &prop_type,
+                            bindings,
+                        )?;
+                    } else {
+                        // Shorthand: { x } means { x: x }
+                        let name = self.interner.resolve(prop.key.node).to_string();
+                        let binding = PatternBinding {
+                            typ: prop_type,
+                            span: prop.key.span,
+                        };
+                        bindings.bindings.insert(name, binding);
+                    }
+                }
+                Ok(())
+            }
+            Pattern::Or(or_pattern) => {
+                // For or-patterns, we'll handle this at a higher level
+                // For now, just extract from the first alternative
+                if let Some(first) = or_pattern.alternatives.first() {
+                    self.extract_pattern_bindings_recursive(first, expected_type, bindings)?;
+                }
+                Ok(())
+            }
+            Pattern::Literal(_, _) | Pattern::Wildcard(_) => {
+                // No bindings
+                Ok(())
+            }
+        }
+    }
+
+    /// Validate that all alternatives in an or-pattern bind the same variables with compatible types
+    fn validate_or_pattern_bindings(
+        &self,
+        or_pattern: &typedlua_parser::ast::pattern::OrPattern,
+        expected_type: &Type,
+    ) -> Result<PatternBindings, TypeCheckError> {
+        use rustc_hash::FxHashSet;
+
+        if or_pattern.alternatives.is_empty() {
+            return Err(TypeCheckError::new(
+                "Or-pattern must have at least one alternative",
+                or_pattern.span,
+            ));
+        }
+
+        // Extract bindings from first alternative (reference)
+        let first_alt = &or_pattern.alternatives[0];
+        let first_bindings = self.extract_pattern_bindings(first_alt, expected_type)?;
+
+        // Check each subsequent alternative
+        for (i, alt) in or_pattern.alternatives.iter().enumerate().skip(1) {
+            let alt_bindings = self.extract_pattern_bindings(alt, expected_type)?;
+
+            // Check 1: Same variable names
+            let first_names: FxHashSet<&String> = first_bindings.bindings.keys().collect();
+            let alt_names: FxHashSet<&String> = alt_bindings.bindings.keys().collect();
+
+            // Variables in first but not in alt
+            if let Some(missing) = first_names.difference(&alt_names).next() {
+                return Err(TypeCheckError::new(
+                    format!(
+                        "Or-pattern alternative {} does not bind variable '{}' (bound in alternative 0)",
+                        i, missing
+                    ),
+                    alt.span(),
+                ));
+            }
+
+            // Variables in alt but not in first
+            if let Some(extra) = alt_names.difference(&first_names).next() {
+                return Err(TypeCheckError::new(
+                    format!(
+                        "Or-pattern alternative {} binds variable '{}' not present in alternative 0",
+                        i, extra
+                    ),
+                    alt.span(),
+                ));
+            }
+
+            // Check 2: Type compatibility for common variables
+            for (name, first_binding) in &first_bindings.bindings {
+                let alt_binding = &alt_bindings.bindings[name];
+
+                // Types must be mutually assignable
+                if !TypeCompatibility::is_assignable(&first_binding.typ, &alt_binding.typ)
+                    && !TypeCompatibility::is_assignable(&alt_binding.typ, &first_binding.typ)
+                {
+                    return Err(TypeCheckError::new(
+                        format!(
+                            "Variable '{}' has incompatible types across or-pattern alternatives: {:?} vs {:?}",
+                            name, first_binding.typ.kind, alt_binding.typ.kind
+                        ),
+                        alt_binding.span,
+                    ));
+                }
+            }
+        }
+
+        Ok(first_bindings)
+    }
+
+    /// Check if an earlier pattern subsumes a later pattern
+    /// Returns true if all values matching the later pattern would also match the earlier pattern
+    fn pattern_subsumes(&self, earlier: &Pattern, later: &Pattern) -> bool {
+        match (earlier, later) {
+            // Wildcard and identifier always subsume everything
+            (Pattern::Wildcard(_), _) | (Pattern::Identifier(_), _) => true,
+
+            // Nothing subsumes wildcard/identifier (they're most general)
+            (_, Pattern::Wildcard(_)) | (_, Pattern::Identifier(_)) => false,
+
+            // Literal subsumption: exact match only
+            (Pattern::Literal(a, _), Pattern::Literal(b, _)) => a == b,
+
+            // Or-pattern subsumption cases
+            (Pattern::Or(or1), Pattern::Or(or2)) => {
+                self.or_pattern_subsumes_or_pattern(&or1.alternatives, &or2.alternatives)
+            }
+            (Pattern::Or(or_pat), later_pat) => {
+                self.or_pattern_subsumes_pattern(&or_pat.alternatives, later_pat)
+            }
+            (earlier_pat, Pattern::Or(or_pat)) => {
+                self.pattern_subsumes_or_pattern(earlier_pat, &or_pat.alternatives)
+            }
+
+            // Array pattern subsumption
+            (Pattern::Array(arr1), Pattern::Array(arr2)) => self.array_pattern_subsumes(arr1, arr2),
+
+            // Object pattern subsumption
+            (Pattern::Object(obj1), Pattern::Object(obj2)) => {
+                self.object_pattern_subsumes(obj1, obj2)
+            }
+
+            // Different pattern types don't subsume each other
+            _ => false,
+        }
+    }
+
+    /// Or-pattern subsumes single pattern if ANY alternative subsumes it
+    fn or_pattern_subsumes_pattern(&self, or_alts: &[Pattern], later: &Pattern) -> bool {
+        or_alts.iter().any(|alt| self.pattern_subsumes(alt, later))
+    }
+
+    /// Single pattern subsumes or-pattern if it subsumes ALL alternatives
+    fn pattern_subsumes_or_pattern(&self, earlier: &Pattern, or_alts: &[Pattern]) -> bool {
+        or_alts
+            .iter()
+            .all(|alt| self.pattern_subsumes(earlier, alt))
+    }
+
+    /// Or-pattern subsumes or-pattern if every later alternative is subsumed by some earlier alternative
+    fn or_pattern_subsumes_or_pattern(
+        &self,
+        earlier_alts: &[Pattern],
+        later_alts: &[Pattern],
+    ) -> bool {
+        later_alts.iter().all(|later_alt| {
+            earlier_alts
+                .iter()
+                .any(|earlier_alt| self.pattern_subsumes(earlier_alt, later_alt))
+        })
+    }
+
+    /// Array pattern subsumption
+    fn array_pattern_subsumes(
+        &self,
+        earlier: &typedlua_parser::ast::pattern::ArrayPattern,
+        later: &typedlua_parser::ast::pattern::ArrayPattern,
+    ) -> bool {
+        let earlier_elems = &earlier.elements;
+        let later_elems = &later.elements;
+
+        // Check if patterns have rest elements
+        let earlier_has_rest = earlier_elems
+            .iter()
+            .any(|e| matches!(e, ArrayPatternElement::Rest(_)));
+        let later_has_rest = later_elems
+            .iter()
+            .any(|e| matches!(e, ArrayPatternElement::Rest(_)));
+
+        // If neither has rest, lengths must match
+        if !earlier_has_rest && !later_has_rest && earlier_elems.len() != later_elems.len() {
+            return false;
+        }
+
+        // If earlier has rest but later doesn't, earlier can match more cases
+        // Need to check that later's elements match earlier's prefix
+        if earlier_has_rest && !later_has_rest {
+            // Find the position of the rest element in earlier
+            if let Some(rest_pos) = earlier_elems
+                .iter()
+                .position(|e| matches!(e, ArrayPatternElement::Rest(_)))
+            {
+                // Check that later has at least rest_pos elements
+                if later_elems.len() < rest_pos {
+                    return false;
+                }
+
+                // Check element-by-element for the prefix
+                for i in 0..rest_pos {
+                    if !self.array_elements_subsume_single(&earlier_elems[i], &later_elems[i]) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+        }
+
+        // Element-by-element subsumption
+        earlier_elems
+            .iter()
+            .zip(later_elems.iter())
+            .all(|(e1, e2)| self.array_elements_subsume_single(e1, e2))
+    }
+
+    /// Check if array pattern element e1 subsumes e2
+    fn array_elements_subsume_single(
+        &self,
+        e1: &ArrayPatternElement,
+        e2: &ArrayPatternElement,
+    ) -> bool {
+        match (e1, e2) {
+            (ArrayPatternElement::Pattern(p1), ArrayPatternElement::Pattern(p2)) => {
+                self.pattern_subsumes(p1, p2)
+            }
+            (ArrayPatternElement::Rest(_), ArrayPatternElement::Rest(_)) => true,
+            (ArrayPatternElement::Hole, ArrayPatternElement::Hole) => true,
+            _ => false,
+        }
+    }
+
+    /// Object pattern subsumption
+    fn object_pattern_subsumes(
+        &self,
+        earlier: &typedlua_parser::ast::pattern::ObjectPattern,
+        later: &typedlua_parser::ast::pattern::ObjectPattern,
+    ) -> bool {
+        let earlier_props = &earlier.properties;
+        let later_props = &later.properties;
+
+        // Earlier must have ≤ properties (less constrained)
+        if earlier_props.len() > later_props.len() {
+            return false;
+        }
+
+        // Every property in earlier must subsume corresponding property in later
+        earlier_props.iter().all(|earlier_prop| {
+            later_props.iter().any(|later_prop| {
+                // Properties must have same key
+                if earlier_prop.key.node != later_prop.key.node {
+                    return false;
+                }
+
+                // Check value pattern subsumption
+                match (&earlier_prop.value, &later_prop.value) {
+                    (Some(p1), Some(p2)) => self.pattern_subsumes(p1, p2),
+                    (None, None) => true,     // Both are shorthand bindings
+                    (None, Some(_)) => true,  // Earlier shorthand subsumes explicit pattern
+                    (Some(_), None) => false, // Explicit pattern more specific
+                }
+            })
+        })
+    }
+
+    /// Check for unreachable patterns in match arms
+    fn check_unreachable_patterns(&self, arms: &[MatchArm]) {
+        for (i, arm) in arms.iter().enumerate() {
+            // Skip checking arms with guards - they may not match
+            if arm.guard.is_some() {
+                continue;
+            }
+
+            // Check against all previous arms
+            for (j, earlier_arm) in arms[..i].iter().enumerate() {
+                // Earlier arms with guards don't guarantee subsumption
+                if earlier_arm.guard.is_some() {
+                    continue;
+                }
+
+                if self.pattern_subsumes(&earlier_arm.pattern, &arm.pattern) {
+                    self.emit_unreachable_warning(i, j, earlier_arm, arm);
+                    break; // Only warn once per unreachable pattern
+                }
+            }
+        }
+    }
+
+    /// Emit a warning for an unreachable pattern
+    fn emit_unreachable_warning(
+        &self,
+        _current_idx: usize,
+        subsuming_idx: usize,
+        earlier_arm: &MatchArm,
+        current_arm: &MatchArm,
+    ) {
+        use crate::diagnostics::error_codes::UNREACHABLE_PATTERN;
+
+        let message = format!(
+            "Pattern is unreachable because it is already covered by arm {} (line {})",
+            subsuming_idx + 1,
+            earlier_arm.pattern.span().line
+        );
+
+        let diagnostic =
+            crate::diagnostics::Diagnostic::warning(current_arm.pattern.span(), message)
+                .with_code(UNREACHABLE_PATTERN);
+
+        self.diagnostic_handler.report(diagnostic);
+    }
+
     /// Check member access permissions
     fn check_member_access(
         &self,
@@ -1094,6 +1730,22 @@ impl TypeInferrer<'_> {
     }
 
     /// Check if match arms are exhaustive for the given type
+    /// Helper to collect all literals from a pattern, including those in or-patterns
+    fn collect_pattern_literals<'a>(&self, pattern: &'a Pattern, literals: &mut Vec<&'a Literal>) {
+        match pattern {
+            Pattern::Literal(lit, _) => {
+                literals.push(lit);
+            }
+            Pattern::Or(or_pattern) => {
+                // Recursively collect from all alternatives
+                for alt in &or_pattern.alternatives {
+                    self.collect_pattern_literals(alt, literals);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn check_exhaustiveness(
         &self,
         arms: &[MatchArm],
@@ -1135,11 +1787,17 @@ impl TypeInferrer<'_> {
                     arms.len()
                 );
                 for arm in arms {
-                    if let Pattern::Literal(Literal::Boolean(b), _) = &arm.pattern {
-                        if *b {
-                            has_true = true;
-                        } else {
-                            has_false = true;
+                    // Collect all literals from the pattern, including those in or-patterns
+                    let mut literals = Vec::new();
+                    self.collect_pattern_literals(&arm.pattern, &mut literals);
+
+                    for lit in literals {
+                        if let Literal::Boolean(b) = lit {
+                            if *b {
+                                has_true = true;
+                            } else {
+                                has_false = true;
+                            }
                         }
                     }
                 }
@@ -1177,7 +1835,9 @@ impl TypeInferrer<'_> {
             TypeKind::Literal(lit) => {
                 // For literal types, must match exactly that literal
                 let covered = arms.iter().any(|arm| {
-                    matches!(&arm.pattern, Pattern::Literal(pattern_lit, _) if pattern_lit == lit)
+                    let mut literals = Vec::new();
+                    self.collect_pattern_literals(&arm.pattern, &mut literals);
+                    literals.contains(&lit)
                 });
 
                 if !covered {
@@ -1211,6 +1871,13 @@ impl TypeInferrer<'_> {
             },
             Pattern::Array(_) => matches!(typ.kind, TypeKind::Array(_) | TypeKind::Tuple(_)),
             Pattern::Object(_) => matches!(typ.kind, TypeKind::Object(_)),
+            Pattern::Or(or_pattern) => {
+                // Or-pattern matches if ANY alternative could match
+                or_pattern
+                    .alternatives
+                    .iter()
+                    .any(|alt| self.pattern_could_match(alt, typ))
+            }
         }
     }
 
@@ -1280,6 +1947,23 @@ impl TypeInferrer<'_> {
                         }
                     }
                     _ => Ok(typ.clone()),
+                }
+            }
+            Pattern::Or(or_pattern) => {
+                // Narrow to union of all narrowed alternative types
+                let mut narrowed_types = Vec::new();
+
+                for alt in &or_pattern.alternatives {
+                    let narrowed = self.narrow_type_by_pattern(alt, typ)?;
+                    narrowed_types.push(narrowed);
+                }
+
+                // If all narrowed to same type, return single type
+                if narrowed_types.len() == 1 {
+                    Ok(narrowed_types[0].clone())
+                } else {
+                    // Different types - return union
+                    Ok(Type::new(TypeKind::Union(narrowed_types), typ.span))
                 }
             }
         }

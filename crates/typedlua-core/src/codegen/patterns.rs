@@ -20,6 +20,12 @@ impl CodeGenerator {
             Pattern::Object(object_pattern) => {
                 self.generate_object_pattern(object_pattern);
             }
+            Pattern::Or(_) => {
+                // Or-patterns should only appear in match expressions
+                // Not in destructuring assignments like: const [a | b] = [1]
+                // Treat as wildcard if encountered (defensive programming)
+                self.write("_");
+            }
         }
     }
 

@@ -27,6 +27,8 @@ pub struct TypeEnvironment {
     type_param_constraints: FxHashMap<String, Type>,
     /// Class implements relationships (class name -> list of implemented interface types)
     class_implements: FxHashMap<String, Vec<Type>>,
+    /// Abstract classes (class name -> is_abstract)
+    abstract_classes: FxHashMap<String, bool>,
 }
 
 impl TypeEnvironment {
@@ -39,6 +41,7 @@ impl TypeEnvironment {
             resolving: std::cell::RefCell::new(std::collections::HashSet::new()),
             type_param_constraints: FxHashMap::default(),
             class_implements: FxHashMap::default(),
+            abstract_classes: FxHashMap::default(),
         };
 
         env.register_builtins();
@@ -186,6 +189,19 @@ impl TypeEnvironment {
     /// Get the interfaces a class implements
     pub fn get_class_implements(&self, class_name: &str) -> Option<&Vec<Type>> {
         self.class_implements.get(class_name)
+    }
+
+    /// Register a class as abstract
+    pub fn register_abstract_class(&mut self, class_name: String) {
+        self.abstract_classes.insert(class_name, true);
+    }
+
+    /// Check if a class is abstract
+    pub fn is_abstract_class(&self, class_name: &str) -> bool {
+        self.abstract_classes
+            .get(class_name)
+            .copied()
+            .unwrap_or(false)
     }
 
     /// Resolve a type reference, detecting cycles
@@ -481,7 +497,7 @@ mod tests {
 
     #[test]
     fn test_resolve_type_reference_cycle() {
-        let mut env = TypeEnvironment::new();
+        let env = TypeEnvironment::new();
 
         // Create a self-referencing type alias
         // Note: This requires the type to reference itself, which is tricky

@@ -1702,7 +1702,7 @@ mod tests {
 
     #[test]
     fn test_required_wrong_arg_count() {
-        let obj = make_object_type(vec![]);
+        let _obj = make_object_type(vec![]);
         let result = required(&[], make_span());
         assert!(result.is_err());
     }
@@ -1717,7 +1717,7 @@ mod tests {
             make_span(),
         );
 
-        let result = readonly(&[array_type.clone()], make_span()).unwrap();
+        let result = readonly(std::slice::from_ref(&array_type), make_span()).unwrap();
         // Arrays are returned as-is for now
         assert!(matches!(result.kind, TypeKind::Array(_)));
     }
@@ -1882,7 +1882,7 @@ mod tests {
             make_span(),
         );
 
-        let result = nilable(&[union.clone()], make_span()).unwrap();
+        let result = nilable(std::slice::from_ref(&union), make_span()).unwrap();
         // Should return the same type since it already has nil
         if let TypeKind::Union(types) = &result.kind {
             assert_eq!(types.len(), 2);
@@ -1901,7 +1901,7 @@ mod tests {
             make_span(),
         );
 
-        let result = nilable(&[nullable.clone()], make_span()).unwrap();
+        let result = nilable(std::slice::from_ref(&nullable), make_span()).unwrap();
         // Should return the same nullable type
         assert!(matches!(result.kind, TypeKind::Nullable(_)));
     }

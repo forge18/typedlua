@@ -24,7 +24,6 @@ use typedlua_parser::string_interner::StringInterner;
 // Parser Round-Trip Properties
 // =============================================================================
 
-
 // =============================================================================
 // Parser Round-Trip Properties
 // =============================================================================
@@ -109,6 +108,7 @@ fn number_literal_strategy() -> impl Strategy<Value = String> {
 }
 
 /// Strategy for generating valid string literals
+#[allow(dead_code)]
 fn string_literal_strategy() -> impl Strategy<Value = String> {
     // Simple strings without special characters that would need escaping
     "[a-zA-Z0-9 _-]{0,50}".prop_map(|s| format!("\"{}\"", s))

@@ -31,6 +31,7 @@ mod tests {
             kind: ClassMemberKind::Method {
                 parameters: vec![],
                 return_type: None,
+                is_abstract: false,
             },
             is_final: false,
         }

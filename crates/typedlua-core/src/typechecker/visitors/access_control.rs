@@ -25,6 +25,7 @@ pub enum ClassMemberKind {
     Method {
         parameters: Vec<Parameter>,
         return_type: Option<Type>,
+        is_abstract: bool,
     },
     Getter {
         return_type: Type,
@@ -99,7 +100,11 @@ impl AccessControl {
     }
 
     /// Find a member by walking the class hierarchy (current class, then parent, etc.)
-    fn find_member_in_hierarchy(&self, class_name: &str, member_name: &str) -> Option<&ClassMemberInfo> {
+    fn find_member_in_hierarchy(
+        &self,
+        class_name: &str,
+        member_name: &str,
+    ) -> Option<&ClassMemberInfo> {
         let mut current = class_name;
         loop {
             if let Some(members) = self.class_members.get(current) {
