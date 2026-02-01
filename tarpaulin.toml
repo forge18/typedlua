@@ -1,0 +1,55 @@
+# cargo-tarpaulin configuration for TypedLua
+# See: https://github.com/xd009642/tarpaulin#config-file
+
+# Output formats
+[output]
+# Generate coverage reports in multiple formats
+xml = true
+html = true
+# LCOV format for integration with other tools
+lcov = true
+
+# Coverage settings
+[run]
+# Include all workspace crates
+workspace = true
+# Run all tests (unit and integration)
+all-targets = true
+# Include all features
+all-features = true
+# Timeout for test execution (seconds)
+timeout = 120
+# Don't fail on test failure (we want coverage even if some tests fail)
+no-fail-fast = false
+
+# Exclude patterns (files/directories to exclude from coverage)
+[exclude]
+# Exclude fuzz tests
+paths = [
+    "fuzz/*",
+    "*/fuzz/*",
+    "crates/typedlua-core/fuzz/*",
+]
+
+# Exclude test files themselves from coverage
+exclude-files = [
+    "*/tests/*",
+    "*/test/*",
+    "*/test_*.rs",
+    "*/tests.rs",
+]
+
+# Coverage thresholds
+[thresholds]
+# Overall coverage threshold (fail if below this percentage)
+line = 70.0
+# Function coverage threshold
+function = 70.0
+# Branch coverage threshold (if enabled)
+branch = 60.0
+
+# Engine configuration
+[engine]
+# Use LLVM coverage engine (more accurate, requires nightly)
+# If not available, falls back to ptrace
+llvm = true

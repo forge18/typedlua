@@ -2458,10 +2458,10 @@ fuzz/
 
 #### 7.1.6 Coverage Verification
 
-- [ ] **Code Coverage Setup:**
-  - [ ] Configure `cargo-tarpaulin` for coverage
-  - [ ] Set coverage target threshold (70%)
-  - [ ] Integrate coverage into CI
+- [x] **Code Coverage Setup:**
+  - [x] Configure `cargo-tarpaulin` for coverage
+  - [x] Set coverage target threshold (70%)
+  - [x] Integrate coverage into CI
 
 - [ ] **Coverage Tracking:**
   - [ ] Run baseline coverage report
@@ -2476,11 +2476,11 @@ fuzz/
   - [x] Review `inference_tests.rs` for completeness
   - [x] Add missing edge cases to both
 
-- [ ] **Review Existing Integration Tests**
-  - [ ] Check that all 54 integration tests are passing
-  - [ ] Add assertions checking for specific error messages
-  - [ ] Add assertions checking for non-error success cases
-  - [ ] Validate test isolation (no state leakage)
+- [x] **Review Existing Integration Tests**
+  - [x] Check that all 54 integration tests are passing
+  - [x] Add assertions checking for specific error messages
+  - [x] Add assertions checking for non-error success cases
+  - [x] Validate test isolation (no state leakage)
 
 ---
 
