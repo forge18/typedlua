@@ -162,8 +162,6 @@ fn test_final_class_with_final_methods() {
 
 #[test]
 fn test_final_method_in_inheritance_chain() {
-    // Note: Currently only checks immediate parent for final methods
-    // TODO: Implement full inheritance chain checking
     let source = r#"
         class Animal {
             final speak(): void {
@@ -182,6 +180,39 @@ fn test_final_method_in_inheritance_chain() {
     assert!(
         result.is_err(),
         "Cannot override final method in immediate child"
+    );
+    assert!(
+        result.unwrap_err().contains("Cannot override final method"),
+        "Error message should mention final method"
+    );
+}
+
+#[test]
+fn test_final_method_across_multiple_inheritance_levels() {
+    let source = r#"
+        class Animal {
+            final speak(): void {
+                print("...")
+            }
+        }
+
+        class Mammal extends Animal {
+            move(): void {
+                print("Moving")
+            }
+        }
+
+        class Dog extends Mammal {
+            override speak(): void {
+                print("Woof!")
+            }
+        }
+    "#;
+
+    let result = type_check(source);
+    assert!(
+        result.is_err(),
+        "Cannot override final method from ancestor multiple levels up"
     );
     assert!(
         result.unwrap_err().contains("Cannot override final method"),

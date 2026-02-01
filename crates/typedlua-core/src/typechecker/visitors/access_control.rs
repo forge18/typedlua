@@ -78,6 +78,9 @@ pub trait AccessControlVisitor: TypeCheckVisitor {
     /// Get class members
     fn get_class_members(&self, class_name: &str) -> Option<&Vec<ClassMemberInfo>>;
 
+    /// Get parent class name
+    fn get_parent_class(&self, class_name: &str) -> Option<String>;
+
     /// Set current class context
     fn set_current_class(&mut self, class: Option<ClassContext>);
 
@@ -268,6 +271,10 @@ impl AccessControlVisitor for AccessControl {
 
     fn get_class_members(&self, class_name: &str) -> Option<&Vec<ClassMemberInfo>> {
         self.class_members.get(class_name)
+    }
+
+    fn get_parent_class(&self, class_name: &str) -> Option<String> {
+        self.class_parents.get(class_name).cloned().flatten()
     }
 
     fn set_current_class(&mut self, class: Option<ClassContext>) {

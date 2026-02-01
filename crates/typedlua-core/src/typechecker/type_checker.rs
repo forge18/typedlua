@@ -1972,7 +1972,10 @@ impl<'a> TypeChecker<'a> {
                 || err.message.contains("Cannot override final method")
                 || err.message.contains("is incompatible with parent")
                 || err.message.contains("must implement abstract method")
-                || err.message.contains("marked as override but parent class")
+                || err.message.contains("uses override but class")
+                || err
+                    .message
+                    .contains("marked as override but parent class does not have this method")
                 || err.message.contains("Return type mismatch")
                 || err.message.contains("is private and only accessible")
                 || err.message.contains("is protected and only accessible");
@@ -2820,39 +2823,46 @@ impl<'a> TypeChecker<'a> {
             )
         })?;
 
-        // Get parent class members
-        let parent_members = self
-            .access_control
-            .get_class_members(parent_name)
-            .ok_or_else(|| {
-                TypeCheckError::new(
-                    format!(
-                        "Parent class '{}' not found or not yet type-checked",
-                        parent_name
-                    ),
-                    method.span,
-                )
-            })?;
-
-        // Find the method in parent class
+        // Walk the inheritance chain to find the method and check if it's final
         let method_name = self.interner.resolve(method.name.node);
-        let parent_method = parent_members.iter().find(|m| m.name == method_name);
+        let mut current_class = parent_name.clone();
+        let mut found_method = None;
+        let mut found_in_class = None;
 
-        let parent_method = parent_method.ok_or_else(|| {
+        loop {
+            if let Some(parent_members) = self.access_control.get_class_members(&current_class) {
+                if let Some(parent_method) = parent_members.iter().find(|m| m.name == method_name) {
+                    found_method = Some(parent_method);
+                    found_in_class = Some(current_class.clone());
+                    break;
+                }
+            }
+
+            // Get parent from access_control's hierarchy
+            let parent_name_opt = self.access_control.get_parent_class(&current_class);
+            match parent_name_opt {
+                Some(next_parent) => current_class = next_parent,
+                None => break,
+            }
+        }
+
+        let parent_method = found_method.ok_or_else(|| {
             TypeCheckError::new(
-                format!("Method '{}' marked as override but parent class '{}' does not have this method",
-                    method_name, parent_name),
+                format!(
+                    "Method '{}' marked as override but parent class does not have this method",
+                    method_name
+                ),
                 method.span,
             )
         })?;
 
-        // Verify that parent member is also a method
-        // Check if parent method is final
+        // Check if parent method is final anywhere in the inheritance chain
         if parent_method.is_final {
             return Err(TypeCheckError::new(
                 format!(
-                    "Cannot override final method {} from parent class {}",
-                    method.name.node, parent_name
+                    "Cannot override final method {} from ancestor class {}",
+                    method.name.node,
+                    found_in_class.unwrap()
                 ),
                 method.span,
             ));
@@ -3041,7 +3051,7 @@ impl<'a> TypeChecker<'a> {
             }
             TypeKind::TemplateLiteral(template) => {
                 use super::evaluate_template_literal_type;
-                evaluate_template_literal_type(template, &self.type_env)
+                evaluate_template_literal_type(template, &self.type_env, self.interner)
             }
             TypeKind::Reference(type_ref) => {
                 // Resolve type reference using the proper resolution logic

@@ -203,17 +203,36 @@ impl CodeGenerator {
         self.write_indent();
         self.writeln(&format!("setmetatable({}, {})", enum_name, mt_name));
 
+        let is_o3 = self.optimization_level.effective() >= OptimizationLevel::O3;
+
+        // O3: Add inline hints for built-in methods
         self.writeln("");
+        if is_o3 {
+            self.write_indent();
+            self.writeln("-- @inline");
+        }
         self.writeln(&enum_rt::ENUM_ORDINAL.replace("{}", enum_name));
         self.writeln("");
+        if is_o3 {
+            self.write_indent();
+            self.writeln("-- @inline");
+        }
         self.writeln(&enum_rt::ENUM_NAME.replace("{}", enum_name));
         self.writeln("");
+        if is_o3 {
+            self.write_indent();
+            self.writeln("-- @inline");
+        }
         self.writeln(
             &enum_rt::ENUM_VALUES
                 .replace("{}", enum_name)
                 .replace("{}", enum_name),
         );
         self.writeln("");
+        if is_o3 {
+            self.write_indent();
+            self.writeln("-- @inline");
+        }
         self.writeln(
             &enum_rt::ENUM_VALUE_OF
                 .replace("{}", enum_name)
@@ -222,6 +241,13 @@ impl CodeGenerator {
 
         for method in &enum_decl.methods {
             self.writeln("");
+
+            // O3: Add inline hints for simple methods
+            if is_o3 && Self::is_simple_method_for_inline(method) {
+                self.write_indent();
+                self.writeln("-- @inline");
+            }
+
             self.write_indent();
             self.write(&format!(
                 "function {}:{}",
@@ -242,5 +268,25 @@ impl CodeGenerator {
             self.write_indent();
             self.writeln("end");
         }
+    }
+
+    /// Check if a method is simple enough to be a candidate for inlining at O3
+    /// Simple methods: no parameters, single return statement with simple expression
+    fn is_simple_method_for_inline(method: &typedlua_parser::ast::statement::EnumMethod) -> bool {
+        use typedlua_parser::ast::statement::{Block, Statement};
+
+        // Must have no parameters
+        if !method.parameters.is_empty() {
+            return false;
+        }
+
+        // Check if body is a simple block with just a return statement
+        let Block { statements, .. } = &method.body;
+
+        if statements.len() != 1 {
+            return false;
+        }
+
+        matches!(&statements[0], Statement::Return(_))
     }
 }

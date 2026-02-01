@@ -550,7 +550,7 @@ pub fn evaluate_mapped_type(
     };
 
     // Extract the keys from the resolved 'in' clause
-    let keys = extract_keys_from_type(&in_type_resolved)?;
+    let keys = extract_keys_from_type(&in_type_resolved, type_env, interner)?;
 
     let members: Vec<_> = keys
         .iter()
@@ -934,23 +934,61 @@ fn substitute_inferred_types(
 
 /// Extract keys from a type for mapped type iteration
 /// Currently supports: string literal unions and type references to them
-fn extract_keys_from_type(typ: &Type) -> Result<Vec<&str>, String> {
+fn extract_keys_from_type(
+    typ: &Type,
+    type_env: &super::TypeEnvironment,
+    interner: &StringInterner,
+) -> Result<Vec<String>, String> {
     match &typ.kind {
-        TypeKind::Literal(Literal::String(s)) => Ok(vec![s.as_str()]),
-        TypeKind::Union(types) => types
-            .iter()
-            .map(|t| match &t.kind {
-                TypeKind::Literal(Literal::String(s)) => Ok(s.as_str()),
-                _ => Err("Mapped type currently only supports string literal unions".to_string()),
-            })
-            .collect(),
-        // Type reference - for now, we can't resolve it without the type environment
-        // This is a limitation - mapped types with type references need special handling
-        TypeKind::Reference(_) => {
-            Err("Mapped type with type reference not yet fully supported - use inline string literal union".to_string())
+        TypeKind::Literal(Literal::String(s)) => Ok(vec![s.clone()]),
+        TypeKind::Union(types) => {
+            let mut keys = Vec::new();
+            for t in types {
+                match &t.kind {
+                    TypeKind::Literal(Literal::String(s)) => {
+                        keys.push(s.clone());
+                    }
+                    TypeKind::Reference(type_ref) => {
+                        let type_name = interner.resolve(type_ref.name.node).to_string();
+                        match type_env.lookup_type(&type_name) {
+                            Some(resolved_type) => {
+                                let resolved_keys =
+                                    extract_keys_from_type(resolved_type, type_env, interner)?;
+                                keys.extend(resolved_keys);
+                            }
+                            None => {
+                                return Err(format!(
+                                    "Type '{}' not found in type environment",
+                                    type_name
+                                ));
+                            }
+                        }
+                    }
+                    _ => {
+                        return Err(
+                            "Mapped type currently only supports string literal unions".to_string()
+                        );
+                    }
+                }
+            }
+            Ok(keys)
+        }
+        // Type reference - resolve it using the type environment
+        TypeKind::Reference(type_ref) => {
+            let type_name = interner.resolve(type_ref.name.node).to_string();
+            match type_env.lookup_type(&type_name) {
+                Some(resolved_type) => extract_keys_from_type(resolved_type, type_env, interner),
+                None => Err(format!(
+                    "Type '{}' not found in type environment",
+                    type_name
+                )),
+            }
         }
         // Future: support keyof T
-        _ => Err("Mapped type 'in' clause must be a string literal or union of string literals".to_string()),
+        _ => Err(
+            "Mapped type 'in' clause must be a string literal or union of string literals"
+                .to_string(),
+        ),
     }
 }
 
@@ -995,6 +1033,7 @@ fn is_assignable_to(source: &Type, target: &Type) -> bool {
 pub fn evaluate_template_literal_type(
     template: &typedlua_parser::ast::types::TemplateLiteralType,
     type_env: &super::TypeEnvironment,
+    interner: &StringInterner,
 ) -> Result<Type, String> {
     use typedlua_parser::ast::types::TemplateLiteralTypePart;
 
@@ -1009,7 +1048,7 @@ pub fn evaluate_template_literal_type(
             }
             TemplateLiteralTypePart::Type(ty) => {
                 // Type interpolation - expand to all possible string values
-                let values = expand_type_to_strings(ty, type_env)?;
+                let values = expand_type_to_strings(ty, type_env, interner)?;
                 if values.is_empty() {
                     return Err(
                         "Template literal type interpolation produced no values".to_string()
@@ -1057,11 +1096,12 @@ pub fn evaluate_template_literal_type(
 fn expand_type_to_strings(
     ty: &Type,
     type_env: &super::TypeEnvironment,
+    interner: &StringInterner,
 ) -> Result<Vec<String>, String> {
     // First resolve any type references
     let resolved = match &ty.kind {
         TypeKind::Reference(type_ref) => {
-            let type_name = type_ref.name.node.to_string();
+            let type_name = interner.resolve(type_ref.name.node).to_string();
             if let Some(resolved) = type_env.lookup_type(&type_name) {
                 resolved
             } else {
@@ -1084,7 +1124,7 @@ fn expand_type_to_strings(
         }
         TypeKind::Union(types) => types
             .iter()
-            .map(|t| expand_type_to_strings(t, type_env))
+            .map(|t| expand_type_to_strings(t, type_env, interner))
             .collect::<Result<Vec<_>, _>>()
             .map(|v| v.into_iter().flatten().collect()),
         _ => Err(format!(

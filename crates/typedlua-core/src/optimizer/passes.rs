@@ -3,7 +3,9 @@ use crate::errors::CompilationError;
 use crate::optimizer::OptimizationPass;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use typedlua_parser::ast::expression::{BinaryOp, Expression, ExpressionKind, Literal, UnaryOp};
+use typedlua_parser::ast::expression::{
+    AssignmentOp, BinaryOp, Expression, ExpressionKind, Literal, UnaryOp,
+};
 use typedlua_parser::ast::pattern::Pattern;
 use typedlua_parser::ast::statement::{
     Block, ForNumeric, ForStatement, Statement, VariableDeclaration, VariableKind,
@@ -2283,10 +2285,17 @@ impl OptimizationPass for LoopOptimizationPass {
 
     fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
         let mut changed = false;
-
         let mut i = 0;
+
         while i < program.statements.len() {
-            if self.optimize_loops_in_statement(&mut program.statements[i]) {
+            let (hoisted, stmt_changed) =
+                self.optimize_loops_in_statement(&mut program.statements[i]);
+            if !hoisted.is_empty() {
+                program.statements.splice(i..i, hoisted);
+                i += 1;
+                changed = true;
+            }
+            if stmt_changed {
                 changed = true;
             }
             i += 1;
@@ -2297,23 +2306,23 @@ impl OptimizationPass for LoopOptimizationPass {
 }
 
 impl LoopOptimizationPass {
-    fn optimize_loops_in_statement(&mut self, stmt: &mut Statement) -> bool {
+    fn optimize_loops_in_statement(&mut self, stmt: &mut Statement) -> (Vec<Statement>, bool) {
         match stmt {
             Statement::For(for_stmt) => self.optimize_for_loop(for_stmt),
             Statement::While(while_stmt) => self.optimize_while_loop(while_stmt),
             Statement::Repeat(repeat_stmt) => self.optimize_repeat_loop(repeat_stmt),
-            Statement::Variable(_) | Statement::Expression(_) => false,
+            Statement::Variable(_) | Statement::Expression(_) => (Vec::new(), false),
             Statement::Return(_)
             | Statement::Break(_)
             | Statement::Continue(_)
             | Statement::Rethrow(_)
-            | Statement::Throw(_) => false,
-            Statement::Block(block) => self.optimize_block(&mut block.statements),
+            | Statement::Throw(_) => (Vec::new(), false),
+            Statement::Block(block) => (Vec::new(), self.optimize_block(&mut block.statements)),
             Statement::Class(_)
             | Statement::Interface(_)
             | Statement::Enum(_)
-            | Statement::TypeAlias(_) => false,
-            Statement::Import(_) | Statement::Export(_) => false,
+            | Statement::TypeAlias(_) => (Vec::new(), false),
+            Statement::Import(_) | Statement::Export(_) => (Vec::new(), false),
             Statement::Namespace(_)
             | Statement::DeclareFunction(_)
             | Statement::DeclareNamespace(_)
@@ -2321,8 +2330,10 @@ impl LoopOptimizationPass {
             | Statement::DeclareInterface(_)
             | Statement::DeclareConst(_)
             | Statement::Label(_)
-            | Statement::Goto(_) => false,
-            Statement::Function(func) => self.optimize_block(&mut func.body.statements),
+            | Statement::Goto(_) => (Vec::new(), false),
+            Statement::Function(func) => {
+                (Vec::new(), self.optimize_block(&mut func.body.statements))
+            }
             Statement::If(if_stmt) => {
                 let mut changed = self.optimize_block(&mut if_stmt.then_block.statements);
                 for else_if in &mut if_stmt.else_ifs {
@@ -2331,33 +2342,37 @@ impl LoopOptimizationPass {
                 if let Some(else_block) = &mut if_stmt.else_block {
                     changed |= self.optimize_block(&mut else_block.statements);
                 }
-                changed
+                (Vec::new(), changed)
             }
-            _ => false,
+            _ => (Vec::new(), false),
         }
     }
 
-    fn optimize_for_loop(&mut self, for_stmt: &mut Box<ForStatement>) -> bool {
+    fn optimize_for_loop(&mut self, for_stmt: &mut Box<ForStatement>) -> (Vec<Statement>, bool) {
         match &mut **for_stmt {
             ForStatement::Generic(for_gen) => {
                 let modified_vars = self.collect_modified_variables(&for_gen.body);
-                let new_body = self.hoist_invariants_simple(&for_gen.body, &modified_vars);
+                let (hoisted, new_body) =
+                    self.hoist_invariants_simple(&for_gen.body, &modified_vars);
                 for_gen.body = new_body;
-                self.optimize_block(&mut for_gen.body.statements)
+                let changed =
+                    !hoisted.is_empty() || self.optimize_block(&mut for_gen.body.statements);
+                (hoisted, changed)
             }
             ForStatement::Numeric(for_num) => {
-                let mut changed = false;
                 if let Some((start, end, step)) = self.evaluate_numeric_bounds(for_num) {
                     if self.has_zero_iterations(start, end, step) {
                         for_num.body.statements.clear();
-                        return true;
+                        return (Vec::new(), true);
                     }
                 }
                 let modified_vars = self.collect_modified_variables(&for_num.body);
-                let new_body = self.hoist_invariants_simple(&for_num.body, &modified_vars);
+                let (hoisted, new_body) =
+                    self.hoist_invariants_simple(&for_num.body, &modified_vars);
                 for_num.body = new_body;
-                changed |= self.optimize_block(&mut for_num.body.statements);
-                changed
+                let changed =
+                    !hoisted.is_empty() || self.optimize_block(&mut for_num.body.statements);
+                (hoisted, changed)
             }
         }
     }
@@ -2365,41 +2380,47 @@ impl LoopOptimizationPass {
     fn optimize_while_loop(
         &mut self,
         while_stmt: &mut typedlua_parser::ast::statement::WhileStatement,
-    ) -> bool {
-        let mut changed = false;
+    ) -> (Vec<Statement>, bool) {
         if let ExpressionKind::Literal(Literal::Boolean(false)) = &while_stmt.condition.kind {
             while_stmt.body.statements.clear();
-            return true;
+            return (Vec::new(), true);
         }
         let modified_vars = self.collect_modified_variables(&while_stmt.body);
-        let new_body = self.hoist_invariants_simple(&while_stmt.body, &modified_vars);
+        let (hoisted, new_body) = self.hoist_invariants_simple(&while_stmt.body, &modified_vars);
         while_stmt.body = new_body;
-        changed |= self.optimize_block(&mut while_stmt.body.statements);
-        changed
+        let changed = !hoisted.is_empty() || self.optimize_block(&mut while_stmt.body.statements);
+        (hoisted, changed)
     }
 
     fn optimize_repeat_loop(
         &mut self,
         repeat_stmt: &mut typedlua_parser::ast::statement::RepeatStatement,
-    ) -> bool {
-        let mut changed = false;
+    ) -> (Vec<Statement>, bool) {
         if let ExpressionKind::Literal(Literal::Boolean(true)) = &repeat_stmt.until.kind {
             repeat_stmt.body.statements.clear();
-            return true;
+            return (Vec::new(), true);
         }
         let modified_vars = self.collect_modified_variables(&repeat_stmt.body);
-        let new_body = self.hoist_invariants_simple(&repeat_stmt.body, &modified_vars);
+        let (hoisted, new_body) = self.hoist_invariants_simple(&repeat_stmt.body, &modified_vars);
         repeat_stmt.body = new_body;
-        changed |= self.optimize_block(&mut repeat_stmt.body.statements);
-        changed
+        let changed = !hoisted.is_empty() || self.optimize_block(&mut repeat_stmt.body.statements);
+        (hoisted, changed)
     }
 
-    fn optimize_block(&mut self, stmts: &mut [Statement]) -> bool {
+    fn optimize_block(&mut self, stmts: &mut Vec<Statement>) -> bool {
         let mut changed = false;
-        for stmt in stmts {
-            if self.optimize_loops_in_statement(stmt) {
+        let mut i = 0;
+        while i < stmts.len() {
+            let (hoisted, stmt_changed) = self.optimize_loops_in_statement(&mut stmts[i]);
+            if !hoisted.is_empty() {
+                stmts.splice(i..i, hoisted);
+                i += 1;
                 changed = true;
             }
+            if stmt_changed {
+                changed = true;
+            }
+            i += 1;
         }
         changed
     }
@@ -2721,24 +2742,34 @@ impl LoopOptimizationPass {
         }
     }
 
-    fn hoist_invariants_simple(&self, block: &Block, loop_vars: &HashSet<StringId>) -> Block {
+    fn hoist_invariants_simple(
+        &self,
+        block: &Block,
+        loop_vars: &HashSet<StringId>,
+    ) -> (Vec<Statement>, Block) {
+        let mut hoisted = Vec::new();
         let mut new_statements = Vec::new();
 
         for stmt in &block.statements {
             match stmt {
                 Statement::Variable(decl) => {
-                    // TODO: If invariant, hoist outside loop
-                    let _ = self.is_invariant_expression(&decl.initializer, loop_vars);
-                    new_statements.push(stmt.clone());
+                    if self.is_invariant_expression(&decl.initializer, loop_vars) {
+                        hoisted.push(stmt.clone());
+                    } else {
+                        new_statements.push(stmt.clone());
+                    }
                 }
                 _ => new_statements.push(stmt.clone()),
             }
         }
 
-        Block {
-            statements: new_statements,
-            span: block.span,
-        }
+        (
+            hoisted,
+            Block {
+                statements: new_statements,
+                span: block.span,
+            },
+        )
     }
 
     fn is_invariant_expression(&self, expr: &Expression, loop_vars: &HashSet<StringId>) -> bool {
@@ -2974,6 +3005,11 @@ impl OptimizationPass for StringConcatOptimizationPass {
             i += 1;
         }
 
+        // Also optimize loop-based string concatenation patterns
+        if self.optimize_loop_string_concat(&mut program.statements) {
+            changed = true;
+        }
+
         Ok(changed)
     }
 }
@@ -3072,6 +3108,375 @@ impl StringConcatOptimizationPass {
 
     fn optimize_concat_in_variable(&mut self, decl: &mut VariableDeclaration) -> bool {
         self.optimize_concat_expression(&mut decl.initializer)
+    }
+
+    /// Optimizes loop-based string concatenation patterns
+    /// Transforms: local s = ""; for ... do s = s .. value end
+    /// Into: local t = {}; for ... do table.insert(t, value) end; local s = table.concat(t)
+    fn optimize_loop_string_concat(&mut self, statements: &mut Vec<Statement>) -> bool {
+        let mut changed = false;
+        let mut i = 0;
+
+        while i < statements.len() {
+            // Look for pattern: local s = "" followed by a loop with s = s .. value
+            if let Some((concat_var, loop_idx)) =
+                self.find_loop_string_concat_pattern(&statements, i)
+            {
+                // Transform the pattern
+                if let Some(new_stmts) =
+                    self.transform_loop_string_concat(statements, i, loop_idx, concat_var)
+                {
+                    // Replace the original statements with transformed ones
+                    statements.splice(i..=loop_idx, new_stmts);
+                    changed = true;
+                    continue;
+                }
+            }
+            i += 1;
+        }
+
+        changed
+    }
+
+    /// Finds the pattern: local s = "" followed by a loop containing s = s .. value
+    fn find_loop_string_concat_pattern(
+        &self,
+        statements: &[Statement],
+        start_idx: usize,
+    ) -> Option<(StringId, usize)> {
+        // Check for local s = "" at start_idx
+        let concat_var = if let Statement::Variable(decl) = &statements[start_idx] {
+            if let Pattern::Identifier(ident) = &decl.pattern {
+                if let ExpressionKind::Literal(Literal::String(s)) = &decl.initializer.kind {
+                    if s.is_empty() {
+                        Some(ident.node)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }?;
+
+        // Look for a loop at start_idx + 1 that contains s = s .. value
+        if start_idx + 1 < statements.len() {
+            let loop_stmt = &statements[start_idx + 1];
+            if self.loop_contains_string_concat(loop_stmt, concat_var) {
+                return Some((concat_var, start_idx + 1));
+            }
+        }
+
+        None
+    }
+
+    /// Checks if a loop statement contains string concatenation on the given variable
+    fn loop_contains_string_concat(&self, stmt: &Statement, var: StringId) -> bool {
+        match stmt {
+            Statement::For(for_stmt) => match &**for_stmt {
+                ForStatement::Generic(for_gen) => {
+                    self.block_contains_string_concat(&for_gen.body, var)
+                }
+                ForStatement::Numeric(for_num) => {
+                    self.block_contains_string_concat(&for_num.body, var)
+                }
+            },
+            Statement::While(while_stmt) => {
+                self.block_contains_string_concat(&while_stmt.body, var)
+            }
+            Statement::Repeat(repeat_stmt) => {
+                self.block_contains_string_concat(&repeat_stmt.body, var)
+            }
+            _ => false,
+        }
+    }
+
+    /// Checks if a block contains string concatenation on the given variable
+    fn block_contains_string_concat(&self, block: &Block, var: StringId) -> bool {
+        block
+            .statements
+            .iter()
+            .any(|stmt| self.statement_contains_string_concat(stmt, var))
+    }
+
+    /// Checks if a statement contains string concatenation on the given variable
+    fn statement_contains_string_concat(&self, stmt: &Statement, var: StringId) -> bool {
+        match stmt {
+            Statement::Expression(expr) => self.expression_is_string_concat(expr, var),
+            Statement::Block(block) => self.block_contains_string_concat(block, var),
+            Statement::If(if_stmt) => {
+                self.block_contains_string_concat(&if_stmt.then_block, var)
+                    || if_stmt
+                        .else_ifs
+                        .iter()
+                        .any(|ei| self.block_contains_string_concat(&ei.block, var))
+                    || if_stmt
+                        .else_block
+                        .as_ref()
+                        .map_or(false, |b| self.block_contains_string_concat(b, var))
+            }
+            _ => false,
+        }
+    }
+
+    /// Checks if an expression is s = s .. value or s ..= value
+    fn expression_is_string_concat(&self, expr: &Expression, var: StringId) -> bool {
+        match &expr.kind {
+            ExpressionKind::Assignment(target, AssignmentOp::Assign, value) => {
+                // Check if target is the variable
+                if let ExpressionKind::Identifier(target_id) = &target.kind {
+                    if *target_id == var {
+                        // Check if value is var .. something
+                        if let ExpressionKind::Binary(BinaryOp::Concatenate, left, _) = &value.kind
+                        {
+                            if let ExpressionKind::Identifier(left_id) = &left.kind {
+                                return *left_id == var;
+                            }
+                        }
+                    }
+                }
+                false
+            }
+            ExpressionKind::Assignment(target, AssignmentOp::ConcatenateAssign, _) => {
+                // Check if target is the variable
+                if let ExpressionKind::Identifier(target_id) = &target.kind {
+                    *target_id == var
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
+    /// Transforms the loop-based string concatenation pattern
+    fn transform_loop_string_concat(
+        &mut self,
+        statements: &[Statement],
+        _var_decl_idx: usize,
+        loop_idx: usize,
+        concat_var: StringId,
+    ) -> Option<Vec<Statement>> {
+        let temp_table_var = self.next_temp_id;
+        self.next_temp_id += 1;
+        let temp_table_name = format!("__str_concat_{}", temp_table_var);
+        let temp_table_id = self.interner_get_or_intern(&temp_table_name);
+
+        // Create: local __str_concat_N = {}
+        let table_decl = Statement::Variable(VariableDeclaration {
+            kind: VariableKind::Local,
+            pattern: Pattern::Identifier(Spanned::new(temp_table_id, Span::dummy())),
+            type_annotation: None,
+            initializer: Expression::new(ExpressionKind::Array(Vec::new()), Span::dummy()),
+            span: Span::dummy(),
+        });
+
+        // Clone and transform the loop
+        let mut transformed_loop = statements[loop_idx].clone();
+        self.transform_loop_body(&mut transformed_loop, concat_var, temp_table_id);
+
+        // Create: local s = table.concat(__str_concat_N)
+        let concat_decl = Statement::Variable(VariableDeclaration {
+            kind: VariableKind::Local,
+            pattern: Pattern::Identifier(Spanned::new(concat_var, Span::dummy())),
+            type_annotation: None,
+            initializer: Expression::new(
+                ExpressionKind::Call(
+                    Box::new(Expression::new(
+                        ExpressionKind::Member(
+                            Box::new(Expression::new(
+                                ExpressionKind::Identifier(self.interner_get_or_intern("table")),
+                                Span::dummy(),
+                            )),
+                            Spanned::new(self.interner_get_or_intern("concat"), Span::dummy()),
+                        ),
+                        Span::dummy(),
+                    )),
+                    vec![Argument {
+                        value: Expression::new(
+                            ExpressionKind::Identifier(temp_table_id),
+                            Span::dummy(),
+                        ),
+                        is_spread: false,
+                        span: Span::dummy(),
+                    }],
+                    None,
+                ),
+                Span::dummy(),
+            ),
+            span: Span::dummy(),
+        });
+
+        Some(vec![table_decl, transformed_loop, concat_decl])
+    }
+
+    /// Transforms the loop body to use table.insert instead of string concatenation
+    fn transform_loop_body(
+        &mut self,
+        stmt: &mut Statement,
+        concat_var: StringId,
+        table_var: StringId,
+    ) {
+        match stmt {
+            Statement::For(for_stmt) => match &mut **for_stmt {
+                ForStatement::Generic(for_gen) => {
+                    self.transform_block(&mut for_gen.body, concat_var, table_var);
+                }
+                ForStatement::Numeric(for_num) => {
+                    self.transform_block(&mut for_num.body, concat_var, table_var);
+                }
+            },
+            Statement::While(while_stmt) => {
+                self.transform_block(&mut while_stmt.body, concat_var, table_var);
+            }
+            Statement::Repeat(repeat_stmt) => {
+                self.transform_block(&mut repeat_stmt.body, concat_var, table_var);
+            }
+            _ => {}
+        }
+    }
+
+    /// Transforms a block to use table.insert instead of string concatenation
+    fn transform_block(&mut self, block: &mut Block, concat_var: StringId, table_var: StringId) {
+        for stmt in &mut block.statements {
+            self.transform_statement(stmt, concat_var, table_var);
+        }
+    }
+
+    /// Transforms a statement to use table.insert instead of string concatenation
+    fn transform_statement(
+        &mut self,
+        stmt: &mut Statement,
+        concat_var: StringId,
+        table_var: StringId,
+    ) {
+        match stmt {
+            Statement::Expression(expr) => {
+                if let Some(new_stmt) = self.transform_string_concat(expr, concat_var, table_var) {
+                    *stmt = new_stmt;
+                }
+            }
+            Statement::Block(block) => {
+                self.transform_block(block, concat_var, table_var);
+            }
+            Statement::If(if_stmt) => {
+                self.transform_block(&mut if_stmt.then_block, concat_var, table_var);
+                for else_if in &mut if_stmt.else_ifs {
+                    self.transform_block(&mut else_if.block, concat_var, table_var);
+                }
+                if let Some(else_block) = &mut if_stmt.else_block {
+                    self.transform_block(else_block, concat_var, table_var);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Transforms s = s .. value or s ..= value into table.insert(t, value)
+    fn transform_string_concat(
+        &mut self,
+        expr: &Expression,
+        concat_var: StringId,
+        table_var: StringId,
+    ) -> Option<Statement> {
+        match &expr.kind {
+            ExpressionKind::Assignment(target, AssignmentOp::Assign, value) => {
+                if let ExpressionKind::Identifier(target_id) = &target.kind {
+                    if *target_id == concat_var {
+                        if let ExpressionKind::Binary(BinaryOp::Concatenate, _, right) = &value.kind
+                        {
+                            // Transform s = s .. right into table.insert(t, right)
+                            return Some(Statement::Expression(Expression::new(
+                                ExpressionKind::Call(
+                                    Box::new(Expression::new(
+                                        ExpressionKind::Member(
+                                            Box::new(Expression::new(
+                                                ExpressionKind::Identifier(
+                                                    self.interner_get_or_intern("table"),
+                                                ),
+                                                Span::dummy(),
+                                            )),
+                                            Spanned::new(
+                                                self.interner_get_or_intern("insert"),
+                                                Span::dummy(),
+                                            ),
+                                        ),
+                                        Span::dummy(),
+                                    )),
+                                    vec![
+                                        Argument {
+                                            value: Expression::new(
+                                                ExpressionKind::Identifier(table_var),
+                                                Span::dummy(),
+                                            ),
+                                            is_spread: false,
+                                            span: Span::dummy(),
+                                        },
+                                        Argument {
+                                            value: *right.clone(),
+                                            is_spread: false,
+                                            span: Span::dummy(),
+                                        },
+                                    ],
+                                    None,
+                                ),
+                                Span::dummy(),
+                            )));
+                        }
+                    }
+                }
+                None
+            }
+            ExpressionKind::Assignment(target, AssignmentOp::ConcatenateAssign, right) => {
+                if let ExpressionKind::Identifier(target_id) = &target.kind {
+                    if *target_id == concat_var {
+                        // Transform s ..= right into table.insert(t, right)
+                        return Some(Statement::Expression(Expression::new(
+                            ExpressionKind::Call(
+                                Box::new(Expression::new(
+                                    ExpressionKind::Member(
+                                        Box::new(Expression::new(
+                                            ExpressionKind::Identifier(
+                                                self.interner_get_or_intern("table"),
+                                            ),
+                                            Span::dummy(),
+                                        )),
+                                        Spanned::new(
+                                            self.interner_get_or_intern("insert"),
+                                            Span::dummy(),
+                                        ),
+                                    ),
+                                    Span::dummy(),
+                                )),
+                                vec![
+                                    Argument {
+                                        value: Expression::new(
+                                            ExpressionKind::Identifier(table_var),
+                                            Span::dummy(),
+                                        ),
+                                        is_spread: false,
+                                        span: Span::dummy(),
+                                    },
+                                    Argument {
+                                        value: *right.clone(),
+                                        is_spread: false,
+                                        span: Span::dummy(),
+                                    },
+                                ],
+                                None,
+                            ),
+                            Span::dummy(),
+                        )));
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
     }
 
     fn optimize_concat_in_expression(&mut self, expr: &mut Expression) -> bool {

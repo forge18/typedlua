@@ -370,6 +370,20 @@ fn test_o3_optimization_adds_inline_hints() {
         output.contains(r#"__name = "Mercury""#),
         "O3: Should have __name field"
     );
+
+    // Verify O3 inline hints are added
+    assert!(
+        output.contains("-- @inline"),
+        "O3: Should add inline hints for simple methods"
+    );
+
+    // Count inline hints - should have at least 4 (ordinal, name, values, valueOf)
+    let inline_count = output.matches("-- @inline").count();
+    assert!(
+        inline_count >= 4,
+        "O3: Should have at least 4 inline hints, found {}",
+        inline_count
+    );
 }
 
 #[test]

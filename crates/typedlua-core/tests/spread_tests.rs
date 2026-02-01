@@ -309,7 +309,6 @@ fn test_spread_with_mixed_types() {
 // ============================================================================
 
 #[test]
-#[ignore = "Object spread with property override not yet fully implemented - requires parser fix for duplicate property names"]
 fn test_object_spread_override() {
     let source = r#"
         const base = {x: 1, y: 2}

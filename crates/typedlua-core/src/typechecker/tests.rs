@@ -561,6 +561,37 @@ fn test_mapped_type_readonly_and_optional() {
     );
 }
 
+#[test]
+fn test_mapped_type_with_type_reference() {
+    let source = r#"
+        type Keys = "a" | "b" | "c"
+        type Mapped = { [K in Keys]: number }
+    "#;
+
+    let result = parse_and_check(source);
+    assert!(
+        result.is_ok(),
+        "Mapped type with type reference should type check: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn test_mapped_type_with_nested_type_reference() {
+    let source = r#"
+        type BaseKeys = "x" | "y"
+        type Keys = BaseKeys | "z"
+        type Mapped = { [K in Keys]: string }
+    "#;
+
+    let result = parse_and_check(source);
+    assert!(
+        result.is_ok(),
+        "Mapped type with nested type reference should type check: {:?}",
+        result.err()
+    );
+}
+
 // Conditional Types Tests
 
 #[test]

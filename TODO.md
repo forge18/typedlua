@@ -256,8 +256,8 @@ Lexer keywords `Throw`, `Try`, `Catch`, `Finally`, `Rethrow`, `Throws`, `BangBan
 
 **Known Issues:**
 
-- [ ] O2 optimization - precompute instances as literal tables (deferred)
-- [ ] O3 optimization - add inline hints (deferred)
+- [x] O2 optimization - precompute instances as literal tables
+- [x] O3 optimization - add inline hints
 
 ---
 
@@ -2340,29 +2340,29 @@ fuzz/
 **MEDIUM PRIORITY — Advanced Type System Features (11 failing tests in advanced generics):**
 
 - [x] **Conditional Types** — `T extends U ? X : Y` syntax not implemented
-- [ ] **Mapped Types** — `{ [K in keyof T]: ?T[K] }` with modifiers (`readonly`, `?`, `-?`, `-readonly`) not implemented
-- [ ] **Template Literal Types** — `` `${Prefix}_${Suffix}` `` not implemented at parser level (`template_literal_limit_tests.rs`)
-- [ ] **Infer Keyword** — `infer` keyword in conditional types not implemented
-- [ ] **Recursive Utility Types** — `DeepPartial<T>`, `DeepReadonly<T>` not implemented
-- [ ] **Mapped Types with Type References** — Returns error: "not yet fully supported - use inline string literal union" (`utility_types.rs:931`)
+- [x] **Mapped Types** — `{ [K in keyof T]: ?T[K] }` with modifiers (`readonly`, `?`, `-?`, `-readonly`) not implemented
+- [x] **Template Literal Types** — `` `${Prefix}_${Suffix}` `` not implemented at parser level (`template_literal_limit_tests.rs`)
+- [x] **Infer Keyword** — `infer` keyword in conditional types implemented
+- [x] **Recursive Utility Types** — `DeepPartial<T>`, `DeepReadonly<T>` not implemented
+- [x] **Mapped Types with Type References** — Returns error: "not yet fully supported - use inline string literal union" (`utility_types.rs:931`)
 
 **MEDIUM PRIORITY — Type Narrowing & Checking:**
 
-- [ ] **Type Narrowing Integration** — `narrowing_integration.rs` is explicitly scaffolding/example code, not integrated into actual type checker control flow analysis
-- [ ] **Final Method Inheritance Chain** — Only checks immediate parent for final methods, not full inheritance chain (`final_tests.rs:166`)
+- [x] **Type Narrowing Integration** — `narrowing_integration.rs` is explicitly scaffolding/example code, not integrated into actual type checker control flow analysis
+- [x] **Final Method Inheritance Chain** — Only checks immediate parent for final methods, not full inheritance chain (`final_tests.rs:166`)
 
 **LOW PRIORITY — Deferred Optimizations:**
 
-- [ ] **Safe Navigation O2 Optimization** — `?.` nil-check skipping for guaranteed non-nil expressions
-- [ ] **Rich Enum O2/O3 Optimizations** — Instance precomputation as literal tables (O2) and inline hints (O3)
-- [ ] **Loop-Based String Concatenation** — Deferred, requires block transformation
-- [ ] **Loop Invariant Hoisting** — Detection exists in `passes.rs:2726` but hoisting logic is a no-op
+- [x] **Safe Navigation O2 Optimization** — `?.` nil-check skipping for guaranteed non-nil expressions
+- [x] **Rich Enum O2/O3 Optimizations** — Instance precomputation as literal tables (O2) and inline hints (O3)
+- [x] **Loop-Based String Concatenation** — Deferred, requires block transformation
+- [x] **Loop Invariant Hoisting** — Detection exists in `passes.rs:2726` but hoisting logic is a no-op
 - [ ] **Bundle Mode Source Maps** — Bundle mode source maps don't map back to individual module source files (`codegen/mod.rs:399`)
 
 **LOW PRIORITY — Tooling:**
 
-- [ ] **LSP Inlay Hints** — `collect_hints_from_statement()` is a complete stub (`inlay_hints.rs:67`)
-- [ ] **Object Spread Property Override** — Requires parser fix for duplicate property names (`spread_tests.rs:312`, `#[ignore]`)
+- [x] **LSP Inlay Hints** — `collect_hints_from_statement()` is a complete stub (`inlay_hints.rs:67`)
+- [x] **Object Spread Property Override** — Requires parser fix for duplicate property names (`spread_tests.rs:312`, `#[ignore]`)
 
 #### 7.1.4 Performance Regression Tests
 
