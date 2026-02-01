@@ -276,6 +276,8 @@ impl<'a> TypeChecker<'a> {
             Statement::Rethrow(span) => self.check_rethrow_statement(*span),
             // File-based namespace declaration
             Statement::Namespace(ns_decl) => self.check_namespace_declaration(ns_decl),
+            // Label and Goto (Lua compatibility)
+            Statement::Label(_) | Statement::Goto(_) => Ok(()),
         }
     }
 
@@ -862,9 +864,17 @@ impl<'a> TypeChecker<'a> {
         // For now, we'll register generic interfaces similar to generic type aliases
         // They will be instantiated when referenced with type arguments
 
-        if let Some(_type_params) = &iface.type_parameters {
+        if let Some(type_params) = &iface.type_parameters {
             // Generic interface - we can't fully type check it yet
             // Just register it as a generic type so it can be instantiated later
+
+            // Store the type parameter names for positional substitution
+            let param_names: Vec<String> = type_params
+                .iter()
+                .map(|tp| self.interner.resolve(tp.name.node).to_string())
+                .collect();
+            self.type_env
+                .register_interface_type_params(iface_name.clone(), param_names);
 
             // For now, we'll create a placeholder object type
             let obj_type = Type::new(
@@ -1058,27 +1068,32 @@ impl<'a> TypeChecker<'a> {
 
     /// Check type alias
     fn check_type_alias(&mut self, alias: &TypeAliasDeclaration) -> Result<(), TypeCheckError> {
-        // Evaluate special types before registering
-        let typ_to_register = self
-            .evaluate_type(&alias.type_annotation)
-            .map_err(|e| TypeCheckError::new(e, alias.span))?;
-
         let alias_name = self.interner.resolve(alias.name.node).to_string();
 
         // Check if this is a generic type alias
         if let Some(type_params) = &alias.type_parameters {
+            // For generic type aliases, store the raw type annotation without
+            // evaluating it — it may contain type parameters (e.g., keyof T)
+            // that can only be resolved when instantiated with concrete arguments.
             self.type_env
                 .register_generic_type_alias(
                     alias_name.clone(),
                     type_params.clone(),
-                    typ_to_register.clone(),
+                    alias.type_annotation.clone(),
                 )
                 .map_err(|e| TypeCheckError::new(e, alias.span))?;
         } else {
+            // Non-generic: evaluate special types (conditional, mapped, etc.) eagerly
+            let typ_to_register = self
+                .evaluate_type(&alias.type_annotation)
+                .map_err(|e| TypeCheckError::new(e, alias.span))?;
             self.type_env
                 .register_type_alias(alias_name.clone(), typ_to_register.clone())
                 .map_err(|e| TypeCheckError::new(e, alias.span))?;
         }
+
+        // Use raw annotation for the symbol table entry
+        let typ_to_register = alias.type_annotation.clone();
 
         // Also register in symbol table for export extraction
         let symbol = Symbol {
@@ -1177,6 +1192,16 @@ impl<'a> TypeChecker<'a> {
                         // Register interface in both type_env and symbol_table
                         // This is a subset of what check_interface_declaration does
                         let iface_name = self.interner.resolve(iface.name.node).to_string();
+
+                        // Store type parameter names for generic interfaces
+                        if let Some(type_params) = &iface.type_parameters {
+                            let param_names: Vec<String> = type_params
+                                .iter()
+                                .map(|tp| self.interner.resolve(tp.name.node).to_string())
+                                .collect();
+                            self.type_env
+                                .register_interface_type_params(iface_name.clone(), param_names);
+                        }
 
                         // Create object type from interface members
                         let obj_type = Type::new(
@@ -2407,9 +2432,6 @@ impl<'a> TypeChecker<'a> {
         // Enter method scope
         self.symbol_table.enter_scope();
 
-        let method_name_str = self.interner.resolve(method.name.node).to_string();
-        eprintln!("[DEBUG] check_class_method: '{}' - entered scope", method_name_str);
-
         // Do all method body work in a closure to ensure scope cleanup on error
         let old_return_type = self.current_function_return_type.clone();
         let result = (|| -> Result<(), TypeCheckError> {
@@ -2433,12 +2455,9 @@ impl<'a> TypeChecker<'a> {
                         self_type,
                         method.span,
                     );
-                    eprintln!("[DEBUG]   declaring 'self' for method '{}'", method_name_str);
                     self.symbol_table
                         .declare(symbol)
                         .map_err(|e| TypeCheckError::new(e, method.span))?;
-                } else {
-                    eprintln!("[DEBUG]   NO class context for method '{}' - self NOT declared", method_name_str);
                 }
             }
 
@@ -2477,18 +2496,12 @@ impl<'a> TypeChecker<'a> {
                     Type::new(TypeKind::Primitive(PrimitiveType::Unknown), param.span)
                 };
 
-                let param_name_dbg = match &param.pattern {
-                    typedlua_parser::ast::Pattern::Identifier(id) => self.interner.resolve(id.node).to_string(),
-                    _ => "<pattern>".to_string(),
-                };
-                eprintln!("[DEBUG]   declaring param '{}' type={:?}", param_name_dbg, param_type.kind);
                 self.declare_pattern(
                     &param.pattern,
                     param_type,
                     SymbolKind::Parameter,
                     param.span,
                 )?;
-                eprintln!("[DEBUG]   param '{}' declared OK, lookup={}", param_name_dbg, self.symbol_table.lookup(&param_name_dbg).is_some());
             }
 
             // Set current function return type for return statement checking
@@ -2496,9 +2509,6 @@ impl<'a> TypeChecker<'a> {
 
             // Check method body
             if let Some(body) = &mut method.body {
-                eprintln!("[DEBUG]   checking body for method '{}', visible symbols: {:?}",
-                    method_name_str,
-                    self.symbol_table.all_visible_symbols().keys().collect::<Vec<_>>());
                 self.check_block(body)?;
             }
 
@@ -3019,7 +3029,7 @@ impl<'a> TypeChecker<'a> {
                 // First evaluate the operand recursively
                 let evaluated_operand = self.evaluate_type(operand)?;
                 use super::evaluate_keyof;
-                evaluate_keyof(&evaluated_operand, &self.type_env)
+                evaluate_keyof(&evaluated_operand, &self.type_env, self.interner)
             }
             TypeKind::Mapped(mapped) => {
                 use super::evaluate_mapped_type;
@@ -3189,25 +3199,23 @@ impl<'a> TypeChecker<'a> {
         match &typ.kind {
             TypeKind::Reference(type_ref) => {
                 let ref_name = self.interner.resolve(type_ref.name.node).to_string();
-                // Check if this reference matches a type parameter
-                // Type parameters are single-letter or named params registered during
-                // interface declaration. We check if the name is a type alias that
-                // resolves to the same reference (meaning it's a type param, not a concrete type).
-                if let Some(iface_type) = self.type_env.get_interface(interface_name) {
-                    // For now, use a simple heuristic: if the reference name is a single
-                    // uppercase letter or matches a known type param pattern, substitute it.
-                    // Better approach: look up the interface's type params from declarations.
-                    // Since we don't have the declaration here, we use the type_env.
-                    if self.type_env.lookup_type(&ref_name).is_none()
-                        && self.type_env.lookup_type_alias(&ref_name).is_none()
-                    {
-                        // This is likely a type parameter - substitute with first type arg
-                        // TODO: Map parameter position properly when multiple type params exist
-                        if !type_args.is_empty() {
-                            return type_args[0].clone();
+                // Check if this reference matches a type parameter of the interface.
+                // Look up the interface's declared type parameter names and find the
+                // positional index so we substitute with the correct type argument.
+                if let Some(param_names) = self.type_env.get_interface_type_params(interface_name) {
+                    if let Some(pos) = param_names.iter().position(|p| p == &ref_name) {
+                        if pos < type_args.len() {
+                            return type_args[pos].clone();
                         }
                     }
-                    let _ = iface_type; // suppress unused warning
+                }
+                // Fallback: if no param names are registered, use heuristic
+                if self.type_env.get_interface(interface_name).is_some()
+                    && self.type_env.lookup_type(&ref_name).is_none()
+                    && self.type_env.lookup_type_alias(&ref_name).is_none()
+                    && !type_args.is_empty()
+                {
+                    return type_args[0].clone();
                 }
                 typ.clone()
             }

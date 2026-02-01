@@ -252,7 +252,7 @@ impl AggressiveInliningPass {
                     }
                 }
             }
-            ExpressionKind::New(callee, args) => {
+            ExpressionKind::New(callee, args, _) => {
                 self.detect_calls_in_expr(callee, hot_set);
                 for arg in args {
                     self.detect_calls_in_expr(&arg.value, hot_set);
@@ -491,7 +491,7 @@ impl AggressiveInliningPass {
                 }
                 changed
             }
-            ExpressionKind::New(callee, args) => {
+            ExpressionKind::New(callee, args, _) => {
                 let mut changed = self.inline_in_expression(callee);
                 for arg in args {
                     changed |= self.inline_in_expression(&mut arg.value);
@@ -718,7 +718,7 @@ impl AggressiveInliningPass {
                             .any(|s| self.contains_call_to(s, name)),
                     })
             }
-            ExpressionKind::New(callee, args) => {
+            ExpressionKind::New(callee, args, _) => {
                 self.expr_contains_call_to(callee, name)
                     || args
                         .iter()
@@ -903,7 +903,7 @@ impl AggressiveInliningPass {
                         MatchArmBody::Block(b) => acc + self.count_closures_in_block(b),
                     })
             }
-            ExpressionKind::New(callee, args) => {
+            ExpressionKind::New(callee, args, _) => {
                 self.count_closures_in_expr(callee)
                     + args
                         .iter()
@@ -1124,7 +1124,7 @@ impl AggressiveInliningPass {
                     }
                 }
             }
-            ExpressionKind::New(callee, args) => {
+            ExpressionKind::New(callee, args, _) => {
                 self.inline_expression(callee, param_subst);
                 for arg in args {
                     self.inline_expression(&mut arg.value, param_subst);

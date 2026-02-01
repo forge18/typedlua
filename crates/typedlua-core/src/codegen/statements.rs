@@ -43,6 +43,16 @@ impl CodeGenerator {
             Statement::Try(try_stmt) => self.generate_try_statement(try_stmt),
             Statement::Rethrow(span) => self.generate_rethrow_statement(*span),
             Statement::Namespace(ns) => self.generate_namespace_declaration(ns),
+            Statement::Label(label) => {
+                self.write_indent();
+                let name = self.interner.resolve(label.name.node);
+                self.writeln(&format!("::{name}::"));
+            }
+            Statement::Goto(goto) => {
+                self.write_indent();
+                let name = self.interner.resolve(goto.target.node);
+                self.writeln(&format!("goto {name}"));
+            }
         }
     }
 

@@ -175,7 +175,7 @@ impl MethodToFunctionConversionPass {
                 }
                 changed
             }
-            ExpressionKind::New(callee, args) => {
+            ExpressionKind::New(callee, args, _) => {
                 let mut changed = self.convert_in_expression(callee);
                 for arg in args {
                     changed |= self.convert_in_expression(&mut arg.value);

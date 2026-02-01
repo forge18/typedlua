@@ -15,7 +15,7 @@ pub fn is_guaranteed_non_nil(expr: &Expression) -> bool {
         ExpressionKind::Literal(Literal::String(_)) => true,
         ExpressionKind::Object(_) => true,
         ExpressionKind::Array(_) => true,
-        ExpressionKind::New(_, _) => true,
+        ExpressionKind::New(_, _, _) => true,
         ExpressionKind::Function(_) => true,
         ExpressionKind::Parenthesized(inner) => is_guaranteed_non_nil(inner),
         _ => false,
@@ -249,7 +249,7 @@ impl CodeGenerator {
                 }
                 self.write(")");
             }
-            ExpressionKind::New(constructor, args) => {
+            ExpressionKind::New(constructor, args, _type_args) => {
                 self.generate_expression(constructor);
                 self.write(".new(");
                 for (i, arg) in args.iter().enumerate() {

@@ -31,6 +31,8 @@ pub struct TypeEnvironment {
     abstract_classes: FxHashMap<String, bool>,
     /// Class primary constructors (class name -> constructor parameters)
     class_constructors: FxHashMap<String, Vec<ConstructorParameter>>,
+    /// Interface type parameter names (interface name -> ordered parameter names)
+    interface_type_params: FxHashMap<String, Vec<String>>,
 }
 
 impl TypeEnvironment {
@@ -45,6 +47,7 @@ impl TypeEnvironment {
             class_implements: FxHashMap::default(),
             abstract_classes: FxHashMap::default(),
             class_constructors: FxHashMap::default(),
+            interface_type_params: FxHashMap::default(),
         };
 
         env.register_builtins();
@@ -139,6 +142,16 @@ impl TypeEnvironment {
         }
         self.interfaces.insert(name.clone(), typ);
         Ok(())
+    }
+
+    /// Register the type parameter names for a generic interface.
+    pub fn register_interface_type_params(&mut self, name: String, params: Vec<String>) {
+        self.interface_type_params.insert(name, params);
+    }
+
+    /// Get the type parameter names for a generic interface.
+    pub fn get_interface_type_params(&self, name: &str) -> Option<&Vec<String>> {
+        self.interface_type_params.get(name)
     }
 
     /// Look up a type by name (checks type aliases, interfaces, and builtins)

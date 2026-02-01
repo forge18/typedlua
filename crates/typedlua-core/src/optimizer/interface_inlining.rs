@@ -244,7 +244,7 @@ impl InterfaceImplementationMap {
                     }
                 }
             }
-            ExpressionKind::New(callee, args) => {
+            ExpressionKind::New(callee, args, _) => {
                 self.expression_mutates_self(callee, class_id)
                     || args
                         .iter()
@@ -516,7 +516,7 @@ impl InterfaceMethodInliningPass {
                 }
                 changed
             }
-            ExpressionKind::New(callee, args) => {
+            ExpressionKind::New(callee, args, _) => {
                 let mut changed = self.process_expression(callee, impl_map);
                 for arg in args {
                     changed |= self.process_expression(&mut arg.value, impl_map);

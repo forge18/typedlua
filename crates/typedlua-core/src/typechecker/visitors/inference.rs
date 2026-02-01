@@ -641,9 +641,10 @@ impl TypeInferenceVisitor for TypeInferrer<'_> {
                 self.infer_expression(right_expr)
             }
 
-            ExpressionKind::New(callee, _args) => {
+            ExpressionKind::New(callee, _args, type_args) => {
                 // Infer the class type from the callee expression
                 // For `new ClassName(args)`, callee is Identifier("ClassName")
+                // For `new ClassName<T>(args)`, type_args carries the <T>
                 match &callee.kind {
                     ExpressionKind::Identifier(name) => {
                         let class_name = self.interner.resolve(*name);
@@ -656,11 +657,11 @@ impl TypeInferenceVisitor for TypeInferrer<'_> {
                             ));
                         }
 
-                        // Return a Reference type to the class
+                        // Return a Reference type to the class, preserving type arguments
                         Ok(Type::new(
                             TypeKind::Reference(TypeReference {
                                 name: typedlua_parser::ast::Spanned::new(*name, span),
-                                type_arguments: None,
+                                type_arguments: type_args.clone(),
                                 span,
                             }),
                             span,

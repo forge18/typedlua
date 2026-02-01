@@ -2,7 +2,7 @@ use rustc_hash::FxHashMap;
 use typedlua_parser::ast::expression::Literal;
 use typedlua_parser::ast::statement::{IndexKeyType, PropertySignature};
 use typedlua_parser::ast::types::{
-    MappedType, ObjectType, ObjectTypeMember, PrimitiveType, Type, TypeKind,
+    MappedType, MappedTypeModifier, ObjectType, ObjectTypeMember, PrimitiveType, Type, TypeKind,
 };
 use typedlua_parser::ast::Ident;
 use typedlua_parser::span::Span;
@@ -544,7 +544,7 @@ pub fn evaluate_mapped_type(
     let in_type_resolved = match &mapped.in_type.kind {
         TypeKind::KeyOf(operand) => {
             // Evaluate keyof to get the union of string literals
-            evaluate_keyof(operand, type_env)?
+            evaluate_keyof(operand, type_env, interner)?
         }
         _ => (*mapped.in_type).clone(),
     };
@@ -556,10 +556,25 @@ pub fn evaluate_mapped_type(
         .iter()
         .map(|key| {
             let key_id = interner.intern(key);
+
+            // Determine readonly status based on modifier
+            let is_readonly = match mapped.readonly_modifier {
+                MappedTypeModifier::Add => true,
+                MappedTypeModifier::Remove => false,
+                MappedTypeModifier::None => false,
+            };
+
+            // Determine optional status based on modifier
+            let is_optional = match mapped.optional_modifier {
+                MappedTypeModifier::Add => true,
+                MappedTypeModifier::Remove => false,
+                MappedTypeModifier::None => false,
+            };
+
             ObjectTypeMember::Property(PropertySignature {
-                is_readonly: mapped.is_readonly,
+                is_readonly,
                 name: Ident::new(key_id, mapped.span),
-                is_optional: mapped.is_optional,
+                is_optional,
                 type_annotation: (*mapped.value_type).clone(),
                 span: mapped.span,
             })
@@ -576,14 +591,18 @@ pub fn evaluate_mapped_type(
 }
 
 /// Evaluate keyof operator - extracts property names from an object type
-pub fn evaluate_keyof(typ: &Type, type_env: &super::TypeEnvironment) -> Result<Type, String> {
+pub fn evaluate_keyof(
+    typ: &Type,
+    type_env: &super::TypeEnvironment,
+    interner: &StringInterner,
+) -> Result<Type, String> {
     // Resolve type reference first
     let resolved_type = match &typ.kind {
         TypeKind::Reference(type_ref) => {
-            let type_name = type_ref.name.node.to_string();
+            let type_name = interner.resolve(type_ref.name.node);
             match type_env.lookup_type(&type_name) {
                 Some(t) => t.clone(),
-                None => return Err(format!("Type '{}' not found", type_ref.name.node)),
+                None => return Err(format!("Type '{}' not found", type_name)),
             }
         }
         _ => typ.clone(),

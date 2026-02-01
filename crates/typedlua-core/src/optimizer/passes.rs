@@ -976,7 +976,7 @@ impl GlobalLocalizationPass {
                     self.collect_from_match_arm_body(&arm.body, usage, declared_locals);
                 }
             }
-            ExpressionKind::New(callee, args) => {
+            ExpressionKind::New(callee, args, _) => {
                 self.collect_from_expression_optimized(callee, usage, declared_locals);
                 for arg in args {
                     self.collect_from_expression_optimized(&arg.value, usage, declared_locals);
@@ -1214,7 +1214,7 @@ impl GlobalLocalizationPass {
                 }
                 self.replace_in_arrow_body(&mut arrow.body, frequently_used, declared_locals);
             }
-            ExpressionKind::New(callee, args) => {
+            ExpressionKind::New(callee, args, _) => {
                 self.replace_in_expression(callee, frequently_used, declared_locals);
                 for arg in args {
                     self.replace_in_expression(&mut arg.value, frequently_used, declared_locals);
@@ -1626,7 +1626,7 @@ impl FunctionInliningPass {
                 }
                 changed
             }
-            ExpressionKind::New(callee, args) => {
+            ExpressionKind::New(callee, args, _) => {
                 let mut changed = self.inline_in_expression(callee);
                 for arg in args {
                     changed |= self.inline_in_expression(&mut arg.value);
@@ -1840,7 +1840,7 @@ impl FunctionInliningPass {
                             .any(|s| self.contains_call_to(s, name)),
                     })
             }
-            ExpressionKind::New(callee, args) => {
+            ExpressionKind::New(callee, args, _) => {
                 self.expr_contains_call_to(callee, name)
                     || args
                         .iter()
@@ -2001,7 +2001,7 @@ impl FunctionInliningPass {
                         MatchArmBody::Block(block) => self.block_has_closures(block),
                     })
             }
-            ExpressionKind::New(callee, args) => {
+            ExpressionKind::New(callee, args, _) => {
                 self.expr_has_closures(callee)
                     || args.iter().any(|a| self.expr_has_closures(&a.value))
             }
@@ -2215,7 +2215,7 @@ impl FunctionInliningPass {
                     }
                 }
             }
-            ExpressionKind::New(callee, args) => {
+            ExpressionKind::New(callee, args, _) => {
                 self.inline_expression(callee, param_subst);
                 for arg in args {
                     self.inline_expression(&mut arg.value, param_subst);
@@ -2319,7 +2319,9 @@ impl LoopOptimizationPass {
             | Statement::DeclareNamespace(_)
             | Statement::DeclareType(_)
             | Statement::DeclareInterface(_)
-            | Statement::DeclareConst(_) => false,
+            | Statement::DeclareConst(_)
+            | Statement::Label(_)
+            | Statement::Goto(_) => false,
             Statement::Function(func) => self.optimize_block(&mut func.body.statements),
             Statement::If(if_stmt) => {
                 let mut changed = self.optimize_block(&mut if_stmt.then_block.statements);
@@ -2505,7 +2507,9 @@ impl LoopOptimizationPass {
             | Statement::DeclareNamespace(_)
             | Statement::DeclareType(_)
             | Statement::DeclareInterface(_)
-            | Statement::DeclareConst(_) => {}
+            | Statement::DeclareConst(_)
+            | Statement::Label(_)
+            | Statement::Goto(_) => {}
         }
     }
 
@@ -2677,7 +2681,7 @@ impl LoopOptimizationPass {
             ExpressionKind::TypeAssertion(expr, _) => {
                 self.collect_modified_in_expression(expr, modified);
             }
-            ExpressionKind::New(expr, args) => {
+            ExpressionKind::New(expr, args, _) => {
                 self.collect_modified_in_expression(expr, modified);
                 for arg in args {
                     self.collect_modified_in_expression(&arg.value, modified);
@@ -2842,7 +2846,7 @@ impl LoopOptimizationPass {
             }),
             ExpressionKind::Parenthesized(expr) => self.is_invariant_expression(expr, loop_vars),
             ExpressionKind::TypeAssertion(expr, _) => self.is_invariant_expression(expr, loop_vars),
-            ExpressionKind::New(expr, args) => {
+            ExpressionKind::New(expr, args, _) => {
                 self.is_invariant_expression(expr, loop_vars)
                     && args
                         .iter()
@@ -3701,7 +3705,7 @@ impl DeadStoreEliminationPass {
             ExpressionKind::TypeAssertion(expr, _) => {
                 self.collect_expression_reads_into(expr, reads);
             }
-            ExpressionKind::New(expr, args) => {
+            ExpressionKind::New(expr, args, _) => {
                 self.collect_expression_reads_into(expr, reads);
                 for arg in args {
                     self.collect_expression_reads_into(&arg.value, reads);
@@ -3920,7 +3924,7 @@ impl DeadStoreEliminationPass {
                         }
                     })
             }
-            ExpressionKind::New(expr, args) => {
+            ExpressionKind::New(expr, args, _) => {
                 self.expression_captures_variables(expr)
                     || args
                         .iter()
@@ -4578,7 +4582,7 @@ impl GenericSpecializationPass {
                 }
             }
 
-            ExpressionKind::New(callee, args) => {
+            ExpressionKind::New(callee, args, _) => {
                 if self.specialize_calls_in_expression(callee) {
                     changed = true;
                 }

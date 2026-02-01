@@ -346,7 +346,7 @@ impl DevirtualizationPass {
                 }
                 changed
             }
-            ExpressionKind::New(callee, args) => {
+            ExpressionKind::New(callee, args, _) => {
                 let mut changed = self.process_expression(callee, hierarchy);
                 for arg in args {
                     changed |= self.process_expression(&mut arg.value, hierarchy);

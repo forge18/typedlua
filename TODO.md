@@ -2335,11 +2335,11 @@ fuzz/
 
 - [x] **Parent Constructor Argument Validation** — Constructor args are type-inferred but never validated against parent constructor's expected parameter count and types (`type_checker.rs:1686`)
 
-- [ ] **Generic Multi-Parameter Type Mapping** — When resolving generic interfaces with multiple type parameters, only the first type argument is used (`type_checker.rs:3097`)
+- [x] **Generic Multi-Parameter Type Mapping** — When resolving generic interfaces with multiple type parameters, only the first type argument is used (`type_checker.rs:3097`)
 
 **MEDIUM PRIORITY — Advanced Type System Features (11 failing tests in advanced generics):**
 
-- [ ] **Conditional Types** — `T extends U ? X : Y` syntax not implemented
+- [x] **Conditional Types** — `T extends U ? X : Y` syntax not implemented
 - [ ] **Mapped Types** — `{ [K in keyof T]: ?T[K] }` with modifiers (`readonly`, `?`, `-?`, `-readonly`) not implemented
 - [ ] **Template Literal Types** — `` `${Prefix}_${Suffix}` `` not implemented at parser level (`template_literal_limit_tests.rs`)
 - [ ] **Infer Keyword** — `infer` keyword in conditional types not implemented

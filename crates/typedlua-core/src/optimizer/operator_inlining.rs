@@ -222,7 +222,7 @@ impl OperatorInliningPass {
                     }
                 }
             }
-            ExpressionKind::New(callee, args) => {
+            ExpressionKind::New(callee, args, _) => {
                 self.catalog_expression(callee);
                 for arg in args {
                     self.catalog_expression(&arg.value);
@@ -575,7 +575,7 @@ fn expression_has_side_effects(expr: &Expression) -> bool {
                 typedlua_parser::ast::expression::ArrowBody::Block(b) => block_has_side_effects(b),
             }
         }
-        ExpressionKind::New(callee, args) => {
+        ExpressionKind::New(callee, args, _) => {
             expression_has_side_effects(callee)
                 || args
                     .iter()
@@ -770,7 +770,7 @@ impl OperatorInliningPass {
                 }
                 changed
             }
-            ExpressionKind::New(callee, args) => {
+            ExpressionKind::New(callee, args, _) => {
                 let mut changed = self.process_expression(callee);
                 for arg in args {
                     changed |= self.process_expression(&mut arg.value);

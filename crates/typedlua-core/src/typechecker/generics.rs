@@ -534,6 +534,8 @@ pub fn instantiate_statement(
         Statement::DeclareType(dt) => Statement::DeclareType(dt.clone()),
         Statement::DeclareInterface(di) => Statement::DeclareInterface(di.clone()),
         Statement::DeclareConst(dc) => Statement::DeclareConst(dc.clone()),
+        Statement::Label(l) => Statement::Label(l.clone()),
+        Statement::Goto(g) => Statement::Goto(g.clone()),
     }
 }
 
@@ -731,11 +733,16 @@ pub fn instantiate_expression(
             ExpressionKind::Template(instantiate_template_literal(template, substitutions))
         }
 
-        ExpressionKind::New(callee, args) => ExpressionKind::New(
+        ExpressionKind::New(callee, args, type_args) => ExpressionKind::New(
             Box::new(instantiate_expression(callee, substitutions)),
             args.iter()
                 .map(|a| instantiate_argument(a, substitutions))
                 .collect(),
+            type_args.as_ref().map(|tas| {
+                tas.iter()
+                    .map(|t| substitute_type(t, substitutions).unwrap_or_else(|_| t.clone()))
+                    .collect()
+            }),
         ),
 
         ExpressionKind::Try(try_expr) => {
