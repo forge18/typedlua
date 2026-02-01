@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use typedlua_parser::span::Span;
 
 /// A source map builder following the Source Map v3 specification
 /// https://sourcemaps.info/spec.html
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SourceMapBuilder {
     file: Option<String>,
     source_root: Option<String>,
@@ -146,6 +147,46 @@ impl SourceMapBuilder {
             sources_content: self.sources_content,
             names: self.names,
             mappings,
+        }
+    }
+
+    /// Get the current generated position (line, column)
+    pub fn current_position(&self) -> (usize, usize) {
+        (self.generated_line, self.generated_column)
+    }
+
+    /// Merge mappings from another source map builder into this one
+    /// Applies the given line and column offsets to the generated positions
+    /// and remaps source indices using the provided source index mapping
+    pub fn merge_mappings_from(
+        &mut self,
+        other: &SourceMapBuilder,
+        line_offset: usize,
+        column_offset: usize,
+        source_index_map: &HashMap<usize, usize>,
+    ) {
+        for mapping in &other.mappings {
+            let new_source_index = source_index_map
+                .get(&mapping.source_index)
+                .copied()
+                .unwrap_or(0);
+            let name_index = mapping
+                .name_index
+                .map(|_idx| {
+                    // If the other builder has names, we need to add them to our names
+                    // For now, we skip name mappings in merge to keep it simple
+                    None
+                })
+                .flatten();
+
+            self.mappings.push(Mapping {
+                generated_line: mapping.generated_line + line_offset,
+                generated_column: mapping.generated_column + column_offset,
+                source_index: new_source_index,
+                source_line: mapping.source_line,
+                source_column: mapping.source_column,
+                name_index,
+            });
         }
     }
 

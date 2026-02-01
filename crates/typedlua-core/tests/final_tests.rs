@@ -219,3 +219,59 @@ fn test_final_method_across_multiple_inheritance_levels() {
         "Error message should mention final method"
     );
 }
+
+#[test]
+fn test_abstract_final_class() {
+    let source = r#"
+        abstract final class Shape {
+            abstract getArea(): number
+        }
+    "#;
+
+    assert!(
+        type_check(source).is_ok(),
+        "Abstract final class should be allowed (can't be extended, must be implemented)"
+    );
+}
+
+#[test]
+fn test_extend_abstract_final_class_fails() {
+    let source = r#"
+        abstract final class Shape {
+            abstract getArea(): number
+        }
+
+        class Circle extends Shape {
+            radius: number
+
+            constructor(radius: number) {
+                self.radius = radius
+            }
+
+            getArea(): number {
+                return 3.14 * self.radius * self.radius
+            }
+        }
+    "#;
+
+    let result = type_check(source);
+    assert!(
+        result.is_err(),
+        "Extending abstract final class should fail (abstract means must be extended, final means can't be extended)"
+    );
+}
+
+#[test]
+fn test_final_class_with_abstract_methods() {
+    let source = r#"
+        abstract final class Base {
+            abstract method1(): void
+            abstract method2(): number
+        }
+    "#;
+
+    assert!(
+        type_check(source).is_ok(),
+        "Final class can have abstract methods"
+    );
+}

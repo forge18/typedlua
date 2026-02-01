@@ -201,3 +201,204 @@ fn test_multiple_classes_with_access_modifiers() {
         "Multiple classes with access modifiers should type-check successfully"
     );
 }
+
+#[test]
+fn test_protected_access_from_subclass() {
+    let source = r#"
+        class Animal {
+            protected species: string = "unknown"
+            protected getSpecies(): string {
+                return this.species
+            }
+        }
+
+        class Dog extends Animal {
+            private breed: string = "mutt"
+
+            public getInfo(): string {
+                return self.getSpecies() .. " " .. self.breed
+            }
+        }
+    "#;
+
+    assert!(
+        type_check(source).is_ok(),
+        "Protected members should be accessible from subclass"
+    );
+}
+
+#[test]
+fn test_protected_inheritance_chain() {
+    let source = r#"
+        class GrandParent {
+            protected value: number = 1
+        }
+
+        class Parent extends GrandParent {
+            protected multiplier: number = 2
+        }
+
+        class Child extends Parent {
+            public getValue(): number {
+                return self.value * self.multiplier
+            }
+        }
+    "#;
+
+    assert!(
+        type_check(source).is_ok(),
+        "Protected members should be accessible through inheritance chain"
+    );
+}
+
+#[test]
+fn test_private_in_protected_base() {
+    let source = r#"
+        class Base {
+            private secret: string = "hidden"
+            protected exposed: string = "visible"
+        }
+
+        class Derived extends Base {
+            public useExposed(): string {
+                return self.exposed
+            }
+        }
+    "#;
+
+    assert!(
+        type_check(source).is_ok(),
+        "Protected members should be accessible in derived class, private members not accessed"
+    );
+}
+
+#[test]
+fn test_static_protected_access_from_subclass() {
+    let source = r#"
+        class Animal {
+            protected static population: number = 0
+
+            protected constructor() {
+                Animal.population = Animal.population + 1
+            }
+        }
+
+        class Dog extends Animal {
+            public static getPopulation(): number {
+                return Animal.population
+            }
+        }
+    "#;
+
+    assert!(
+        type_check(source).is_ok(),
+        "Protected static members should be accessible from subclass"
+    );
+}
+
+#[test]
+fn test_static_private_access_within_class() {
+    let source = r#"
+        class Counter {
+            private static count: number = 0
+
+            public static increment(): number {
+                Counter.count = Counter.count + 1
+                return Counter.count
+            }
+
+            public static getCount(): number {
+                return Counter.count
+            }
+        }
+    "#;
+
+    assert!(
+        type_check(source).is_ok(),
+        "Private static members should be accessible within the class"
+    );
+}
+
+#[test]
+fn test_private_member_accessibility_within_class() {
+    let source = r#"
+        class BankAccount {
+            private balance: number = 100
+
+            public deposit(amount: number): void {
+                self.balance = self.balance + amount
+            }
+
+            public getBalance(): number {
+                return self.balance
+            }
+
+            public transferTo(other: BankAccount, amount: number): void {
+                self.balance = self.balance - amount
+                other.balance = other.balance + amount
+            }
+        }
+    "#;
+
+    assert!(
+        type_check(source).is_ok(),
+        "Private members should be accessible within the same class instance"
+    );
+}
+
+#[test]
+fn test_protected_vs_private_access() {
+    let source = r#"
+        class Base {
+            private privateField: string = "private"
+            protected protectedField: string = "protected"
+        }
+
+        class Derived extends Base {
+            public testAccess(): string {
+                return self.protectedField
+            }
+        }
+
+        class Unrelated {
+            public testAccess(obj: Base): string {
+                return obj.protectedField -- This should error: protected not accessible
+            }
+        }
+    "#;
+
+    assert!(
+        type_check(source).is_err(),
+        "Protected members should not be accessible from unrelated classes"
+    );
+}
+
+#[test]
+fn test_getter_setter_access_modifiers() {
+    let source = r#"
+        class Person {
+            private _age: number = 0
+
+            public get age(): number {
+                return self._age
+            }
+
+            private set age(value: number) {
+                if value >= 0 then
+                    self._age = value
+                end
+            }
+        }
+
+        class Employee extends Person {
+            public celebrateBirthday(): void {
+                self.age = self.age + 1
+            }
+        }
+    "#;
+
+    assert!(
+        type_check(source).is_ok(),
+        "Getters and setters with different access modifiers should work"
+    );
+}

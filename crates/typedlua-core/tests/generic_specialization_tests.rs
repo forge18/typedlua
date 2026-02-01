@@ -14,6 +14,28 @@ use typedlua_parser::ast::{Program, Spanned};
 use typedlua_parser::span::Span;
 use typedlua_parser::string_interner::StringInterner;
 
+// Helper for integration-style tests that parse and type-check source code
+fn type_check(source: &str) -> Result<(), String> {
+    let handler = Arc::new(CollectingDiagnosticHandler::new());
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let mut lexer = Lexer::new(source, handler.clone(), &interner);
+    let tokens = lexer.tokenize().map_err(|e| format!("{:?}", e))?;
+
+    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
+    let program = parser.parse().map_err(|e| format!("{:?}", e))?;
+
+    let mut checker = TypeChecker::new(handler, &interner, &common_ids);
+    checker
+        .check_program(&mut program.clone())
+        .map_err(|e| e.message)?;
+
+    Ok(())
+}
+
+use typedlua_core::typechecker::TypeChecker;
+use typedlua_parser::lexer::Lexer;
+use typedlua_parser::parser::Parser;
+
 fn create_test_interner() -> Rc<StringInterner> {
     Rc::new(StringInterner::new())
 }
@@ -772,5 +794,214 @@ fn test_different_type_args_create_different_specializations() {
     assert_eq!(
         specialized_count, 2,
         "Should create different specializations for different type args"
+    );
+}
+
+// =============================================================================
+// Integration Tests for Generic Classes and Interfaces
+// These tests verify that generic classes, interfaces, and constraints work correctly
+// =============================================================================
+
+#[test]
+fn test_generic_class_definition() {
+    let source = r#"
+        class Box<T> {
+        }
+    "#;
+
+    assert!(
+        type_check(source).is_ok(),
+        "Generic class with type parameter should type-check successfully"
+    );
+}
+
+#[test]
+fn test_generic_class_instantiation() {
+    let source = r#"
+        class Container<T> {
+            private item: T
+
+            constructor(item: T) {
+                self.item = item
+            }
+
+            public getItem(): T {
+                return self.item
+            }
+        }
+
+        const numContainer = Container<number>(42)
+        const strContainer = Container<string>("hello")
+    "#;
+
+    assert!(
+        type_check(source).is_ok(),
+        "Generic class instantiation with type arguments should work"
+    );
+}
+
+#[test]
+fn test_generic_interface() {
+    let source = r#"
+        interface Repository<T> {
+            findById(id: number): T | nil
+            save(entity: T): boolean
+            delete(id: number): boolean
+        }
+    "#;
+
+    assert!(
+        type_check(source).is_ok(),
+        "Generic interface should type-check successfully"
+    );
+}
+
+#[test]
+fn test_generic_nested_class() {
+    let source = r#"
+        class Outer<T> {
+            class Inner<U> {
+            }
+        }
+    "#;
+
+    assert!(
+        type_check(source).is_ok(),
+        "Nested generic class should type-check successfully"
+    );
+}
+
+#[test]
+fn test_generic_constraint_with_extends() {
+    let source = r#"
+        interface HasId {
+            id: number
+        }
+
+        function processItem<T extends HasId>(item: T): number {
+            return item.id
+        }
+
+        class Product implements HasId {
+            id: number = 0
+            name: string = ""
+        }
+
+        class Order implements HasId {
+            id: number = 0
+            total: number = 0
+        }
+    "#;
+
+    assert!(
+        type_check(source).is_ok(),
+        "Generic function with extends constraint should work"
+    );
+}
+
+#[test]
+fn test_generic_class_with_constraint() {
+    let source = r#"
+        interface Identifiable {
+            getId(): number
+        }
+
+        class Registry<T extends Identifiable> {
+        }
+    "#;
+
+    assert!(
+        type_check(source).is_ok(),
+        "Generic class with constraint should work"
+    );
+}
+
+#[test]
+fn test_generic_multiple_constraints() {
+    let source = r#"
+        interface Serializable {
+            serialize(): string
+        }
+
+        interface Comparable {
+            compare(other: any): number
+        }
+
+        class DataSet<T extends Serializable & Comparable> {
+            private data: Array<T> = {}
+
+            public add(item: T): void {
+                table.insert(self.data, item)
+            }
+
+            public serializeAll(): string {
+                local result = ""
+                for _, item in ipairs(self.data) do
+                    result = result .. item.serialize()
+                end
+                return result
+            }
+        }
+    "#;
+
+    assert!(
+        type_check(source).is_ok(),
+        "Generic with multiple constraints should type-check"
+    );
+}
+
+#[test]
+fn test_generic_method_in_class() {
+    let source = r#"
+        class MathUtils {
+            public identity<T>(x: T): T {
+                return x
+            }
+
+            public double<T>(x: T): T {
+                return x
+            }
+
+            public swap<T, U>(a: T, b: U): { first: U, second: T } {
+                return { first = b, second = a }
+            }
+        }
+    "#;
+
+    assert!(
+        type_check(source).is_ok(),
+        "Generic methods in non-generic class should work"
+    );
+}
+
+#[test]
+fn test_generic_inheritance() {
+    let source = r#"
+        class Base<T> {
+        }
+
+        class Derived<T> extends Base<T> {
+        }
+    "#;
+
+    assert!(
+        type_check(source).is_ok(),
+        "Generic class inheritance should work"
+    );
+}
+
+#[test]
+fn test_generic_interface_implementation() {
+    let source = r#"
+        interface Functor<T> {
+        }
+
+        class Maybe<T> implements Functor<T> {
+        }
+    "#;
+
+    assert!(
+        type_check(source).is_ok(),
+        "Generic interface implementation should work"
     );
 }

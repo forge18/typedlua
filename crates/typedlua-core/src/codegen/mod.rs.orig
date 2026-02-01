@@ -344,15 +344,14 @@ impl CodeGenerator {
             );
 
             // Record the starting position of this module in the bundle for source map merging
-            // Add a mapping for the start of this module (line 0, column 0 of source)
-            if let Some(ref mut builder) = source_map_builder {
-                builder.add_mapping_with_source(
-                    typedlua_parser::span::Span::new(0, 0, 0, 0),
-                    source_index,
-                    None,
-                );
-            }
             let module_start_position = source_map_builder.as_ref().map(|b| b.current_position());
+
+            // Create module source map builder outside the generator so we can use it after generation
+            let module_source_map_builder: Option<SourceMapBuilder> = if with_source_map {
+                Some(SourceMapBuilder::new(module_id.clone()))
+            } else {
+                None
+            };
 
             // Generate module code with source map support
             // Use the provided interner or create a new one if not provided
@@ -373,15 +372,12 @@ impl CodeGenerator {
             // Set source index for this module
             generator.current_source_index = source_index;
 
-            // If we're building a source map, enable it for the generator
-            if with_source_map {
-                generator.source_map = Some(SourceMapBuilder::new(module_id.clone()));
+            // If we're building a source map, use our external builder
+            if let Some(ref builder) = module_source_map_builder {
+                generator.source_map = Some(builder.clone());
             }
 
             let module_code = generator.generate(&mut program);
-
-            // Take the source map builder from the generator
-            let module_source_map_builder = generator.source_map.take();
 
             // Indent the module code and add mappings
             for line in module_code.lines() {

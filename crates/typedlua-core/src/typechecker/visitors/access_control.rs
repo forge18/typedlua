@@ -86,6 +86,9 @@ pub trait AccessControlVisitor: TypeCheckVisitor {
 
     /// Get current class context
     fn get_current_class(&self) -> &Option<ClassContext>;
+
+    /// Register the interfaces that a class implements
+    fn register_class_implements(&mut self, class_name: &str, interfaces: Vec<String>);
 }
 
 /// Default implementation of access control
@@ -94,6 +97,7 @@ pub struct AccessControl {
     class_members: FxHashMap<String, Vec<ClassMemberInfo>>,
     final_classes: FxHashMap<String, bool>,
     class_parents: FxHashMap<String, Option<String>>, // Store class hierarchy
+    class_implements: FxHashMap<String, Vec<String>>, // Store class -> interfaces mapping
     current_class: Option<ClassContext>,
 }
 
@@ -103,6 +107,7 @@ impl AccessControl {
     }
 
     /// Find a member by walking the class hierarchy (current class, then parent, etc.)
+    /// Also checks implemented interfaces for default method implementations
     fn find_member_in_hierarchy(
         &self,
         class_name: &str,
@@ -117,7 +122,7 @@ impl AccessControl {
             }
             // Walk to parent class
             if let Some(Some(parent_name)) = self.class_parents.get(current) {
-                // Strip generic arguments from parent name (e.g., "DataStore<number>" -> "DataStore")
+                // Strip generic arguments from parent name (e.g. "DataStore<number>" -> "DataStore")
                 let base_name = if let Some(idx) = parent_name.find('<') {
                     &parent_name[..idx]
                 } else {
@@ -129,6 +134,33 @@ impl AccessControl {
                 current = base_name;
             } else {
                 break;
+            }
+        }
+
+        // If not found in class hierarchy, check implemented interfaces
+        self.find_member_in_interfaces(class_name, member_name)
+    }
+
+    /// Find a member in the interfaces implemented by a class
+    fn find_member_in_interfaces(
+        &self,
+        class_name: &str,
+        member_name: &str,
+    ) -> Option<&ClassMemberInfo> {
+        if let Some(interfaces) = self.class_implements.get(class_name) {
+            for interface_name in interfaces {
+                // Strip generic arguments from interface name
+                let base_name = if let Some(idx) = interface_name.find('<') {
+                    &interface_name[..idx]
+                } else {
+                    interface_name.as_str()
+                };
+
+                if let Some(members) = self.class_members.get(base_name) {
+                    if let Some(info) = members.iter().find(|m| m.name == member_name) {
+                        return Some(info);
+                    }
+                }
             }
         }
         None
@@ -283,6 +315,11 @@ impl AccessControlVisitor for AccessControl {
 
     fn get_current_class(&self) -> &Option<ClassContext> {
         &self.current_class
+    }
+
+    fn register_class_implements(&mut self, class_name: &str, interfaces: Vec<String>) {
+        self.class_implements
+            .insert(class_name.to_string(), interfaces);
     }
 }
 

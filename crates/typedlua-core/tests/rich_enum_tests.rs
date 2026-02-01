@@ -441,3 +441,196 @@ fn test_o1_uses_constructor_calls() {
         "O1: Should not add inline hints"
     );
 }
+
+// ============================================================================
+// Rich Enum Method Tests
+// ============================================================================
+
+#[test]
+fn test_enum_name_method() {
+    let source = r#"
+        enum Color {
+            Red(1),
+            Green(2),
+            Blue(3),
+            value: number,
+            constructor(v: number) {
+                self.value = v
+            }
+        }
+    "#;
+
+    let result = compile_and_check(source);
+    assert!(result.is_ok(), "Enum should compile: {:?}", result.err());
+
+    let output = result.unwrap();
+    assert!(
+        output.contains("function Color:name()"),
+        "Should generate name() method"
+    );
+    assert!(
+        output.contains("return self.__name"),
+        "name() should return __name field"
+    );
+}
+
+#[test]
+fn test_enum_ordinal_method() {
+    let source = r#"
+        enum Status {
+            Pending(0),
+            Approved(1),
+            Rejected(2),
+            code: number,
+            constructor(c: number) {
+                self.code = c
+            }
+        }
+    "#;
+
+    let result = compile_and_check(source);
+    assert!(result.is_ok(), "Enum should compile: {:?}", result.err());
+
+    let output = result.unwrap();
+    assert!(
+        output.contains("function Status:ordinal()"),
+        "Should generate ordinal() method"
+    );
+    assert!(
+        output.contains("return self.__ordinal"),
+        "ordinal() should return __ordinal field"
+    );
+}
+
+#[test]
+fn test_enum_values_method() {
+    let source = r#"
+        enum Direction {
+            North(0),
+            South(1),
+            East(2),
+            West(3),
+            id: number,
+            constructor(i: number) {
+                self.id = i
+            }
+        }
+    "#;
+
+    let result = compile_and_check(source);
+    assert!(result.is_ok(), "Enum should compile: {:?}", result.err());
+
+    let output = result.unwrap();
+    assert!(
+        output.contains("function Direction.values()"),
+        "Should generate values() static method"
+    );
+    assert!(
+        output.contains("return Direction.__values"),
+        "values() should return __values array"
+    );
+    assert!(
+        output.contains("Direction.__values = {"),
+        "Should define __values array"
+    );
+}
+
+#[test]
+fn test_enum_value_of_method() {
+    let source = r#"
+        enum Result {
+            Success(0),
+            Failure(1),
+            code: number,
+            constructor(c: number) {
+                self.code = c
+            }
+        }
+    "#;
+
+    let result = compile_and_check(source);
+    assert!(result.is_ok(), "Enum should compile: {:?}", result.err());
+
+    let output = result.unwrap();
+    assert!(
+        output.contains("function Result.valueOf(name)"),
+        "Should generate valueOf() static method"
+    );
+    assert!(
+        output.contains("return Result.__byName[name]"),
+        "valueOf() should return from __byName hash"
+    );
+    assert!(
+        output.contains("Result.__byName = {"),
+        "Should define __byName hash table"
+    );
+}
+
+#[test]
+fn test_enum_equality() {
+    let source = r#"
+        enum Color {
+            Red(1),
+            Green(2),
+            Blue(3),
+            value: number,
+            constructor(v: number) {
+                self.value = v
+            }
+        }
+    "#;
+
+    let result = compile_and_check(source);
+    assert!(
+        result.is_ok(),
+        "Enum with equality should compile: {:?}",
+        result.err()
+    );
+
+    let output = result.unwrap();
+    assert!(
+        output.contains("Color.Red"),
+        "Should create enum instance Color.Red"
+    );
+    assert!(
+        output.contains("Color.Green"),
+        "Should create enum instance Color.Green"
+    );
+}
+
+#[test]
+fn test_enum_with_multiple_constructors() {
+    let source = r#"
+        enum Planet {
+            Mercury(3.303e23, 2.4397e6),
+            Earth(5.976e24, 6.37814e6),
+            mass: number,
+            radius: number,
+            constructor(mass: number, radius: number) {
+                self.mass = mass
+                self.radius = radius
+            }
+        }
+    "#;
+
+    let result = compile_and_check(source);
+    assert!(
+        result.is_ok(),
+        "Enum with multiple fields should compile: {:?}",
+        result.err()
+    );
+
+    let output = result.unwrap();
+    assert!(
+        output.contains("Planet__new"),
+        "Should create constructor function"
+    );
+    assert!(
+        output.contains("Planet.Mercury"),
+        "Should create Mercury instance"
+    );
+    assert!(
+        output.contains("Planet.Earth"),
+        "Should create Earth instance"
+    );
+}

@@ -1666,6 +1666,23 @@ impl<'a> TypeChecker<'a> {
         if !class_decl.implements.is_empty() {
             self.type_env
                 .register_class_implements(class_name.clone(), class_decl.implements.clone());
+
+            // Also register with access control for member lookup in interfaces
+            let interface_names: Vec<String> = class_decl
+                .implements
+                .iter()
+                .map(|t| {
+                    // Extract the interface name from the type
+                    match &t.kind {
+                        typedlua_parser::ast::types::TypeKind::Reference(ref_type) => {
+                            self.interner.resolve(ref_type.name.node).to_string()
+                        }
+                        _ => format!("{:?}", t),
+                    }
+                })
+                .collect();
+            self.access_control
+                .register_class_implements(&class_name, interface_names);
         }
 
         // Process primary constructor parameters - they become class properties
@@ -2939,10 +2956,9 @@ impl<'a> TypeChecker<'a> {
                     let resolved_child = self.deep_resolve_type(child_type);
                     let resolved_parent = self.deep_resolve_type(&parent_type);
 
-                    // Parameters should have the same type (we could allow contravariance here)
-                    if !TypeCompatibility::is_assignable(&resolved_parent, &resolved_child)
-                        || !TypeCompatibility::is_assignable(&resolved_child, &resolved_parent)
-                    {
+                    // Parameters are contravariant: parent type must be assignable to child type
+                    // (child can accept a more specific type than parent)
+                    if !TypeCompatibility::is_assignable(&resolved_parent, &resolved_child) {
                         return Err(TypeCheckError::new(
                             format!("Method '{}' parameter {} type '{}' is incompatible with parent parameter type",
                                 method.name.node, i + 1, self.type_to_string(child_type)),
@@ -3052,6 +3068,43 @@ impl<'a> TypeChecker<'a> {
             TypeKind::TemplateLiteral(template) => {
                 use super::evaluate_template_literal_type;
                 evaluate_template_literal_type(template, &self.type_env, self.interner)
+            }
+            TypeKind::TypeQuery(expr) => {
+                // typeof(expression) - Look up the type of the expression
+                // For identifiers, we can look them up directly in the type environment
+                use typedlua_parser::ast::expression::ExpressionKind;
+                match &expr.kind {
+                    ExpressionKind::Identifier(name_id) => {
+                        let name = self.interner.resolve(*name_id);
+                        match self.type_env.lookup_type(&name) {
+                            Some(t) => Ok(t.clone()),
+                            None => match self.symbol_table.lookup(&name) {
+                                Some(symbol) => Ok(symbol.typ.clone()),
+                                None => Err(format!("Cannot resolve typeof for identifier '{}'", name)),
+                            },
+                        }
+                    }
+                    ExpressionKind::Call(callee, _args, _type_args) => {
+                        // For function calls like typeof(getNumber()), 
+                        // look up the return type of the function
+                        if let ExpressionKind::Identifier(name_id) = &callee.kind {
+                            let name = self.interner.resolve(*name_id);
+                            match self.symbol_table.lookup(&name) {
+                                Some(symbol) => {
+                                    if let TypeKind::Function(func) = &symbol.typ.kind {
+                                        Ok((*func.return_type).clone())
+                                    } else {
+                                        Ok(Type::new(TypeKind::Primitive(PrimitiveType::Unknown), typ.span))
+                                    }
+                                }
+                                None => Err(format!("Cannot resolve typeof for call '{}'", name)),
+                            }
+                        } else {
+                            Ok(Type::new(TypeKind::Primitive(PrimitiveType::Unknown), typ.span))
+                        }
+                    }
+                    _ => Ok(Type::new(TypeKind::Primitive(PrimitiveType::Unknown), typ.span)),
+                }
             }
             TypeKind::Reference(type_ref) => {
                 // Resolve type reference using the proper resolution logic
