@@ -693,11 +693,10 @@ fn test_comparison_operator_without_boolean_return() {
     "#;
 
     let (result, handler) = compile_with_diagnostics(source);
-    // Depending on strictness, this might be a warning or error
-    // For now, we just verify it compiles
+    // Comparison operators must return boolean (consistent with test_operator_equal_must_return_boolean)
     assert!(
-        result.is_ok(),
-        "Comparison operators may allow non-boolean returns"
+        result.is_err(),
+        "Comparison operators must return boolean"
     );
 }
 

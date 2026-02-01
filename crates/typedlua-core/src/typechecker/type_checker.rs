@@ -1996,7 +1996,12 @@ impl<'a> TypeChecker<'a> {
                     .contains("marked as override but parent class does not have this method")
                 || err.message.contains("Return type mismatch")
                 || err.message.contains("is private and only accessible")
-                || err.message.contains("is protected and only accessible");
+                || err.message.contains("is protected and only accessible")
+                || err.message.contains("operators can have 0 parameters")
+                || err.message.contains("Binary operator must have exactly")
+                || err.message.contains("Operator must have 0, 1, or 2")
+                || err.message.contains("must have exactly 2 parameters")
+                || err.message.contains("must return 'boolean'");
 
             if is_critical_error {
                 return Err(err);

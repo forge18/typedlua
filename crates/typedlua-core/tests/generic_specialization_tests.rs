@@ -265,12 +265,8 @@ fn test_generic_interface() {
         }
     "#;
 
-    let result = type_check(source);
-    if let Err(ref e) = result {
-        eprintln!("Interface Impl Error: {:?}", e);
-    }
     assert!(
-        result.is_ok(),
+        type_check(source).is_ok(),
         "Generic interface should type-check successfully"
     );
 }
@@ -422,11 +418,10 @@ fn test_generic_inheritance() {
         }
     "#;
 
-    let result = type_check(source);
-    if let Err(ref e) = result {
-        eprintln!("Inheritance Error: {:?}", e);
-    }
-    assert!(result.is_ok(), "Generic class inheritance should work");
+    assert!(
+        type_check(source).is_ok(),
+        "Generic class inheritance should work"
+    );
 }
 
 #[test]
@@ -462,11 +457,9 @@ fn test_generic_interface_implementation() {
     "#;
 
     let result = type_check(source);
-    if let Err(ref e) = result {
-        eprintln!("Interface Impl Error: {:?}", e);
-    }
     assert!(
         result.is_ok(),
-        "Generic interface implementation should work"
+        "Generic interface implementation should work: {:?}",
+        result.err()
     );
 }

@@ -10,7 +10,7 @@ use rustc_hash::FxHashMap;
 use std::sync::Arc;
 use typedlua_parser::ast::expression::*;
 use typedlua_parser::ast::pattern::{ArrayPatternElement, Pattern};
-use typedlua_parser::ast::statement::{Block, Statement};
+use typedlua_parser::ast::statement::{Block, OperatorKind, Statement};
 use typedlua_parser::ast::types::*;
 use typedlua_parser::prelude::{
     Argument, MatchArm, MatchArmBody, MatchExpression, PropertySignature,
@@ -702,6 +702,11 @@ impl TypeInferenceVisitor for TypeInferrer<'_> {
             | BinaryOp::Modulo
             | BinaryOp::Power
             | BinaryOp::IntegerDivide => {
+                // Check for operator overload on the left operand's class
+                if let Some(return_type) = self.check_operator_overload(left, op) {
+                    return Ok(return_type);
+                }
+
                 // Check that both operands are numbers
                 let left_is_number = matches!(
                     left.kind,
@@ -963,6 +968,40 @@ impl TypeInferenceVisitor for TypeInferrer<'_> {
                         }
                     }
                     return self.infer_member(resolved, member, span);
+                }
+
+                // Fall back to access_control for class property/getter types.
+                // Only use concrete type annotations (no unresolved type parameters).
+                // Generic class members contain raw type params like T that need
+                // substitution, so we skip those and fall through to Unknown.
+                if let Some(class_members) =
+                    self.access_control.get_class_members(&type_name)
+                {
+                    for m in class_members {
+                        if m.name == member {
+                            match &m.kind {
+                                ClassMemberKind::Property { type_annotation }
+                                    if !self
+                                        .type_has_unresolved_params(type_annotation) =>
+                                {
+                                    return Ok(type_annotation.clone());
+                                }
+                                ClassMemberKind::Getter { return_type }
+                                    if !self
+                                        .type_has_unresolved_params(return_type) =>
+                                {
+                                    return Ok(return_type.clone());
+                                }
+                                ClassMemberKind::Method {
+                                    return_type: Some(rt),
+                                    ..
+                                } if !self.type_has_unresolved_params(rt) => {
+                                    return Ok(rt.clone());
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
                 }
 
                 // If not resolvable, return unknown
@@ -1394,6 +1433,79 @@ impl TypeInferenceVisitor for TypeInferrer<'_> {
 }
 
 impl TypeInferrer<'_> {
+    /// Check if a type contains unresolved type parameters (References that aren't
+    /// known types, interfaces, or classes). Used to guard the access_control fallback
+    /// in infer_member so we don't return raw type annotations with unsubstituted
+    /// type parameters from generic classes.
+    fn type_has_unresolved_params(&self, ty: &Type) -> bool {
+        match &ty.kind {
+            TypeKind::Reference(type_ref) => {
+                let name = self.interner.resolve(type_ref.name.node);
+                self.type_env.lookup_type(&name).is_none()
+                    && self.access_control.get_class_members(&name).is_none()
+            }
+            TypeKind::Union(types)
+            | TypeKind::Intersection(types)
+            | TypeKind::Tuple(types) => {
+                types.iter().any(|t| self.type_has_unresolved_params(t))
+            }
+            TypeKind::Array(elem)
+            | TypeKind::Nullable(elem)
+            | TypeKind::Parenthesized(elem) => self.type_has_unresolved_params(elem),
+            _ => false,
+        }
+    }
+
+    /// Check if a type has an operator overload for the given binary operation.
+    /// Returns the operator's return type if found.
+    fn check_operator_overload(&self, operand_type: &Type, op: BinaryOp) -> Option<Type> {
+        let op_kind = match op {
+            BinaryOp::Add => OperatorKind::Add,
+            BinaryOp::Subtract => OperatorKind::Subtract,
+            BinaryOp::Multiply => OperatorKind::Multiply,
+            BinaryOp::Divide => OperatorKind::Divide,
+            BinaryOp::Modulo => OperatorKind::Modulo,
+            BinaryOp::Power => OperatorKind::Power,
+            BinaryOp::IntegerDivide => OperatorKind::FloorDivide,
+            BinaryOp::Concatenate => OperatorKind::Concatenate,
+            BinaryOp::Equal => OperatorKind::Equal,
+            BinaryOp::NotEqual => OperatorKind::NotEqual,
+            BinaryOp::LessThan => OperatorKind::LessThan,
+            BinaryOp::LessThanOrEqual => OperatorKind::LessThanOrEqual,
+            BinaryOp::GreaterThan => OperatorKind::GreaterThan,
+            BinaryOp::GreaterThanOrEqual => OperatorKind::GreaterThanOrEqual,
+            BinaryOp::BitwiseAnd => OperatorKind::BitwiseAnd,
+            BinaryOp::BitwiseOr => OperatorKind::BitwiseOr,
+            BinaryOp::BitwiseXor => OperatorKind::BitwiseXor,
+            BinaryOp::ShiftLeft => OperatorKind::ShiftLeft,
+            BinaryOp::ShiftRight => OperatorKind::ShiftRight,
+            _ => return None,
+        };
+
+        // Get the class name from the operand type
+        let class_name = match &operand_type.kind {
+            TypeKind::Reference(type_ref) => self.interner.resolve(type_ref.name.node),
+            _ => return None,
+        };
+
+        // Look up class members for operator overloads
+        let members = self.access_control.get_class_members(&class_name)?;
+        for member in members {
+            if let ClassMemberKind::Operator {
+                operator,
+                return_type,
+                ..
+            } = &member.kind
+            {
+                if *operator == op_kind {
+                    return return_type.clone();
+                }
+            }
+        }
+
+        None
+    }
+
     /// Extract all variable bindings from a pattern
     fn extract_pattern_bindings(
         &self,

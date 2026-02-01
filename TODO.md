@@ -2396,14 +2396,14 @@ fuzz/
     - [ ] Re-typecheck after single-file change
     - [ ] Cache hit rate for unchanged modules
 
-- [ ] **Stress Tests** (expand `tests/stress_tests.rs`)
-  - [ ] Large array literal (10K+ elements)
-  - [ ] Large object literal (10K+ properties)
-  - [ ] Deep class inheritance (20+ levels)
-  - [ ] Complex nested generics (10+ layers)
-  - [ ] Long method chains (50+ method calls)
-  - [ ] Max identifier length
-  - [ ] Maximum file size parsing
+- [x] **Stress Tests** (expand `tests/stress_tests.rs`)
+  - [x] Large array literal (10K+ elements)
+  - [x] Large object literal (10K+ properties)
+  - [x] Deep class inheritance (20+ levels)
+  - [x] Complex nested generics (10+ layers)
+  - [x] Long method chains (50+ method calls)
+  - [x] Max identifier length
+  - [x] Maximum file size parsing
 
 #### 7.1.5 Integration Test Enhancements - Existing Features
 
