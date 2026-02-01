@@ -589,99 +589,72 @@ fn test_optimization_preserves_correctness() {
 /// Generates code that triggers O3-specific optimizations
 fn generate_o3_test_code() -> String {
     let mut code = String::new();
-    
+
     // Add header
     code.push_str("// Code to test O3 optimizations\n\n");
-    
+
     // Generate final classes for devirtualization
     for i in 0..10 {
-        code.push_str(&format!(
-            "final class FinalClass{} {{\n",
-            i
-        ));
-        code.push_str(&format!(
-            "    value: number = {}\n",
-            i
-        ));
+        code.push_str(&format!("final class FinalClass{} {{\n", i));
+        code.push_str(&format!("    value: number = {}\n", i));
         code.push_str("    getValue(): number {\n");
         code.push_str("        return self.value\n");
         code.push_str("    }\n");
         code.push_str("}\n\n");
     }
-    
+
     // Generate large functions for aggressive inlining (>20 AST nodes)
     for i in 0..10 {
-        code.push_str(&format!(
-            "function largeFunc{}(x: number): number {{\n",
-            i
-        ));
+        code.push_str(&format!("function largeFunc{}(x: number): number {{\n", i));
         // Create a function with many statements to exceed 20 AST nodes
         for j in 0..15 {
-            code.push_str(&format!(
-                "    const a{} = x + {}\n",
-                j, j
-            ));
-            code.push_str(&format!(
-                "    const b{} = a{} * 2\n",
-                j, j
-            ));
+            code.push_str(&format!("    const a{} = x + {}\n", j, j));
+            code.push_str(&format!("    const b{} = a{} * 2\n", j, j));
         }
         code.push_str("    return x\n");
         code.push_str("}\n\n");
     }
-    
+
     // Generate interface with default methods for interface inlining
     for i in 0..5 {
-        code.push_str(&format!(
-            "interface IWithDefault{} {{\n",
-            i
-        ));
+        code.push_str(&format!("interface IWithDefault{} {{\n", i));
         code.push_str("    value: number\n");
         code.push_str("    default getDefaultValue(): number {{\n");
         code.push_str("        return 42\n");
         code.push_str("    }\n");
         code.push_str("}\n\n");
     }
-    
+
     // Use the final classes (triggers devirtualization analysis)
     for i in 0..10 {
-        code.push_str(&format!(
-            "const fc{} = new FinalClass{}()\n",
-            i, i
-        ));
-        code.push_str(&format!(
-            "const v{} = fc{}:getValue()\n",
-            i, i
-        ));
+        code.push_str(&format!("const fc{} = new FinalClass{}()\n", i, i));
+        code.push_str(&format!("const v{} = fc{}:getValue()\n", i, i));
     }
-    
+
     // Call large functions (triggers aggressive inlining consideration)
     for i in 0..10 {
-        code.push_str(&format!(
-            "const r{} = largeFunc{}(42)\n",
-            i, i
-        ));
+        code.push_str(&format!("const r{} = largeFunc{}(42)\n", i, i));
     }
-    
+
     code
 }
 
 #[test]
 fn test_o3_with_optimizable_code() {
     let source = generate_o3_test_code();
-    
+
     let (o2_time, o2_size) = benchmark_optimization_level(&source, OptimizationLevel::O2)
         .expect("O2 compilation should succeed");
     let (o3_time, o3_size) = benchmark_optimization_level(&source, OptimizationLevel::O3)
         .expect("O3 compilation should succeed");
-    
+
     println!("With optimizable code:");
     println!("O2 optimization: {:?}, size: {} bytes", o2_time, o2_size);
     println!("O3 optimization: {:?}, size: {} bytes", o3_time, o3_size);
-    
+
     let slowdown_ratio = o3_time.as_secs_f64() / o2_time.as_secs_f64().max(0.001);
     println!("O3/O2 slowdown ratio: {:.2}x", slowdown_ratio);
-    
+
     // O3 should be slower when it actually has work to do
     // But should still be within reasonable bounds
     assert!(
@@ -689,7 +662,7 @@ fn test_o3_with_optimizable_code() {
         "O3 should not be more than 15x slower than O2 even with optimizable code, was {:.2}x",
         slowdown_ratio
     );
-    
+
     // O3 should produce smaller or equal code
     assert!(
         o3_size <= o2_size * 11 / 10,
@@ -707,7 +680,7 @@ fn test_typecheck_complex_generic_inference() {
 
     // Deep generic nesting with inference
     source.push_str("function identity<T>(x: T): T { return x }\n\n");
-    
+
     // Multiple levels of generic nesting
     for i in 0..50 {
         source.push_str(&format!(
@@ -717,50 +690,40 @@ fn test_typecheck_complex_generic_inference() {
         source.push_str("    return c\n");
         source.push_str("}\n\n");
     }
-    
+
     // Complex generic constraints
     for i in 0..30 {
         source.push_str(&format!(
             "interface Comparable{} {{\n    compare(other: Comparable{}): number\n}}\n\n",
             i, i
         ));
-        source.push_str(&format!(
-            "function sort{}<T extends Comparable{}>(items: T[]): T[] {{\n",
-            i, i
-        ));
-        source.push_str("    return items\n");
-        source.push_str("}\n\n");
     }
-    
+
     // Generic class hierarchies with inference
     for i in 0..20 {
         source.push_str(&format!(
             "class Container{}<T> {{\n    private value: T\n",
             i
         ));
+        source.push_str(&format!("    constructor(v: T) {{ self.value = v }}\n"));
+        source.push_str(&format!("    getValue(): T {{ return self.value }}\n"));
         source.push_str(&format!(
-            "    constructor(v: T) {{ self.value = v }}\n"
-        ));
-        source.push_str(&format!(
-            "    getValue(): T {{ return self.value }}\n"
-        ));
-        source.push_str(&format!(
-            "    map<U>(fn: (x: T) => U): Container{}<U> {{\n",
+            "    map<U>(fn: (x: T) -> U): Container{}<U> {{\n",
             i
         ));
-        source.push_str("        return new Container<U>(fn(self.value))\n");
+        source.push_str(&format!(
+            "        return new Container{}<U>(fn(self.value))\n",
+            i
+        ));
         source.push_str("    }\n");
         source.push_str("}\n\n");
     }
-    
+
     // Usage with type inference
     for i in 0..20 {
+        source.push_str(&format!("const c{} = new Container{}(42)\n", i, i));
         source.push_str(&format!(
-            "const c{} = new Container{}(42)\n",
-            i, i
-        ));
-        source.push_str(&format!(
-            "const mapped{} = c{}.map(x => x * 2)\n",
+            "const mapped{} = c{}.map(function(x) return x * 2 end)\n",
             i, i
         ));
     }
@@ -784,60 +747,50 @@ fn test_typecheck_large_template_literals() {
 
     // Small template literals (baseline)
     for i in 0..100 {
-        source.push_str(&format!(
-            "const small{} = `Hello {}`\n",
-            i, i
-        ));
+        source.push_str(&format!("const small{} = `Hello {}`\n", i, i));
     }
-    
+
     // Medium template literals (multi-line)
     for i in 0..50 {
         source.push_str(&format!(
             "const medium{} = `\n    Line 1: {}\n    Line 2: {}\n    Line 3: {}\n`\n",
-            i, i, i + 1, i + 2
+            i,
+            i,
+            i + 1,
+            i + 2
         ));
     }
-    
+
     // Large template literals (100+ lines each)
     for i in 0..10 {
         source.push_str(&format!("const large{} = `\n", i));
         for j in 0..100 {
             source.push_str(&format!(
                 "    This is line {} of template {} with some interpolated value: {}\n",
-                j, i, i * 100 + j
+                j,
+                i,
+                i * 100 + j
             ));
         }
         source.push_str("`\n\n");
     }
-    
+
     // SQL-like templates with dedenting
     for i in 0..20 {
-        source.push_str(&format!(
-            "const query{} = `\n",
-            i
-        ));
+        source.push_str(&format!("const query{} = `\n", i));
         source.push_str("    SELECT\n");
         source.push_str("        id,\n");
         source.push_str("        name,\n");
         source.push_str("        value\n");
         source.push_str("    FROM\n");
-        source.push_str(&format!(
-            "        table_{}\n",
-            i
-        ));
+        source.push_str(&format!("        table_{}\n", i));
         source.push_str("    WHERE\n");
-        source.push_str(&format!(
-            "        id = {}\n",
-            i
-        ));
+        source.push_str(&format!("        id = {}\n", i));
         source.push_str("`\n\n");
     }
 
     let duration = benchmark_typecheck(&source).expect("Type checking should succeed");
-    println!(
-        "Type checking large template literals took: {:?}",
-        duration
-    );
+    println!("Type checking large template literals took: {:?}", duration);
 
     assert!(
         duration.as_millis() < 2000,
@@ -850,37 +803,25 @@ fn test_typecheck_large_template_literals() {
 fn test_reflection_overhead_vs_static_access() {
     // Generate code with reflection-heavy classes
     let mut reflective_source = String::new();
-    
+
     reflective_source.push_str("// Reflection-heavy code\n\n");
-    
+
     // Classes with many fields and methods for reflection
     for i in 0..20 {
-        reflective_source.push_str(&format!(
-            "class ReflectiveClass{} {{\n",
-            i
-        ));
+        reflective_source.push_str(&format!("class ReflectiveClass{} {{\n", i));
         // Many fields
         for j in 0..20 {
-            reflective_source.push_str(&format!(
-                "    public field{}: number = {}\n",
-                j, j
-            ));
+            reflective_source.push_str(&format!("    public field{}: number = {}\n", j, j));
         }
         // Many methods
         for j in 0..10 {
-            reflective_source.push_str(&format!(
-                "    public method{}(): number {{\n",
-                j
-            ));
-            reflective_source.push_str(&format!(
-                "        return self.field{}\n",
-                j % 20
-            ));
+            reflective_source.push_str(&format!("    public method{}(): number {{\n", j));
+            reflective_source.push_str(&format!("        return self.field{}\n", j % 20));
             reflective_source.push_str("    }\n");
         }
         reflective_source.push_str("}\n\n");
     }
-    
+
     // Use reflection API
     reflective_source.push_str("// Using reflection\n");
     for i in 0..20 {
@@ -897,68 +838,57 @@ fn test_reflection_overhead_vs_static_access() {
             i, i
         ));
     }
-    
+
     // Generate code with static access (baseline)
     let mut static_source = String::new();
-    
+
     static_source.push_str("// Static access code\n\n");
-    
+
     // Same classes but with static access
     for i in 0..20 {
-        static_source.push_str(&format!(
-            "class StaticClass{} {{\n",
-            i
-        ));
+        static_source.push_str(&format!("class StaticClass{} {{\n", i));
         // Many fields
         for j in 0..20 {
-            static_source.push_str(&format!(
-                "    public field{}: number = {}\n",
-                j, j
-            ));
+            static_source.push_str(&format!("    public field{}: number = {}\n", j, j));
         }
         // Many methods
         for j in 0..10 {
-            static_source.push_str(&format!(
-                "    public method{}(): number {{\n",
-                j
-            ));
-            static_source.push_str(&format!(
-                "        return self.field{}\n",
-                j % 20
-            ));
+            static_source.push_str(&format!("    public method{}(): number {{\n", j));
+            static_source.push_str(&format!("        return self.field{}\n", j % 20));
             static_source.push_str("    }\n");
         }
         static_source.push_str("}\n\n");
     }
-    
+
     // Use static access
     static_source.push_str("// Using static access\n");
     for i in 0..20 {
-        static_source.push_str(&format!(
-            "const s_instance{} = new StaticClass{}()\n",
-            i, i
-        ));
-        static_source.push_str(&format!(
-            "const s_field{} = s_instance{}.field0\n",
-            i, i
-        ));
+        static_source.push_str(&format!("const s_instance{} = new StaticClass{}()\n", i, i));
+        static_source.push_str(&format!("const s_field{} = s_instance{}.field0\n", i, i));
         static_source.push_str(&format!(
             "const s_method{} = s_instance{}.method0()\n",
             i, i
         ));
     }
-    
-    let reflective_duration = benchmark_typecheck(&reflective_source)
-        .expect("Reflective type checking should succeed");
-    let static_duration = benchmark_typecheck(&static_source)
-        .expect("Static type checking should succeed");
-    
-    println!("Reflection-heavy code type checking took: {:?}", reflective_duration);
-    println!("Static access code type checking took: {:?}", static_duration);
-    
-    let overhead_ratio = reflective_duration.as_secs_f64() / static_duration.as_secs_f64().max(0.001);
+
+    let reflective_duration =
+        benchmark_typecheck(&reflective_source).expect("Reflective type checking should succeed");
+    let static_duration =
+        benchmark_typecheck(&static_source).expect("Static type checking should succeed");
+
+    println!(
+        "Reflection-heavy code type checking took: {:?}",
+        reflective_duration
+    );
+    println!(
+        "Static access code type checking took: {:?}",
+        static_duration
+    );
+
+    let overhead_ratio =
+        reflective_duration.as_secs_f64() / static_duration.as_secs_f64().max(0.001);
     println!("Reflection overhead ratio: {:.2}x", overhead_ratio);
-    
+
     // Reflection should not be more than 3x slower
     assert!(
         overhead_ratio < 3.0,
@@ -985,30 +915,35 @@ fn test_rich_enum_instance_precomputation() {
     // Then fields
     source.push_str("    mass: number,\n");
     source.push_str("    radius: number\n\n");
-    
+
     source.push_str("    constructor(mass: number, radius: number) {\n");
     source.push_str("        self.mass = mass\n");
     source.push_str("        self.radius = radius\n");
     source.push_str("    }\n\n");
-    
-    source.push_str("    public surfaceGravity(): number {\n");
+
+    source.push_str("    function surfaceGravity(): number {\n");
     source.push_str("        const G = 6.67430e-11\n");
     source.push_str("        return G * self.mass / (self.radius * self.radius)\n");
     source.push_str("    }\n\n");
-    
-    source.push_str("    public density(): number {\n");
-    source.push_str("        const volume = 4 / 3 * 3.14159 * self.radius * self.radius * self.radius\n");
+
+    source.push_str("    function density(): number {\n");
+    source.push_str(
+        "        const volume = 4 / 3 * 3.14159 * self.radius * self.radius * self.radius\n",
+    );
     source.push_str("        return self.mass / volume\n");
     source.push_str("    }\n");
     source.push_str("}\n\n");
-    
+
     // Another rich enum with complex data
     source.push_str("enum StatusCode {\n");
     // Status code variants
     for i in 0..50 {
         source.push_str(&format!(
             "    Code{}({}, \"Message {}\", \"Category{}\"),\n",
-            i, 200 + i, i, i % 5
+            i,
+            200 + i,
+            i,
+            i % 5
         ));
     }
     source.push_str("\n");
@@ -1016,28 +951,28 @@ fn test_rich_enum_instance_precomputation() {
     source.push_str("    code: number,\n");
     source.push_str("    message: string,\n");
     source.push_str("    category: string\n\n");
-    
+
     source.push_str("    constructor(code: number, message: string, category: string) {\n");
     source.push_str("        self.code = code\n");
     source.push_str("        self.message = message\n");
     source.push_str("        self.category = category\n");
     source.push_str("    }\n\n");
-    
-    source.push_str("    public isError(): boolean {\n");
+
+    source.push_str("    function isError(): boolean {\n");
     source.push_str("        return self.code >= 400\n");
     source.push_str("    }\n\n");
-    
-    source.push_str("    public isSuccess(): boolean {\n");
+
+    source.push_str("    function isSuccess(): boolean {\n");
     source.push_str("        return self.code >= 200 && self.code < 300\n");
     source.push_str("    }\n");
     source.push_str("}\n\n");
-    
+
     // Usage
     source.push_str("// Using the enums\n");
     source.push_str("const earthGravity = Planet.Earth:surfaceGravity()\n");
     source.push_str("const earthDensity = Planet.Earth:density()\n");
     source.push_str("const allPlanets = Planet:values()\n");
-    
+
     let duration = benchmark_typecheck(&source).expect("Type checking should succeed");
     println!(
         "Type checking rich enum instance precomputation took: {:?}",
