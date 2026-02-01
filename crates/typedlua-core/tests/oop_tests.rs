@@ -24,11 +24,26 @@ fn compile_and_check(source: &str) -> Result<String, String> {
         .parse()
         .map_err(|e| format!("Parsing failed: {:?}", e))?;
 
+    eprintln!("Parsed {} statements", program.statements.len());
+    for (i, stmt) in program.statements.iter().enumerate() {
+        use typedlua_parser::ast::statement::Statement;
+        let stmt_type = match stmt {
+            Statement::Interface(_) => "Interface",
+            Statement::Class(_) => "Class",
+            Statement::Function(_) => "Function",
+            Statement::Variable(_) => "Variable",
+            _ => "Other",
+        };
+        eprintln!("  Statement {}: {}", i, stmt_type);
+    }
+
     // Type check
     let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids);
     type_checker
         .check_program(&mut program)
         .map_err(|e| e.message)?;
+
+    eprintln!("After type check: {} statements", program.statements.len());
 
     // Generate code
     let mut codegen = CodeGenerator::new(interner.clone());
@@ -356,6 +371,7 @@ fn test_class_implements_interface() {
     );
 
     let output = result.unwrap();
+    eprintln!("Generated output:\n{}", output);
     assert!(output.contains("function Circle:draw()"));
 }
 

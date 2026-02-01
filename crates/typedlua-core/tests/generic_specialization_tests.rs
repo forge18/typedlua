@@ -806,6 +806,19 @@ fn test_different_type_args_create_different_specializations() {
 fn test_generic_class_definition() {
     let source = r#"
         class Box<T> {
+            private value: T
+
+            constructor(val: T) {
+                self.value = val
+            }
+
+            public get(): T {
+                return self.value
+            }
+
+            public set(val: T): void {
+                self.value = val
+            }
         }
     "#;
 
