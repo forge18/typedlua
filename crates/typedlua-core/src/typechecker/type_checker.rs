@@ -1597,6 +1597,30 @@ impl<'a> TypeChecker<'a> {
             }
         }
 
+        // Register class implements relationships before compliance checking,
+        // so covariant return type checks can look up the class hierarchy
+        if !class_decl.implements.is_empty() {
+            self.type_env
+                .register_class_implements(class_name.clone(), class_decl.implements.clone());
+
+            // Also register with access control for member lookup in interfaces
+            let interface_names: Vec<String> = class_decl
+                .implements
+                .iter()
+                .map(|t| {
+                    // Extract the interface name from the type
+                    match &t.kind {
+                        typedlua_parser::ast::types::TypeKind::Reference(ref_type) => {
+                            self.interner.resolve(ref_type.name.node).to_string()
+                        }
+                        _ => format!("{:?}", t),
+                    }
+                })
+                .collect();
+            self.access_control
+                .register_class_implements(&class_name, interface_names);
+        }
+
         // Check interface implementation
         for interface_type in &class_decl.implements {
             if let TypeKind::Reference(type_ref) = &interface_type.kind {
@@ -1660,29 +1684,6 @@ impl<'a> TypeChecker<'a> {
                     class_decl.span,
                 ));
             }
-        }
-
-        // Register class implements relationships for assignability checking
-        if !class_decl.implements.is_empty() {
-            self.type_env
-                .register_class_implements(class_name.clone(), class_decl.implements.clone());
-
-            // Also register with access control for member lookup in interfaces
-            let interface_names: Vec<String> = class_decl
-                .implements
-                .iter()
-                .map(|t| {
-                    // Extract the interface name from the type
-                    match &t.kind {
-                        typedlua_parser::ast::types::TypeKind::Reference(ref_type) => {
-                            self.interner.resolve(ref_type.name.node).to_string()
-                        }
-                        _ => format!("{:?}", t),
-                    }
-                })
-                .collect();
-            self.access_control
-                .register_class_implements(&class_name, interface_names);
         }
 
         // Process primary constructor parameters - they become class properties
@@ -2102,11 +2103,14 @@ impl<'a> TypeChecker<'a> {
                                     }
                                 }
 
-                                // Check return type
+                                // Check return type (covariant: class return must be assignable to interface return)
                                 // MethodSignature has return_type: Type (not Option)
                                 // MethodDeclaration has return_type: Option<Type>
                                 if let Some(class_return) = &class_method.return_type {
                                     if !TypeCompatibility::is_assignable(
+                                        class_return,
+                                        &req_method.return_type,
+                                    ) && !self.check_implements_assignable(
                                         class_return,
                                         &req_method.return_type,
                                     ) {

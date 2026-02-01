@@ -1,7 +1,12 @@
+use std::collections::HashSet;
 use typedlua_parser::ast::expression::Literal;
 use typedlua_parser::ast::types::{
     FunctionType, ObjectType, ObjectTypeMember, PrimitiveType, Type, TypeKind,
 };
+
+fn type_ptr(ty: &Type) -> usize {
+    ty as *const Type as usize
+}
 
 /// Type compatibility checker
 pub struct TypeCompatibility;
@@ -9,6 +14,23 @@ pub struct TypeCompatibility;
 impl TypeCompatibility {
     /// Check if `source` is assignable to `target`
     pub fn is_assignable(source: &Type, target: &Type) -> bool {
+        let mut visited: HashSet<(usize, usize)> = HashSet::new();
+        Self::is_assignable_recursive(source, target, &mut visited)
+    }
+
+    fn is_assignable_recursive(
+        source: &Type,
+        target: &Type,
+        visited: &mut HashSet<(usize, usize)>,
+    ) -> bool {
+        let source_ptr = type_ptr(source);
+        let target_ptr = type_ptr(target);
+
+        if visited.contains(&(source_ptr, target_ptr)) {
+            return true;
+        }
+        visited.insert((source_ptr, target_ptr));
+
         // Unknown is assignable to/from anything
         if matches!(source.kind, TypeKind::Primitive(PrimitiveType::Unknown))
             || matches!(target.kind, TypeKind::Primitive(PrimitiveType::Unknown))
@@ -46,32 +68,42 @@ impl TypeCompatibility {
             // Also handle the case where source is a union containing nil and target expects literal nil
             (TypeKind::Union(sources), TypeKind::Literal(Literal::Nil)) => {
                 // Check if any source member is nil
-                sources.iter().any(|s| Self::is_assignable(s, target))
+                sources
+                    .iter()
+                    .any(|s| Self::is_assignable_recursive(s, target, visited))
             }
 
             // Union types
             (_, TypeKind::Union(targets)) => {
                 // Source is assignable to union if assignable to any member
-                targets.iter().any(|t| Self::is_assignable(source, t))
+                targets
+                    .iter()
+                    .any(|t| Self::is_assignable_recursive(source, t, visited))
             }
             (TypeKind::Union(sources), _) => {
                 // Union is assignable to target if all members are assignable
-                sources.iter().all(|s| Self::is_assignable(s, target))
+                sources
+                    .iter()
+                    .all(|s| Self::is_assignable_recursive(s, target, visited))
             }
 
             // Intersection types
             (TypeKind::Intersection(sources), _) => {
                 // Intersection is assignable to target if any member is assignable
-                sources.iter().any(|s| Self::is_assignable(s, target))
+                sources
+                    .iter()
+                    .any(|s| Self::is_assignable_recursive(s, target, visited))
             }
             (_, TypeKind::Intersection(targets)) => {
                 // Source is assignable to intersection if assignable to all members
-                targets.iter().all(|t| Self::is_assignable(source, t))
+                targets
+                    .iter()
+                    .all(|t| Self::is_assignable_recursive(source, t, visited))
             }
 
             // Array types
             (TypeKind::Array(s_elem), TypeKind::Array(t_elem)) => {
-                Self::is_assignable(s_elem, t_elem)
+                Self::is_assignable_recursive(s_elem, t_elem, visited)
             }
 
             // Tuple types
@@ -82,29 +114,35 @@ impl TypeCompatibility {
                 s_elems
                     .iter()
                     .zip(t_elems.iter())
-                    .all(|(s, t)| Self::is_assignable(s, t))
+                    .all(|(s, t)| Self::is_assignable_recursive(s, t, visited))
             }
 
             // Function types
             (TypeKind::Function(s_func), TypeKind::Function(t_func)) => {
-                Self::is_function_assignable(s_func, t_func)
+                Self::is_function_assignable(s_func, t_func, visited)
             }
 
             // Object types
             (TypeKind::Object(s_obj), TypeKind::Object(t_obj)) => {
-                Self::is_object_assignable(s_obj, t_obj)
+                Self::is_object_assignable(s_obj, t_obj, visited)
             }
 
             // Nullable types
             (TypeKind::Nullable(s_inner), TypeKind::Nullable(t_inner)) => {
-                Self::is_assignable(s_inner, t_inner)
+                Self::is_assignable_recursive(s_inner, t_inner, visited)
             }
             (TypeKind::Primitive(PrimitiveType::Nil), TypeKind::Nullable(_)) => true,
-            (_, TypeKind::Nullable(t_inner)) => Self::is_assignable(source, t_inner),
+            (_, TypeKind::Nullable(t_inner)) => {
+                Self::is_assignable_recursive(source, t_inner, visited)
+            }
 
             // Parenthesized types
-            (TypeKind::Parenthesized(s_inner), _) => Self::is_assignable(s_inner, target),
-            (_, TypeKind::Parenthesized(t_inner)) => Self::is_assignable(source, t_inner),
+            (TypeKind::Parenthesized(s_inner), _) => {
+                Self::is_assignable_recursive(s_inner, target, visited)
+            }
+            (_, TypeKind::Parenthesized(t_inner)) => {
+                Self::is_assignable_recursive(source, t_inner, visited)
+            }
 
             // Type references
             // NOTE: Ideally we would resolve type aliases to their underlying types
@@ -123,10 +161,9 @@ impl TypeCompatibility {
                         (None, None) => true,
                         (Some(s_args), Some(t_args)) if s_args.len() == t_args.len() => {
                             // Check all type arguments are compatible
-                            s_args
-                                .iter()
-                                .zip(t_args.iter())
-                                .all(|(s_arg, t_arg)| Self::is_assignable(s_arg, t_arg))
+                            s_args.iter().zip(t_args.iter()).all(|(s_arg, t_arg)| {
+                                Self::is_assignable_recursive(s_arg, t_arg, visited)
+                            })
                         }
                         _ => false,
                     }
@@ -178,7 +215,11 @@ impl TypeCompatibility {
     }
 
     /// Check function type compatibility (contravariant parameters, covariant return)
-    fn is_function_assignable(source: &FunctionType, target: &FunctionType) -> bool {
+    fn is_function_assignable(
+        source: &FunctionType,
+        target: &FunctionType,
+        visited: &mut HashSet<(usize, usize)>,
+    ) -> bool {
         // Check parameter count
         if source.parameters.len() != target.parameters.len() {
             return false;
@@ -189,18 +230,22 @@ impl TypeCompatibility {
             if let (Some(s_type), Some(t_type)) =
                 (&s_param.type_annotation, &t_param.type_annotation)
             {
-                if !Self::is_assignable(t_type, s_type) {
+                if !Self::is_assignable_recursive(t_type, s_type, visited) {
                     return false;
                 }
             }
         }
 
         // Return type is covariant: source return must be assignable to target return
-        Self::is_assignable(&source.return_type, &target.return_type)
+        Self::is_assignable_recursive(&source.return_type, &target.return_type, visited)
     }
 
     /// Check object type structural compatibility
-    fn is_object_assignable(source: &ObjectType, target: &ObjectType) -> bool {
+    fn is_object_assignable(
+        source: &ObjectType,
+        target: &ObjectType,
+        visited: &mut HashSet<(usize, usize)>,
+    ) -> bool {
         // For each property in target, source must have a compatible property
         for t_member in &target.members {
             match t_member {
@@ -209,9 +254,10 @@ impl TypeCompatibility {
                     let found = source.members.iter().any(|s_member| {
                         if let ObjectTypeMember::Property(s_prop) = s_member {
                             s_prop.name.node == t_prop.name.node
-                                && Self::is_assignable(
+                                && Self::is_assignable_recursive(
                                     &s_prop.type_annotation,
                                     &t_prop.type_annotation,
+                                    visited,
                                 )
                         } else {
                             false

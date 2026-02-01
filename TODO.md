@@ -2366,12 +2366,12 @@ fuzz/
 
 #### 7.1.4 Performance Regression Tests
 
-- [ ] **Performance Benchmarks** (`tests/performance_benchmarks.rs`)
+- [x] **Performance Benchmarks** (`tests/performance_benchmarks.rs`) (Compilation speed benchmarks complete)
   - [ ] **Compilation Speed Benchmarks:**
-    - [ ] Type checking 1K lines of code
-    - [ ] Type checking 10K lines of code
-    - [ ] Type checking 100K lines of code
-    - [ ] Full compilation (parse + typecheck + codegen)
+    - [x] Type checking 1K lines of code
+    - [x] Type checking 10K lines of code
+    - [x] Type checking 100K lines of code
+    - [x] Full compilation (parse + typecheck + codegen)
   - [ ] **Optimization Benchmarks:**
     - [ ] O0 vs O1 optimization time
     - [ ] O1 vs O2 optimization time

@@ -59,40 +59,65 @@ mod tests {
     }
 
     #[test]
-    fn test_scope_lookup_in_parent() {
-        let mut parent = Scope::new();
-        let parent_symbol = create_test_symbol("parent_var", SymbolKind::Variable);
-        parent.declare(parent_symbol).unwrap();
+    fn test_scope_lookup_is_local_only() {
+        // Scope::lookup() now only checks local symbols.
+        // Parent scope lookups are done through SymbolTable::lookup() stack walking.
+        let mut scope = Scope::new();
+        let symbol = create_test_symbol("my_var", SymbolKind::Variable);
+        scope.declare(symbol).unwrap();
 
-        let mut child = Scope::with_parent(parent);
-        let child_symbol = create_test_symbol("child_var", SymbolKind::Variable);
-        child.declare(child_symbol).unwrap();
-
-        // Child should see parent symbols
-        assert!(child.lookup("parent_var").is_some());
-        assert!(child.lookup("child_var").is_some());
-
-        // Parent should not see child symbols
-        assert!(child.lookup("nonexistent").is_none());
+        assert!(scope.lookup("my_var").is_some());
+        assert!(scope.lookup("nonexistent").is_none());
     }
 
     #[test]
-    fn test_scope_shadowing() {
-        let mut parent = Scope::new();
-        let parent_symbol = create_test_symbol("x", SymbolKind::Variable);
-        parent.declare(parent_symbol).unwrap();
+    fn test_symbol_table_parent_lookup_via_stack() {
+        // Parent scope lookups work through SymbolTable's stack-walking approach
+        let mut table = SymbolTable::new();
 
-        let mut child = Scope::with_parent(parent);
+        let parent_symbol = create_test_symbol("parent_var", SymbolKind::Variable);
+        table.declare(parent_symbol).unwrap();
+
+        table.enter_scope();
+        let child_symbol = create_test_symbol("child_var", SymbolKind::Variable);
+        table.declare(child_symbol).unwrap();
+
+        // Should see both parent and child symbols
+        assert!(table.lookup("parent_var").is_some());
+        assert!(table.lookup("child_var").is_some());
+        assert!(table.lookup("nonexistent").is_none());
+
+        table.exit_scope();
+
+        // After exiting, child symbols are gone
+        assert!(table.lookup("parent_var").is_some());
+        assert!(table.lookup("child_var").is_none());
+    }
+
+    #[test]
+    fn test_symbol_table_shadowing_via_stack() {
+        let mut table = SymbolTable::new();
+
+        let parent_symbol = create_test_symbol("x", SymbolKind::Variable);
+        table.declare(parent_symbol).unwrap();
+
+        table.enter_scope();
         let child_symbol = create_test_symbol_with_type(
             "x",
             SymbolKind::Const,
             Type::new(TypeKind::Primitive(PrimitiveType::String), Span::default()),
         );
-        child.declare(child_symbol).unwrap();
+        table.declare(child_symbol).unwrap();
 
-        // Child should see shadowed symbol
-        let found = child.lookup("x").unwrap();
-        assert_eq!(found.kind, SymbolKind::Const); // Child's version
+        // Inner scope shadows outer
+        let found = table.lookup("x").unwrap();
+        assert_eq!(found.kind, SymbolKind::Const);
+
+        table.exit_scope();
+
+        // Outer scope restored
+        let found = table.lookup("x").unwrap();
+        assert_eq!(found.kind, SymbolKind::Variable);
     }
 
     #[test]
@@ -282,16 +307,15 @@ mod tests {
             .unwrap();
         table.enter_scope();
 
-        // References added in nested scope are tracked in that scope's view
+        // References added in nested scope modify the actual parent scope symbol
         let span = Span::new(5, 10, 1, 0);
         assert!(table.add_reference("outer", span));
 
-        // When we exit the scope, the cloned parent scope is discarded,
-        // so references added in nested scopes don't persist to parent scope
+        // After exiting the scope, the reference persists on the parent symbol
         table.exit_scope();
         let found = table.lookup("outer").unwrap();
-        // References in nested scopes don't propagate to parent scope
-        assert_eq!(found.references.len(), 0);
+        assert_eq!(found.references.len(), 1);
+        assert_eq!(found.references[0].start, 5);
     }
 
     #[test]

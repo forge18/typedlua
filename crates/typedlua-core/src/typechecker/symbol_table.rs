@@ -50,21 +50,12 @@ impl Symbol {
 #[derive(Debug, Clone)]
 pub struct Scope {
     symbols: FxHashMap<String, Symbol>,
-    parent: Option<Box<Scope>>,
 }
 
 impl Scope {
     pub fn new() -> Self {
         Self {
             symbols: FxHashMap::default(),
-            parent: None,
-        }
-    }
-
-    pub fn with_parent(parent: Scope) -> Self {
-        Self {
-            symbols: FxHashMap::default(),
-            parent: Some(Box::new(parent)),
         }
     }
 
@@ -80,17 +71,9 @@ impl Scope {
         Ok(())
     }
 
-    /// Look up a symbol in this scope or parent scopes
+    /// Look up a symbol in this scope only
     pub fn lookup(&self, name: &str) -> Option<&Symbol> {
-        if let Some(symbol) = self.symbols.get(name) {
-            return Some(symbol);
-        }
-
-        if let Some(parent) = &self.parent {
-            return parent.lookup(name);
-        }
-
-        None
+        self.symbols.get(name)
     }
 
     /// Look up a symbol only in this scope (not parent scopes)
@@ -125,17 +108,10 @@ impl SymbolTable {
         }
     }
 
-    /// Enter a new scope
+    /// Enter a new scope (O(1) - no cloning)
     pub fn enter_scope(&mut self) {
         let parent = std::mem::take(&mut self.current_scope);
         self.scope_stack.push(parent);
-
-        if let Some(parent) = self.scope_stack.last() {
-            self.current_scope.parent = Some(Box::new(Scope {
-                symbols: parent.symbols.clone(),
-                parent: parent.parent.clone(),
-            }));
-        }
     }
 
     /// Exit current scope
@@ -150,9 +126,17 @@ impl SymbolTable {
         self.current_scope.declare(symbol)
     }
 
-    /// Look up a symbol in current or parent scopes
+    /// Look up a symbol in current scope, then walk the scope stack (most recent first)
     pub fn lookup(&self, name: &str) -> Option<&Symbol> {
-        self.current_scope.lookup(name)
+        if let Some(symbol) = self.current_scope.symbols.get(name) {
+            return Some(symbol);
+        }
+        for scope in self.scope_stack.iter().rev() {
+            if let Some(symbol) = scope.symbols.get(name) {
+                return Some(symbol);
+            }
+        }
+        None
     }
 
     /// Look up a symbol only in the current scope
@@ -163,24 +147,18 @@ impl SymbolTable {
     /// Add a reference to a symbol
     /// Returns true if the symbol was found and reference was added
     pub fn add_reference(&mut self, name: &str, span: Span) -> bool {
-        // Try to find and update the symbol in current scope
-        if self.current_scope.symbols.contains_key(name) {
-            if let Some(symbol) = self.current_scope.symbols.get_mut(name) {
+        // Try current scope first
+        if let Some(symbol) = self.current_scope.symbols.get_mut(name) {
+            symbol.add_reference(span);
+            return true;
+        }
+
+        // Walk the scope stack (most recent first)
+        for scope in self.scope_stack.iter_mut().rev() {
+            if let Some(symbol) = scope.symbols.get_mut(name) {
                 symbol.add_reference(span);
                 return true;
             }
-        }
-
-        // Try parent scopes
-        let mut current_parent = &mut self.current_scope.parent;
-        while let Some(ref mut parent_box) = current_parent {
-            if parent_box.symbols.contains_key(name) {
-                if let Some(symbol) = parent_box.symbols.get_mut(name) {
-                    symbol.add_reference(span);
-                    return true;
-                }
-            }
-            current_parent = &mut parent_box.parent;
         }
 
         false
@@ -191,27 +169,23 @@ impl SymbolTable {
         &self.current_scope
     }
 
-    /// Get all symbols visible from the current scope (current + all parents)
+    /// Get all symbols visible from the current scope (current + all parent scopes on stack)
     pub fn all_visible_symbols(&self) -> FxHashMap<String, &Symbol> {
         let mut result = FxHashMap::default();
-        self.collect_symbols_recursive(&self.current_scope, &mut result);
-        result
-    }
 
-    fn collect_symbols_recursive<'a>(
-        &'a self,
-        scope: &'a Scope,
-        result: &mut FxHashMap<String, &'a Symbol>,
-    ) {
-        // Add parent symbols first (so they can be shadowed)
-        if let Some(parent) = &scope.parent {
-            self.collect_symbols_recursive(parent, result);
+        // Add from oldest scope to newest so newer scopes shadow older ones
+        for scope in &self.scope_stack {
+            for (name, symbol) in &scope.symbols {
+                result.insert(name.clone(), symbol);
+            }
         }
 
-        // Add current scope symbols (shadowing parent symbols with same name)
-        for (name, symbol) in &scope.symbols {
+        // Current scope shadows everything
+        for (name, symbol) in &self.current_scope.symbols {
             result.insert(name.clone(), symbol);
         }
+
+        result
     }
 }
 
@@ -243,28 +217,37 @@ impl SymbolTable {
     /// Convert to serializable format by flattening scope hierarchy
     pub fn to_serializable(&self) -> SerializableSymbolTable {
         let mut symbols = Vec::new();
-        self.flatten_scope(&self.current_scope, 0, &mut symbols);
-        SerializableSymbolTable { symbols }
-    }
 
-    fn flatten_scope(&self, scope: &Scope, depth: usize, out: &mut Vec<SerializableSymbol>) {
-        // Add symbols from parent scope first (if exists)
-        if let Some(parent) = &scope.parent {
-            self.flatten_scope(parent, depth + 1, out);
+        // Scope stack: depth 0 = oldest (bottom of stack), increasing depth
+        for (depth, scope) in self.scope_stack.iter().enumerate() {
+            for symbol in scope.symbols.values() {
+                symbols.push(SerializableSymbol {
+                    name: symbol.name.clone(),
+                    kind: symbol.kind,
+                    typ: symbol.typ.clone(),
+                    span: symbol.span,
+                    is_exported: symbol.is_exported,
+                    references: symbol.references.clone(),
+                    scope_depth: depth,
+                });
+            }
         }
 
-        // Add symbols from current scope
-        for symbol in scope.symbols.values() {
-            out.push(SerializableSymbol {
+        // Current scope is the deepest
+        let current_depth = self.scope_stack.len();
+        for symbol in self.current_scope.symbols.values() {
+            symbols.push(SerializableSymbol {
                 name: symbol.name.clone(),
                 kind: symbol.kind,
                 typ: symbol.typ.clone(),
                 span: symbol.span,
                 is_exported: symbol.is_exported,
                 references: symbol.references.clone(),
-                scope_depth: depth,
+                scope_depth: current_depth,
             });
         }
+
+        SerializableSymbolTable { symbols }
     }
 
     /// Reconstruct from serializable format
@@ -278,23 +261,12 @@ impl SymbolTable {
                 .push(symbol);
         }
 
-        // Find max depth to reconstruct from deepest to shallowest
         let max_depth = symbols_by_depth.keys().max().copied().unwrap_or(0);
 
-        // Start with deepest scope and work up to root
-        let mut scope_map: FxHashMap<usize, Scope> = FxHashMap::default();
-
-        for depth in (0..=max_depth).rev() {
+        // Build scope stack from depth 0 to max_depth-1, current_scope = max_depth
+        let mut scope_stack = Vec::new();
+        for depth in 0..max_depth {
             let mut scope = Scope::new();
-
-            // Set parent if this is not the deepest scope
-            if depth < max_depth {
-                if let Some(child_scope) = scope_map.get(&(depth + 1)) {
-                    scope.parent = Some(Box::new(child_scope.clone()));
-                }
-            }
-
-            // Add symbols at this depth
             if let Some(symbols) = symbols_by_depth.get(&depth) {
                 for serializable in symbols {
                     let symbol = Symbol {
@@ -308,16 +280,28 @@ impl SymbolTable {
                     scope.symbols.insert(symbol.name.clone(), symbol);
                 }
             }
-
-            scope_map.insert(depth, scope);
+            scope_stack.push(scope);
         }
 
-        // The root scope is at depth 0
-        let current_scope = scope_map.remove(&0).unwrap_or_default();
+        // Current scope is the deepest level
+        let mut current_scope = Scope::new();
+        if let Some(symbols) = symbols_by_depth.get(&max_depth) {
+            for serializable in symbols {
+                let symbol = Symbol {
+                    name: serializable.name.clone(),
+                    kind: serializable.kind,
+                    typ: serializable.typ.clone(),
+                    span: serializable.span,
+                    is_exported: serializable.is_exported,
+                    references: serializable.references.clone(),
+                };
+                current_scope.symbols.insert(symbol.name.clone(), symbol);
+            }
+        }
 
         SymbolTable {
             current_scope,
-            scope_stack: Vec::new(),
+            scope_stack,
         }
     }
 }
@@ -385,7 +369,7 @@ mod tests {
         // Enter new scope
         table.enter_scope();
 
-        // Should still see x from parent
+        // Should still see x from parent scope via stack walk
         assert!(table.lookup("x").is_some());
 
         // Declare y in inner scope

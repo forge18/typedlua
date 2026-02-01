@@ -327,11 +327,11 @@ fn test_generic_class_with_constraint() {
 
         class Registry<T extends Identifiable> {
             private items: { [number]: T } = {}
-            
+
             register(item: T): void {
                 self.items[item.getId()] = item
             }
-            
+
             get(id: number): T | nil {
                 return self.items[id]
             }
@@ -339,7 +339,7 @@ fn test_generic_class_with_constraint() {
 
         class User implements Identifiable {
             private _id: number = 0
-            
+
             getId(): number {
                 return self._id
             }
