@@ -2,8 +2,12 @@ use super::dedent;
 use super::CodeGenerator;
 use crate::config::OptimizationLevel;
 use typedlua_parser::ast::expression::*;
-use typedlua_parser::ast::pattern::{ArrayPatternElement, Pattern};
+use typedlua_parser::ast::pattern::Pattern;
 use typedlua_parser::prelude::{MatchArmBody, MatchExpression};
+
+pub mod binary_ops;
+pub mod calls;
+pub mod literals;
 
 /// Check if an expression is guaranteed to never be nil
 /// Used for O2 null coalescing optimization to skip unnecessary nil checks
@@ -92,164 +96,31 @@ impl CodeGenerator {
         unary_op_to_string(op)
     }
 
+    pub fn expression_to_string(&mut self, expr: &Expression) -> String {
+        let original_output = std::mem::take(self.emitter.output_mut());
+        self.generate_expression(expr);
+        std::mem::replace(self.emitter.output_mut(), original_output)
+    }
+
     /// Generate expression to Lua code (main dispatcher)
     pub fn generate_expression(&mut self, expr: &Expression) {
         match &expr.kind {
             ExpressionKind::Literal(lit) => self.generate_literal(lit),
-            ExpressionKind::Identifier(name) => {
-                let name_str = self.resolve(*name);
-                self.write(&name_str);
-            }
+            ExpressionKind::Identifier(name) => self.generate_identifier(*name),
             ExpressionKind::Binary(op, left, right) => {
                 self.generate_binary_expression(*op, left, right);
             }
             ExpressionKind::Unary(op, operand) => {
-                if *op == UnaryOp::BitwiseNot && !self.strategy.supports_native_bitwise() {
-                    let operand_str = self.expression_to_string(operand);
-                    let result = self.strategy.generate_unary_bitwise_not(&operand_str);
-                    self.write(&result);
-                } else {
-                    let op_str = unary_op_to_string(*op).to_string();
-                    self.write(&op_str);
-                    self.generate_expression(operand);
-                }
+                self.generate_unary_expression(*op, operand);
             }
-            ExpressionKind::Assignment(target, op, value) => match op {
-                AssignmentOp::Assign => {
-                    self.generate_expression(target);
-                    self.write(" = ");
-                    self.generate_expression(value);
-                }
-                AssignmentOp::AddAssign => {
-                    self.generate_expression(target);
-                    self.write(" = ");
-                    self.generate_expression(target);
-                    self.write(" + ");
-                    self.generate_expression(value);
-                }
-                AssignmentOp::SubtractAssign => {
-                    self.generate_expression(target);
-                    self.write(" = ");
-                    self.generate_expression(target);
-                    self.write(" - ");
-                    self.generate_expression(value);
-                }
-                AssignmentOp::MultiplyAssign => {
-                    self.generate_expression(target);
-                    self.write(" = ");
-                    self.generate_expression(target);
-                    self.write(" * ");
-                    self.generate_expression(value);
-                }
-                AssignmentOp::DivideAssign => {
-                    self.generate_expression(target);
-                    self.write(" = ");
-                    self.generate_expression(target);
-                    self.write(" / ");
-                    self.generate_expression(value);
-                }
-                AssignmentOp::ModuloAssign => {
-                    self.generate_expression(target);
-                    self.write(" = ");
-                    self.generate_expression(target);
-                    self.write(" % ");
-                    self.generate_expression(value);
-                }
-                AssignmentOp::PowerAssign => {
-                    self.generate_expression(target);
-                    self.write(" = ");
-                    self.generate_expression(target);
-                    self.write(" ^ ");
-                    self.generate_expression(value);
-                }
-                AssignmentOp::ConcatenateAssign => {
-                    self.generate_expression(target);
-                    self.write(" = ");
-                    self.generate_expression(target);
-                    self.write(" .. ");
-                    self.generate_expression(value);
-                }
-                AssignmentOp::BitwiseAndAssign => {
-                    self.generate_expression(target);
-                    self.write(" = ");
-                    self.generate_expression(target);
-                    self.write(" & ");
-                    self.generate_expression(value);
-                }
-                AssignmentOp::BitwiseOrAssign => {
-                    self.generate_expression(target);
-                    self.write(" = ");
-                    self.generate_expression(target);
-                    self.write(" | ");
-                    self.generate_expression(value);
-                }
-                AssignmentOp::FloorDivideAssign => {
-                    self.generate_expression(target);
-                    self.write(" = ");
-                    self.generate_expression(target);
-                    self.write(" // ");
-                    self.generate_expression(value);
-                }
-                AssignmentOp::LeftShiftAssign => {
-                    self.generate_expression(target);
-                    self.write(" = ");
-                    self.generate_expression(target);
-                    self.write(" << ");
-                    self.generate_expression(value);
-                }
-                AssignmentOp::RightShiftAssign => {
-                    self.generate_expression(target);
-                    self.write(" = ");
-                    self.generate_expression(target);
-                    self.write(" >> ");
-                    self.generate_expression(value);
-                }
-            },
+            ExpressionKind::Assignment(target, op, value) => {
+                self.generate_assignment_expression(target, *op, value);
+            }
             ExpressionKind::Call(callee, args, _) => {
-                if matches!(&callee.kind, ExpressionKind::SuperKeyword) {
-                    if let Some(parent) = self.current_class_parent {
-                        let parent_str = self.resolve(parent);
-                        self.write(&parent_str);
-                        self.write("._init(self");
-                        if !args.is_empty() {
-                            self.write(", ");
-                        }
-                        for (i, arg) in args.iter().enumerate() {
-                            if i > 0 {
-                                self.write(", ");
-                            }
-                            self.generate_argument(arg);
-                        }
-                        self.write(")");
-                    } else {
-                        self.write("nil -- super() without parent class");
-                    }
-                    return;
-                }
-
-                let is_super_method_call = matches!(&callee.kind,
-                    ExpressionKind::Member(obj, _) if matches!(obj.kind, ExpressionKind::SuperKeyword)
-                );
-
-                self.generate_expression(callee);
-                self.write("(");
-
-                if is_super_method_call {
-                    self.write("self");
-                    if !args.is_empty() {
-                        self.write(", ");
-                    }
-                }
-
-                for (i, arg) in args.iter().enumerate() {
-                    if i > 0 {
-                        self.write(", ");
-                    }
-                    self.generate_argument(arg);
-                }
-                self.write(")");
+                self.generate_call_expression(callee, args);
             }
             ExpressionKind::New(constructor, args, _type_args) => {
+                self.write("(");
                 self.generate_expression(constructor);
                 self.write(".new(");
                 for (i, arg) in args.iter().enumerate() {
@@ -258,7 +129,7 @@ impl CodeGenerator {
                     }
                     self.generate_argument(arg);
                 }
-                self.write(")");
+                self.write("))");
             }
             ExpressionKind::Member(object, member) => {
                 if matches!(object.kind, ExpressionKind::SuperKeyword) {
@@ -295,10 +166,7 @@ impl CodeGenerator {
                         if i > 0 {
                             self.write(", ");
                         }
-                        match elem {
-                            ArrayElement::Expression(expr) => self.generate_expression(expr),
-                            ArrayElement::Spread(_) => unreachable!(),
-                        }
+                        self.generate_array_element(elem);
                     }
                     self.write("}");
                 } else {
@@ -449,18 +317,7 @@ impl CodeGenerator {
                 }
             },
             ExpressionKind::MethodCall(object, method, args, _) => {
-                self.generate_expression(object);
-                self.write(":");
-                let method_str = self.resolve(method.node);
-                self.write(&method_str);
-                self.write("(");
-                for (i, arg) in args.iter().enumerate() {
-                    if i > 0 {
-                        self.write(", ");
-                    }
-                    self.generate_argument(arg);
-                }
-                self.write(")");
+                self.generate_method_call_expression(object, method, args);
             }
             ExpressionKind::Parenthesized(expr) => {
                 self.write("(");
@@ -487,10 +344,10 @@ impl CodeGenerator {
 
                 for part in &template_lit.parts {
                     match part {
-                        typedlua_parser::ast::expression::TemplatePart::String(s) => {
+                        TemplatePart::String(s) => {
                             string_parts.push(s.clone());
                         }
-                        typedlua_parser::ast::expression::TemplatePart::Expression(expr) => {
+                        TemplatePart::Expression(expr) => {
                             expression_parts.push(expr);
                         }
                     }
@@ -666,115 +523,6 @@ impl CodeGenerator {
         }
     }
 
-    pub fn generate_literal(&mut self, lit: &Literal) {
-        match lit {
-            Literal::Nil => self.write("nil"),
-            Literal::Boolean(b) => self.write(if *b { "true" } else { "false" }),
-            Literal::Number(n) => self.write(&n.to_string()),
-            Literal::Integer(i) => self.write(&i.to_string()),
-            Literal::String(s) => {
-                self.write("\"");
-                self.write(&s.replace('\\', "\\\\").replace('"', "\\\""));
-                self.write("\"");
-            }
-        }
-    }
-
-    pub fn generate_argument(&mut self, arg: &Argument) {
-        self.generate_expression(&arg.value);
-    }
-
-    pub fn generate_object_property(&mut self, prop: &ObjectProperty) {
-        match prop {
-            ObjectProperty::Property { key, value, .. } => {
-                let key_str = self.resolve(key.node);
-                self.write(&key_str);
-                self.write(" = ");
-                self.generate_expression(value);
-            }
-            ObjectProperty::Computed { key, value, .. } => {
-                self.write("[");
-                self.generate_expression(key);
-                self.write("] = ");
-                self.generate_expression(value);
-            }
-            ObjectProperty::Spread { value, .. } => {
-                self.generate_expression(value);
-            }
-        }
-    }
-
-    pub fn generate_binary_expression(
-        &mut self,
-        op: BinaryOp,
-        left: &Expression,
-        right: &Expression,
-    ) {
-        match op {
-            BinaryOp::NullCoalesce => {
-                self.generate_null_coalesce(left, right);
-            }
-
-            BinaryOp::Add
-            | BinaryOp::Subtract
-            | BinaryOp::Multiply
-            | BinaryOp::Divide
-            | BinaryOp::Modulo
-            | BinaryOp::Power
-            | BinaryOp::Concatenate
-            | BinaryOp::Equal
-            | BinaryOp::NotEqual
-            | BinaryOp::LessThan
-            | BinaryOp::LessThanOrEqual
-            | BinaryOp::GreaterThan
-            | BinaryOp::GreaterThanOrEqual
-            | BinaryOp::And
-            | BinaryOp::Or => {
-                self.write("(");
-                self.generate_expression(left);
-                self.write(" ");
-                self.write(self.simple_binary_op_to_string(op));
-                self.write(" ");
-                self.generate_expression(right);
-                self.write(")");
-            }
-
-            BinaryOp::Instanceof => {
-                self.write("(type(");
-                self.generate_expression(left);
-                self.write(") == \"table\" and getmetatable(");
-                self.generate_expression(left);
-                self.write(") == ");
-                self.generate_expression(right);
-                self.write(")");
-            }
-
-            BinaryOp::BitwiseAnd
-            | BinaryOp::BitwiseOr
-            | BinaryOp::BitwiseXor
-            | BinaryOp::ShiftLeft
-            | BinaryOp::ShiftRight => {
-                let left_str = self.expression_to_string(left);
-                let right_str = self.expression_to_string(right);
-                let result = self.strategy.generate_bitwise_op(op, &left_str, &right_str);
-                self.write(&result);
-            }
-
-            BinaryOp::IntegerDivide => {
-                let left_str = self.expression_to_string(left);
-                let right_str = self.expression_to_string(right);
-                let result = self.strategy.generate_integer_divide(&left_str, &right_str);
-                self.write(&result);
-            }
-        }
-    }
-
-    pub fn expression_to_string(&mut self, expr: &Expression) -> String {
-        let original_output = std::mem::take(self.emitter.output_mut());
-        self.generate_expression(expr);
-        std::mem::replace(self.emitter.output_mut(), original_output)
-    }
-
     pub fn generate_null_coalesce(&mut self, left: &Expression, right: &Expression) {
         if self.optimization_level.effective() >= OptimizationLevel::O2
             && self.is_guaranteed_non_nil(left)
@@ -895,7 +643,7 @@ impl CodeGenerator {
                             self.generate_pattern_match(pat, &index_expr);
                         }
                         typedlua_parser::ast::pattern::ArrayPatternElement::Rest(_) => {}
-                        ArrayPatternElement::Hole => {}
+                        typedlua_parser::ast::pattern::ArrayPatternElement::Hole => {}
                     }
                 }
             }
@@ -905,7 +653,6 @@ impl CodeGenerator {
                 self.write(") == \"table\"");
             }
             Pattern::Or(or_pattern) => {
-                // Generate: (cond1 or cond2 or cond3 ...)
                 self.write("(");
                 for (i, alt) in or_pattern.alternatives.iter().enumerate() {
                     if i > 0 {
@@ -932,11 +679,11 @@ impl CodeGenerator {
             Pattern::Array(array_pattern) => {
                 for (i, elem) in array_pattern.elements.iter().enumerate() {
                     match elem {
-                        ArrayPatternElement::Pattern(pat) => {
+                        typedlua_parser::ast::pattern::ArrayPatternElement::Pattern(pat) => {
                             let index_expr = format!("{}[{}]", value_var, i + 1);
                             self.generate_pattern_bindings(pat, &index_expr);
                         }
-                        ArrayPatternElement::Rest(ident) => {
+                        typedlua_parser::ast::pattern::ArrayPatternElement::Rest(ident) => {
                             self.write_indent();
                             self.write("local ");
                             let ident_str = self.resolve(ident.node);
@@ -948,7 +695,7 @@ impl CodeGenerator {
                             self.write(")}");
                             self.writeln("");
                         }
-                        ArrayPatternElement::Hole => {}
+                        typedlua_parser::ast::pattern::ArrayPatternElement::Hole => {}
                     }
                 }
             }
@@ -973,8 +720,6 @@ impl CodeGenerator {
             }
             Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
             Pattern::Or(or_pattern) => {
-                // All alternatives bind same variables (verified by type checker during checking)
-                // Therefore we can safely use the first alternative for binding generation
                 if let Some(first) = or_pattern.alternatives.first() {
                     self.generate_pattern_bindings(first, value_var);
                 }
