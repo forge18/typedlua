@@ -1,0 +1,14 @@
+[package]
+name = "typedlua-test-helpers"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Test utilities and fixtures for TypedLua"
+
+[dependencies]
+typedlua-core = { path = "../typedlua-core" }
+typedlua-parser = { git = "https://github.com/forge18/typedlua-parser.git" }
+
+[dev-dependencies]

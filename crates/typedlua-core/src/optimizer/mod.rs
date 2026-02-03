@@ -37,7 +37,9 @@ pub trait OptimizationPass {
     fn run(&mut self, program: &mut Program) -> Result<bool, String>;
 
     /// Get the minimum optimization level required for this pass
-    fn min_level(&self) -> OptimizationLevel;
+    fn min_level(&self) -> OptimizationLevel {
+        OptimizationLevel::O1
+    }
 }
 
 /// Optimizer for AST transformations

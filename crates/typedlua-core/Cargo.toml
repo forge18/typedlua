@@ -21,8 +21,8 @@ indexmap = { workspace = true, features = ["serde"] }
 tracing.workspace = true
 typedlua-runtime = { path = "../typedlua-runtime" }
 lua-sourcemap = { path = "../typedlua-sourcemap" }
-typedlua-parser = { path = "../typedlua-parser" }
-typedlua-typechecker = { git = "https://github.com/forge18/typedlua-typechecker", branch = "main" }
+typedlua-parser = { git = "https://github.com/forge18/typedlua-parser.git" }
+typedlua-typechecker = { git = "https://github.com/forge18/typedlua-typechecker.git" }
 
 [dev-dependencies]
 insta.workspace = true

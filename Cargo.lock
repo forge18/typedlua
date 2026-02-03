@@ -1490,13 +1490,14 @@ dependencies = [
  "serde_json",
  "tracing",
  "tracing-subscriber",
- "typedlua-core",
  "typedlua-parser",
+ "typedlua-typechecker",
 ]
 
 [[package]]
 name = "typedlua-parser"
 version = "0.1.0"
+source = "git+https://github.com/forge18/typedlua-parser.git#51bb0e70a89643fe6495535d1f7490ce2eb453c7"
 dependencies = [
  "rustc-hash 2.1.1",
  "serde",
@@ -1508,9 +1509,17 @@ name = "typedlua-runtime"
 version = "0.1.0"
 
 [[package]]
+name = "typedlua-test-helpers"
+version = "0.1.0"
+dependencies = [
+ "typedlua-core",
+ "typedlua-parser",
+]
+
+[[package]]
 name = "typedlua-typechecker"
 version = "0.1.0"
-source = "git+https://github.com/forge18/typedlua-typechecker?branch=main#2b4fa76e6a95eee8deb58af119dae8c3ac49b725"
+source = "git+https://github.com/forge18/typedlua-typechecker.git#4476138de0675708866c679f5e7d9f80af9055a7"
 dependencies = [
  "indexmap",
  "rustc-hash 2.1.1",
