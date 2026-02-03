@@ -1,3 +1,17 @@
+use crate::config::OptimizationLevel;
+use crate::optimizer::OptimizationPass;
+use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
+use typedlua_parser::ast::expression::{Expression, ExpressionKind};
+use typedlua_parser::ast::pattern::Pattern;
+use typedlua_parser::ast::statement::{
+    Block, ForStatement, Statement, VariableDeclaration, VariableKind,
+};
+use typedlua_parser::ast::Program;
+use typedlua_parser::ast::Spanned;
+use typedlua_parser::span::Span;
+use typedlua_parser::string_interner::StringInterner;
+
 pub struct GlobalLocalizationPass {
     interner: Rc<StringInterner>,
 }
@@ -640,5 +654,3 @@ impl GlobalLocalizationPass {
         }
     }
 }
-
-// =============================================================================

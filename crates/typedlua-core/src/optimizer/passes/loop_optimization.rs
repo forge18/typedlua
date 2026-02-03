@@ -2,6 +2,17 @@
 // O2: Loop Optimization Pass
 // =============================================================================
 
+use crate::config::OptimizationLevel;
+use crate::optimizer::OptimizationPass;
+use std::collections::HashSet;
+use typedlua_parser::ast::expression::{
+    ArrayElement, BinaryOp, Expression, ExpressionKind, Literal, UnaryOp,
+};
+use typedlua_parser::ast::pattern::Pattern;
+use typedlua_parser::ast::statement::{Block, ForNumeric, ForStatement, Statement};
+use typedlua_parser::ast::Program;
+use typedlua_parser::string_interner::StringId;
+
 /// Loop optimization pass
 /// 1. Hoists loop-invariant local variable declarations
 /// 2. Removes dead loops (while false, zero-iteration for, repeat until true)
@@ -706,4 +717,3 @@ impl LoopOptimizationPass {
         }
     }
 }
-

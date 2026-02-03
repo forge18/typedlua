@@ -1,3 +1,11 @@
+use crate::config::OptimizationLevel;
+use crate::optimizer::OptimizationPass;
+use typedlua_parser::ast::expression::{Expression, ExpressionKind};
+use typedlua_parser::ast::statement::Statement;
+use typedlua_parser::ast::Program;
+use typedlua_parser::ast::Spanned;
+use typedlua_parser::span::Span;
+
 pub struct TablePreallocationPass;
 
 impl OptimizationPass for TablePreallocationPass {
@@ -113,11 +121,3 @@ impl TablePreallocationPass {
         }
     }
 }
-
-// =============================================================================
-// O1: Global Localization Pass
-// =============================================================================
-
-/// Global localization optimization pass
-/// Identifies frequently used globals and creates local references to reduce
-/// repeated table lookups in Lua (e.g., `local _math = math` then use `_math.sin`)

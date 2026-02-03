@@ -2,6 +2,21 @@
 // O2: String Concatenation Optimization Pass
 // =============================================================================
 
+use crate::config::OptimizationLevel;
+use crate::optimizer::OptimizationPass;
+use std::rc::Rc;
+use typedlua_parser::ast::expression::{
+    Argument, ArrayElement, AssignmentOp, BinaryOp, Expression, ExpressionKind, Literal,
+};
+use typedlua_parser::ast::pattern::Pattern;
+use typedlua_parser::ast::statement::{
+    Block, ForStatement, Statement, VariableDeclaration, VariableKind,
+};
+use typedlua_parser::ast::Program;
+use typedlua_parser::ast::Spanned;
+use typedlua_parser::span::Span;
+use typedlua_parser::string_interner::{StringId, StringInterner};
+
 const MIN_CONCAT_PARTS_FOR_OPTIMIZATION: usize = 3;
 
 #[derive(Default)]
@@ -588,4 +603,3 @@ impl StringConcatOptimizationPass {
         self.interner.as_ref()
     }
 }
-

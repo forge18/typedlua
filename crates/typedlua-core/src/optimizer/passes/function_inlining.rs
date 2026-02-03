@@ -1,9 +1,20 @@
 // O2: Function Inlining Pass
 // =============================================================================
 
-use typedlua_parser::ast::expression::ArrowBody;
-use typedlua_parser::ast::statement::{FunctionDeclaration, Parameter, ReturnStatement};
-use typedlua_parser::string_interner::StringId;
+use crate::config::OptimizationLevel;
+use crate::optimizer::OptimizationPass;
+use std::collections::HashMap;
+use std::rc::Rc;
+use typedlua_parser::ast::expression::{ArrowBody, Expression, ExpressionKind};
+use typedlua_parser::ast::pattern::Pattern;
+use typedlua_parser::ast::statement::{
+    Block, ForStatement, FunctionDeclaration, Parameter, ReturnStatement, Statement,
+    VariableDeclaration, VariableKind,
+};
+use typedlua_parser::ast::Program;
+use typedlua_parser::ast::Spanned;
+use typedlua_parser::span::Span;
+use typedlua_parser::string_interner::{StringId, StringInterner};
 
 enum InlineResult {
     /// Direct expression substitution - for simple single-return functions
@@ -959,4 +970,3 @@ impl FunctionInliningPass {
 use typedlua_parser::ast::expression::Argument;
 use typedlua_parser::ast::expression::ArrayElement;
 use typedlua_parser::ast::expression::MatchArmBody;
-

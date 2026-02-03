@@ -2,12 +2,22 @@
 // O3: Generic Specialization Pass
 // =============================================================================
 
+use crate::config::OptimizationLevel;
+use crate::optimizer::OptimizationPass;
 use crate::{build_substitutions, instantiate_function_declaration};
 use rustc_hash::FxHashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use typedlua_parser::ast::expression::ObjectProperty;
+use std::rc::Rc;
+use typedlua_parser::ast::expression::{
+    Argument, ArrayElement, Expression, ExpressionKind, ObjectProperty,
+};
+use typedlua_parser::ast::statement::{Block, ForStatement, FunctionDeclaration, Statement};
 use typedlua_parser::ast::types::Type;
+use typedlua_parser::ast::Program;
+use typedlua_parser::ast::Spanned;
+use typedlua_parser::span::Span;
+use typedlua_parser::string_interner::{StringId, StringInterner};
 
 /// Computes a hash of type arguments for caching specialized functions
 fn hash_type_args(type_args: &[Type]) -> u64 {

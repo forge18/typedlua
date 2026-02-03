@@ -1,3 +1,9 @@
+use crate::config::OptimizationLevel;
+use crate::optimizer::OptimizationPass;
+use typedlua_parser::ast::expression::{BinaryOp, Expression, ExpressionKind, Literal, UnaryOp};
+use typedlua_parser::ast::statement::{ForStatement, Statement};
+use typedlua_parser::ast::Program;
+
 pub struct ConstantFoldingPass;
 
 impl OptimizationPass for ConstantFoldingPass {
@@ -213,4 +219,3 @@ impl ConstantFoldingPass {
         }
     }
 }
-

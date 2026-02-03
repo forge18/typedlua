@@ -1,3 +1,9 @@
+use crate::config::OptimizationLevel;
+use crate::optimizer::OptimizationPass;
+use typedlua_parser::ast::expression::{BinaryOp, Expression, ExpressionKind, Literal, UnaryOp};
+use typedlua_parser::ast::statement::{ForStatement, Statement};
+use typedlua_parser::ast::Program;
+
 pub struct AlgebraicSimplificationPass;
 
 impl OptimizationPass for AlgebraicSimplificationPass {
@@ -212,11 +218,3 @@ fn is_one(expr: &ExpressionKind) -> bool {
         ExpressionKind::Literal(Literal::Number(n)) if *n == 1.0
     )
 }
-
-// =============================================================================
-// O1: Table Preallocation Pass
-// =============================================================================
-
-/// Table preallocation optimization pass
-/// Analyzes table constructors and adds size hints for Lua
-/// Note: This is a placeholder - actual hints would be used by codegen

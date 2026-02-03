@@ -2,6 +2,18 @@
 // O2: Dead Store Elimination Pass
 // =============================================================================
 
+use crate::config::OptimizationLevel;
+use crate::optimizer::OptimizationPass;
+use std::collections::HashSet;
+use typedlua_parser::ast::expression::{
+    ArrayElement, BinaryOp, Expression, ExpressionKind, Literal,
+};
+use typedlua_parser::ast::pattern::Pattern;
+use typedlua_parser::ast::statement::{Block, ForStatement, Statement};
+use typedlua_parser::ast::Program;
+use typedlua_parser::span::Span;
+use typedlua_parser::string_interner::StringId;
+
 /// Dead store elimination pass
 /// Removes assignments to variables that are never read
 pub struct DeadStoreEliminationPass;
@@ -850,4 +862,3 @@ impl DeadStoreEliminationPass {
         }
     }
 }
-

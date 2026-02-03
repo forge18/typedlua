@@ -1,11 +1,3 @@
-use crate::config::OptimizationLevel;
-use crate::diagnostics::DiagnosticHandler;
-
-use std::rc::Rc;
-use std::sync::Arc;
-use typedlua_parser::ast::Program;
-use typedlua_parser::string_interner::StringInterner;
-
 mod constant_folding;
 pub use constant_folding::ConstantFoldingPass;
 
@@ -38,21 +30,3 @@ pub use tail_call_optimization::TailCallOptimizationPass;
 
 mod generic_specialization;
 pub use generic_specialization::GenericSpecializationPass;
-
-mod rich_enum_optimization;
-pub use rich_enum_optimization::*;
-
-mod method_to_function_conversion;
-pub use method_to_function_conversion::*;
-
-mod devirtualization;
-pub use devirtualization::DevirtualizationPass;
-
-mod operator_inlining;
-pub use operator_inlining::OperatorInliningPass;
-
-mod interface_inlining;
-pub use interface_inlining::InterfaceMethodInliningPass;
-
-mod aggressive_inlining;
-pub use aggressive_inlining::AggressiveInliningPass;

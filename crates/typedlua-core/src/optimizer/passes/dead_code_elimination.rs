@@ -1,3 +1,10 @@
+use crate::config::OptimizationLevel;
+use crate::optimizer::OptimizationPass;
+use typedlua_parser::ast::statement::{ForStatement, Statement};
+use typedlua_parser::ast::Program;
+use typedlua_parser::ast::Spanned;
+use typedlua_parser::span::Span;
+
 pub struct DeadCodeEliminationPass;
 
 impl OptimizationPass for DeadCodeEliminationPass {
@@ -72,6 +79,3 @@ impl DeadCodeEliminationPass {
         changed
     }
 }
-
-/// Algebraic simplification pass
-/// Simplifies expressions using algebraic identities

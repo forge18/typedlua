@@ -2,6 +2,13 @@
 // O2: Tail Call Optimization Pass
 // =============================================================================
 
+use crate::config::OptimizationLevel;
+use crate::optimizer::OptimizationPass;
+use typedlua_parser::ast::expression::Expression;
+use typedlua_parser::ast::expression::ExpressionKind;
+use typedlua_parser::ast::statement::{Block, ForStatement, Statement};
+use typedlua_parser::ast::Program;
+
 /// Tail call optimization pass
 /// Analyzes tail call patterns and ensures other optimizations don't break TCO positions
 /// Lua automatically handles tail calls at runtime - this pass provides analysis and verification
@@ -83,4 +90,3 @@ impl TailCallOptimizationPass {
         )
     }
 }
-
