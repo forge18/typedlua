@@ -105,7 +105,7 @@ fn test_throw_error_class() {
 
     let output = compile_and_check(source).unwrap();
     assert!(
-        output.contains("error(Error.new(\"Test error\"))"),
+        output.contains("error((Error.new(\"Test error\")))"),
         "Should throw Error instance"
     );
 }
@@ -164,7 +164,7 @@ fn test_require_helper() {
         "Should check condition"
     );
     assert!(
-        output.contains("error(ArgumentError.new(message))"),
+        output.contains("error((ArgumentError.new(message)))"),
         "Should throw ArgumentError"
     );
 }
@@ -195,7 +195,7 @@ fn test_check_helper() {
         "Should check for nil"
     );
     assert!(
-        output.contains("error(ArgumentError.new"),
+        output.contains("error((ArgumentError.new"),
         "Should throw ArgumentError on nil"
     );
 }
@@ -227,7 +227,7 @@ fn test_unreachable_helper() {
 
     let output = compile_and_check(source).unwrap();
     assert!(
-        output.contains("error(StateError.new"),
+        output.contains("error((StateError.new"),
         "Should throw StateError"
     );
     assert!(

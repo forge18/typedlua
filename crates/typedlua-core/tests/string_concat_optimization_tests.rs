@@ -1,17 +1,13 @@
-use typedlua_core::config::{CompilerConfig, CompilerOptions, OptimizationLevel};
+use typedlua_core::config::{CompilerConfig, OptimizationLevel};
 use typedlua_core::di::Container;
 
 fn compile_with_optimization_level(
     source: &str,
     level: OptimizationLevel,
 ) -> Result<String, String> {
-    let mut config = CompilerConfig::default();
-    config.optimization.level = level;
+    let config = CompilerConfig::default();
     let container = Container::new(config);
-    container.compile_with_stdlib(source)
-}
-
-    Ok(output)
+    container.compile_with_stdlib_and_optimization(source, level)
 }
 
 // ============================================================================

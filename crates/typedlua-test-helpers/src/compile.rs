@@ -4,8 +4,7 @@
 //! in tests, using proper DI through the Container.
 
 use std::sync::Arc;
-use typedlua_core::codegen::CodeGenerator;
-use typedlua_core::config::CompilerConfig;
+use typedlua_core::config::{CompilerConfig, OptimizationLevel};
 use typedlua_core::di::Container;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::fs::MockFileSystem;
@@ -26,6 +25,20 @@ pub fn compile(source: &str) -> Result<String, String> {
     container.compile(source)
 }
 
+/// Compile TypedLua source code without stdlib and with optimization
+///
+/// # Arguments
+/// * `source` - The TypedLua source code to compile
+/// * `level` - The optimization level to apply
+///
+/// # Returns
+/// The generated Lua code or an error message
+pub fn compile_with_optimization(source: &str, level: OptimizationLevel) -> Result<String, String> {
+    let config = CompilerConfig::default();
+    let container = Container::new(config);
+    container.compile_with_optimization(source, level)
+}
+
 /// Compile TypedLua source code with stdlib loaded
 ///
 /// Use this for tests that need standard library features
@@ -42,6 +55,25 @@ pub fn compile_with_stdlib(source: &str) -> Result<String, String> {
     container.compile_with_stdlib(source)
 }
 
+/// Compile TypedLua source code with stdlib loaded and optimization
+///
+/// Use this for tests that need both standard library features and optimization.
+///
+/// # Arguments
+/// * `source` - The TypedLua source code to compile
+/// * `level` - The optimization level to apply
+///
+/// # Returns
+/// The generated Lua code or an error message
+pub fn compile_with_stdlib_and_optimization(
+    source: &str,
+    level: OptimizationLevel,
+) -> Result<String, String> {
+    let config = CompilerConfig::default();
+    let container = Container::new(config);
+    container.compile_with_stdlib_and_optimization(source, level)
+}
+
 /// Type check TypedLua source code
 ///
 /// Returns the symbol table for further inspection, or an error message.
@@ -53,7 +85,7 @@ pub fn compile_with_stdlib(source: &str) -> Result<String, String> {
 /// Ok(()) if type checking succeeds, or an error message
 pub fn type_check(source: &str) -> Result<(), String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
-    let (mut interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
 
     let mut lexer = Lexer::new(source, handler.clone(), &interner);
     let tokens = lexer

@@ -12,7 +12,7 @@ pub trait TypeCheckHelper {
 impl TypeCheckHelper for super::di::Container {
     fn type_check_source(&self, source: &str) -> Result<(), String> {
         let handler = Arc::new(CollectingDiagnosticHandler::new());
-        let (mut interner, common_ids) = StringInterner::new_with_common_identifiers();
+        let (interner, common_ids) = StringInterner::new_with_common_identifiers();
         let interner = Rc::new(interner);
 
         let mut lexer = Lexer::new(source, handler.clone(), &interner);

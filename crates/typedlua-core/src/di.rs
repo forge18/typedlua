@@ -1,7 +1,8 @@
 use super::codegen::CodeGenerator;
-use super::config::CompilerConfig;
+use super::config::{CompilerConfig, OptimizationLevel};
 use super::diagnostics::{ConsoleDiagnosticHandler, DiagnosticHandler};
 use super::fs::{FileSystem, RealFileSystem};
+use super::optimizer::Optimizer;
 use std::rc::Rc;
 use std::sync::Arc;
 use typedlua_parser::diagnostics::CollectingDiagnosticHandler as ParserCollectingHandler;
@@ -88,6 +89,22 @@ impl Container {
     /// # Returns
     /// The generated Lua code or an error message
     pub fn compile(&self, source: &str) -> Result<String, String> {
+        self.compile_with_optimization(source, OptimizationLevel::O0)
+    }
+
+    /// Compile source code using the container's dependencies (without stdlib) with optimization
+    ///
+    /// # Arguments
+    /// * `source` - The TypedLua source code to compile
+    /// * `level` - The optimization level to apply
+    ///
+    /// # Returns
+    /// The generated Lua code or an error message
+    pub fn compile_with_optimization(
+        &self,
+        source: &str,
+        level: OptimizationLevel,
+    ) -> Result<String, String> {
         let parser_handler =
             Arc::new(ParserCollectingHandler::new()) as Arc<dyn typedlua_parser::DiagnosticHandler>;
         let typecheck_handler = self.diagnostic_handler.clone();
@@ -109,7 +126,10 @@ impl Container {
             .check_program(&mut program)
             .map_err(|e| e.message)?;
 
-        let mut codegen = CodeGenerator::new(interner);
+        let mut optimizer = Optimizer::new(level, typecheck_handler.clone(), interner.clone());
+        let _ = optimizer.optimize(&mut program);
+
+        let mut codegen = CodeGenerator::new(interner.clone());
         let output = codegen.generate(&mut program);
 
         Ok(output)
@@ -123,6 +143,22 @@ impl Container {
     /// # Returns
     /// The generated Lua code or an error message
     pub fn compile_with_stdlib(&self, source: &str) -> Result<String, String> {
+        self.compile_with_stdlib_and_optimization(source, OptimizationLevel::O0)
+    }
+
+    /// Compile source code with stdlib loaded and optimization (for tests that need both)
+    ///
+    /// # Arguments
+    /// * `source` - The TypedLua source code to compile
+    /// * `level` - The optimization level to apply
+    ///
+    /// # Returns
+    /// The generated Lua code or an error message
+    pub fn compile_with_stdlib_and_optimization(
+        &self,
+        source: &str,
+        level: OptimizationLevel,
+    ) -> Result<String, String> {
         let parser_handler =
             Arc::new(ParserCollectingHandler::new()) as Arc<dyn typedlua_parser::DiagnosticHandler>;
         let typecheck_handler = self.diagnostic_handler.clone();
@@ -146,7 +182,10 @@ impl Container {
             .check_program(&mut program)
             .map_err(|e| e.message)?;
 
-        let mut codegen = CodeGenerator::new(interner);
+        let mut optimizer = Optimizer::new(level, typecheck_handler.clone(), interner.clone());
+        let _ = optimizer.optimize(&mut program);
+
+        let mut codegen = CodeGenerator::new(interner.clone());
         let output = codegen.generate(&mut program);
 
         Ok(output)
