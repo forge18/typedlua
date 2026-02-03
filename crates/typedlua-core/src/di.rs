@@ -1,7 +1,13 @@
+use super::codegen::CodeGenerator;
 use super::config::CompilerConfig;
 use super::diagnostics::{ConsoleDiagnosticHandler, DiagnosticHandler};
 use super::fs::{FileSystem, RealFileSystem};
+use std::rc::Rc;
 use std::sync::Arc;
+use typedlua_parser::diagnostics::CollectingDiagnosticHandler as ParserCollectingHandler;
+use typedlua_parser::string_interner::StringInterner;
+use typedlua_parser::{Lexer, Parser};
+use typedlua_typechecker::TypeChecker;
 
 /// Dependency injection container
 /// Manages all shared dependencies and creates instances with proper wiring
@@ -72,6 +78,78 @@ impl Container {
     /// Get the warning count
     pub fn warning_count(&self) -> usize {
         self.diagnostic_handler.warning_count()
+    }
+
+    /// Compile source code using the container's dependencies (without stdlib)
+    ///
+    /// # Arguments
+    /// * `source` - The TypedLua source code to compile
+    ///
+    /// # Returns
+    /// The generated Lua code or an error message
+    pub fn compile(&self, source: &str) -> Result<String, String> {
+        let parser_handler =
+            Arc::new(ParserCollectingHandler::new()) as Arc<dyn typedlua_parser::DiagnosticHandler>;
+        let typecheck_handler = self.diagnostic_handler.clone();
+        let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+        let interner = Rc::new(interner);
+
+        let mut lexer = Lexer::new(source, parser_handler.clone(), &interner);
+        let tokens = lexer
+            .tokenize()
+            .map_err(|e| format!("Lexing failed: {:?}", e))?;
+
+        let mut parser = Parser::new(tokens, parser_handler.clone(), &interner, &common_ids);
+        let mut program = parser
+            .parse()
+            .map_err(|e| format!("Parsing failed: {:?}", e))?;
+
+        let mut type_checker = TypeChecker::new(typecheck_handler.clone(), &interner, &common_ids);
+        type_checker
+            .check_program(&mut program)
+            .map_err(|e| e.message)?;
+
+        let mut codegen = CodeGenerator::new(interner);
+        let output = codegen.generate(&mut program);
+
+        Ok(output)
+    }
+
+    /// Compile source code with stdlib loaded (for tests that need standard library)
+    ///
+    /// # Arguments
+    /// * `source` - The TypedLua source code to compile
+    ///
+    /// # Returns
+    /// The generated Lua code or an error message
+    pub fn compile_with_stdlib(&self, source: &str) -> Result<String, String> {
+        let parser_handler =
+            Arc::new(ParserCollectingHandler::new()) as Arc<dyn typedlua_parser::DiagnosticHandler>;
+        let typecheck_handler = self.diagnostic_handler.clone();
+        let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+        let interner = Rc::new(interner);
+
+        let mut lexer = Lexer::new(source, parser_handler.clone(), &interner);
+        let tokens = lexer
+            .tokenize()
+            .map_err(|e| format!("Lexing failed: {:?}", e))?;
+
+        let mut parser = Parser::new(tokens, parser_handler.clone(), &interner, &common_ids);
+        let mut program = parser
+            .parse()
+            .map_err(|e| format!("Parsing failed: {:?}", e))?;
+
+        let mut type_checker =
+            TypeChecker::new_with_stdlib(typecheck_handler.clone(), &interner, &common_ids)
+                .map_err(|e| format!("Failed to load stdlib: {:?}", e))?;
+        type_checker
+            .check_program(&mut program)
+            .map_err(|e| e.message)?;
+
+        let mut codegen = CodeGenerator::new(interner);
+        let output = codegen.generate(&mut program);
+
+        Ok(output)
     }
 }
 

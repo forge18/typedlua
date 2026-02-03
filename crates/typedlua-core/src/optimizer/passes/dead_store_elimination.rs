@@ -5,9 +5,7 @@
 use crate::config::OptimizationLevel;
 use crate::optimizer::OptimizationPass;
 use std::collections::HashSet;
-use typedlua_parser::ast::expression::{
-    BinaryOp, Expression, ExpressionKind,
-};
+use typedlua_parser::ast::expression::{BinaryOp, Expression, ExpressionKind};
 use typedlua_parser::ast::pattern::Pattern;
 use typedlua_parser::ast::statement::{Block, ForStatement, Statement};
 use typedlua_parser::ast::Program;

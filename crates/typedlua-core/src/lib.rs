@@ -3,6 +3,7 @@ pub mod cache;
 pub mod codegen;
 pub mod di;
 pub mod optimizer;
+pub mod type_checker;
 
 // Re-export everything from external typechecker
 pub use typedlua_typechecker::{

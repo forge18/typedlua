@@ -85,9 +85,9 @@ mod lsp_mocks {
     use super::*;
     use lsp_types::{
         CodeAction, CodeActionContext, CodeActionResponse, CompletionItem, Diagnostic,
-        DocumentSymbolResponse, FoldingRange, FormattingOptions, Hover, InlayHint, Location,
-        Position, Range, SelectionRange, SemanticToken, SemanticTokensDelta, SignatureHelp, Uri,
-        WorkspaceEdit,
+        DocumentSymbolResponse, FoldingRange, FormattingOptions, GotoDefinitionResponse, Hover,
+        InlayHint, Location, Position, Range, SelectionRange, SemanticToken, SemanticTokensDelta,
+        SignatureHelp, Uri, WorkspaceEdit,
     };
     use typedlua_lsp::document::Document;
     use typedlua_lsp::traits::*;
@@ -141,7 +141,7 @@ mod lsp_mocks {
             _uri: &Uri,
             _document: &Document,
             _position: Position,
-        ) -> Option<Location> {
+        ) -> Option<GotoDefinitionResponse> {
             None
         }
     }

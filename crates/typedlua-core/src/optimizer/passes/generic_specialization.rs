@@ -9,9 +9,7 @@ use rustc_hash::FxHashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
-use typedlua_parser::ast::expression::{
-    ArrayElement, Expression, ExpressionKind, ObjectProperty,
-};
+use typedlua_parser::ast::expression::{ArrayElement, Expression, ExpressionKind, ObjectProperty};
 use typedlua_parser::ast::statement::{ForStatement, FunctionDeclaration, Statement};
 use typedlua_parser::ast::types::Type;
 use typedlua_parser::ast::Program;
