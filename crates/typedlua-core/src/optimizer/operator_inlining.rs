@@ -9,12 +9,11 @@
 //! 3. Operator is called frequently (heuristic: 3+ call sites)
 
 use crate::config::OptimizationLevel;
-use crate::errors::CompilationError;
+
 use crate::optimizer::OptimizationPass;
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
 use typedlua_parser::ast::expression::{BinaryOp, Expression, ExpressionKind, UnaryOp};
-use typedlua_parser::ast::pattern::Pattern;
 use typedlua_parser::ast::statement::{Block, ClassMember, Statement};
 use typedlua_parser::ast::types::{Type, TypeKind};
 use typedlua_parser::ast::Program;
@@ -25,12 +24,7 @@ const MAX_INLINE_STATEMENTS: usize = 5;
 const MIN_CALL_FREQUENCY: usize = 3;
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct OperatorInfo {
-    class_name: StringId,
-    operator: typedlua_parser::ast::statement::OperatorKind,
-    body: Block,
-    param_names: Vec<StringId>,
     statement_count: usize,
     has_side_effects: bool,
     call_count: usize,
@@ -50,13 +44,6 @@ impl OperatorInliningPass {
         }
     }
 
-    fn extract_param_name(pattern: &Pattern) -> Option<StringId> {
-        match pattern {
-            Pattern::Identifier(ident) => Some(ident.node),
-            _ => None,
-        }
-    }
-
     fn build_operator_catalog(&mut self, program: &Program) {
         for stmt in &program.statements {
             self.catalog_statement(stmt);
@@ -69,20 +56,10 @@ impl OperatorInliningPass {
                 let class_name = class.name.node;
                 for member in &class.members {
                     if let ClassMember::Operator(op) = member {
-                        let param_names: Vec<StringId> = op
-                            .parameters
-                            .iter()
-                            .filter_map(|p| Self::extract_param_name(&p.pattern))
-                            .collect();
-
                         let statement_count = count_statements(&op.body);
                         let has_side_effects = has_side_effects(&op.body);
 
                         let info = OperatorInfo {
-                            class_name,
-                            operator: op.operator,
-                            body: op.body.clone(),
-                            param_names,
                             statement_count,
                             has_side_effects,
                             call_count: 0,
@@ -617,7 +594,7 @@ impl OptimizationPass for OperatorInliningPass {
         OptimizationLevel::O3
     }
 
-    fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
+    fn run(&mut self, program: &mut Program) -> Result<bool, String> {
         self.build_operator_catalog(program);
 
         let mut changed = false;

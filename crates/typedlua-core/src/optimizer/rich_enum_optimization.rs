@@ -1,5 +1,5 @@
 use crate::config::OptimizationLevel;
-use crate::errors::CompilationError;
+
 use crate::optimizer::OptimizationPass;
 use typedlua_parser::ast::statement::{EnumDeclaration, Statement};
 use typedlua_parser::ast::Program;
@@ -15,7 +15,7 @@ impl OptimizationPass for RichEnumOptimizationPass {
         OptimizationLevel::O2
     }
 
-    fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
+    fn run(&mut self, program: &mut Program) -> Result<bool, String> {
         let mut rich_enum_count = 0;
 
         for stmt in &program.statements {

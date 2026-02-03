@@ -3,7 +3,7 @@ use std::sync::Arc;
 use typedlua_core::codegen::CodeGenerator;
 use typedlua_core::config::{CompilerOptions, OptimizationLevel};
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
-use typedlua_core::typechecker::TypeChecker;
+use typedlua_core::TypeChecker;
 use typedlua_parser::lexer::Lexer;
 use typedlua_parser::parser::Parser;
 use typedlua_parser::string_interner::StringInterner;
@@ -29,8 +29,9 @@ fn compile_with_optimization(source: &str, level: OptimizationLevel) -> Result<S
 
     let options = CompilerOptions::default();
 
-    let mut type_checker =
-        TypeChecker::new(handler.clone(), &interner, &common_ids).with_options(options);
+    let mut type_checker = TypeChecker::new_with_stdlib(handler.clone(), &interner, &common_ids)
+        .expect("Failed to load stdlib")
+        .with_options(options);
     type_checker
         .check_program(&mut program)
         .map_err(|e| e.message)?;

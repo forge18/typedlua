@@ -4,7 +4,7 @@ fn time_100k_phases() {
     use std::sync::Arc;
     use std::time::Instant;
     use typedlua_core::diagnostics::CollectingDiagnosticHandler;
-    use typedlua_core::typechecker::TypeChecker;
+    use typedlua_core::TypeChecker;
     use typedlua_parser::lexer::Lexer;
     use typedlua_parser::parser::Parser;
     use typedlua_parser::string_interner::StringInterner;

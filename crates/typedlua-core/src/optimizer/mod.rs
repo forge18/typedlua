@@ -1,6 +1,6 @@
 use crate::config::OptimizationLevel;
 use crate::diagnostics::DiagnosticHandler;
-use crate::errors::CompilationError;
+
 use std::rc::Rc;
 use std::sync::Arc;
 use typedlua_parser::ast::Program;
@@ -34,7 +34,7 @@ pub trait OptimizationPass {
 
     /// Run this optimization pass on the program
     /// Returns true if the pass made changes to the AST
-    fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError>;
+    fn run(&mut self, program: &mut Program) -> Result<bool, String>;
 
     /// Get the minimum optimization level required for this pass
     fn min_level(&self) -> OptimizationLevel;
@@ -122,7 +122,7 @@ impl Optimizer {
 
     /// Optimize the program AST
     /// Runs all registered optimization passes until no more changes are made
-    pub fn optimize(&mut self, program: &mut Program) -> Result<(), CompilationError> {
+    pub fn optimize(&mut self, program: &mut Program) -> Result<(), String> {
         // Resolve Auto to actual optimization level based on build profile
         let effective_level = self.level.effective();
 

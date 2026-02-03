@@ -8,4 +8,11 @@
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
 | #5099 | 4:37 PM | 🔵 | Type checker compilation errors in argument validation code | ~346 |
+
+### Feb 2, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #6262 | 1:58 PM | 🔄 | Replaced embedded typechecker with external typedlua-typechecker crate | ~572 |
+| #6241 | 1:28 PM | ⚖️ | Plan created to migrate to external typedlua-typechecker crate | ~471 |
 </claude-mem-context>

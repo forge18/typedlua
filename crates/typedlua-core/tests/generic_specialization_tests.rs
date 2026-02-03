@@ -24,7 +24,8 @@ fn type_check(source: &str) -> Result<(), String> {
     let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
     let program = parser.parse().map_err(|e| format!("{:?}", e))?;
 
-    let mut checker = TypeChecker::new(handler, &interner, &common_ids);
+    let mut checker = TypeChecker::new_with_stdlib(handler, &interner, &common_ids)
+        .expect("Failed to load stdlib");
     checker
         .check_program(&mut program.clone())
         .map_err(|e| e.message)?;
@@ -32,7 +33,7 @@ fn type_check(source: &str) -> Result<(), String> {
     Ok(())
 }
 
-use typedlua_core::typechecker::TypeChecker;
+use typedlua_core::TypeChecker;
 use typedlua_parser::lexer::Lexer;
 use typedlua_parser::parser::Parser;
 

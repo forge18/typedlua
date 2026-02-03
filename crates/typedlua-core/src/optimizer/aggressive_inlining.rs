@@ -1,5 +1,5 @@
 use crate::config::OptimizationLevel;
-use crate::errors::CompilationError;
+
 use crate::optimizer::OptimizationPass;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -68,7 +68,7 @@ impl OptimizationPass for AggressiveInliningPass {
         OptimizationLevel::O3
     }
 
-    fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
+    fn run(&mut self, program: &mut Program) -> Result<bool, String> {
         self.next_temp_id = 0;
         self.functions.clear();
         self.hot_paths.clear();

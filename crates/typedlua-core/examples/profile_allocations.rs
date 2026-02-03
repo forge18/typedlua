@@ -13,7 +13,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use typedlua_core::codegen::CodeGenerator;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
-use typedlua_core::typechecker::TypeChecker;
+use typedlua_core::TypeChecker;
 use typedlua_parser::lexer::Lexer;
 use typedlua_parser::parser::Parser;
 use typedlua_parser::string_interner::StringInterner;
@@ -39,7 +39,8 @@ fn compile_source(source: &str) -> Result<String, String> {
         .map_err(|e| format!("Parsing failed: {:?}", e))?;
 
     // Type check
-    let mut type_checker = TypeChecker::new(handler, &interner, &common_ids);
+    let mut type_checker = TypeChecker::new_with_stdlib(handler, &interner, &common_ids)
+        .expect("Failed to load stdlib");
     type_checker
         .check_program(&mut program)
         .map_err(|e| e.message)?;

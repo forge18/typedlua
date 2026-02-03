@@ -18,7 +18,7 @@
 //! 5. Preserving original dispatch if multiple implementations exist
 
 use crate::config::OptimizationLevel;
-use crate::errors::CompilationError;
+
 use crate::optimizer::OptimizationPass;
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
@@ -113,11 +113,6 @@ impl InterfaceImplementationMap {
         } else {
             None
         }
-    }
-
-    #[allow(dead_code)]
-    pub fn is_final_class(&self, class_id: StringId) -> bool {
-        self.class_is_final.get(&class_id).copied().unwrap_or(false)
     }
 
     pub fn get_method_body(&self, class_id: StringId, method_id: StringId) -> Option<&Block> {
@@ -298,14 +293,11 @@ impl InterfaceImplementationMap {
     }
 }
 
-#[allow(dead_code)]
-pub struct InterfaceMethodInliningPass {
-    interner: Rc<StringInterner>,
-}
+pub struct InterfaceMethodInliningPass;
 
 impl InterfaceMethodInliningPass {
-    pub fn new(interner: Rc<StringInterner>) -> Self {
-        Self { interner }
+    pub fn new(_interner: Rc<StringInterner>) -> Self {
+        Self
     }
 
     fn process_statement(
@@ -756,7 +748,7 @@ impl OptimizationPass for InterfaceMethodInliningPass {
         OptimizationLevel::O3
     }
 
-    fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
+    fn run(&mut self, program: &mut Program) -> Result<bool, String> {
         let impl_map = InterfaceImplementationMap::build(program);
 
         let mut changed = false;
@@ -769,11 +761,8 @@ impl OptimizationPass for InterfaceMethodInliningPass {
 }
 
 impl Default for InterfaceMethodInliningPass {
-    #[allow(clippy::arc_with_non_send_sync)]
     fn default() -> Self {
-        Self {
-            interner: Rc::new(StringInterner::new()),
-        }
+        Self
     }
 }
 

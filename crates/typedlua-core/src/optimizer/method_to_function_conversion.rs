@@ -1,5 +1,5 @@
 use crate::config::OptimizationLevel;
-use crate::errors::CompilationError;
+
 use crate::optimizer::OptimizationPass;
 use std::rc::Rc;
 use typedlua_parser::ast::expression::{Expression, ExpressionKind, ReceiverClassInfo};
@@ -274,7 +274,7 @@ impl OptimizationPass for MethodToFunctionConversionPass {
         OptimizationLevel::O2
     }
 
-    fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
+    fn run(&mut self, program: &mut Program) -> Result<bool, String> {
         let mut changed = false;
         for stmt in &mut program.statements {
             changed |= self.convert_in_statement(stmt);

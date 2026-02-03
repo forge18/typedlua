@@ -2,7 +2,7 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 use std::sync::Arc;
 use typedlua_core::config::CompilerOptions;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
-use typedlua_core::typechecker::TypeChecker;
+use typedlua_core::TypeChecker;
 use typedlua_parser::lexer::Lexer;
 use typedlua_parser::parser::Parser;
 use typedlua_parser::string_interner::StringInterner;
@@ -25,7 +25,7 @@ fn bench_type_checker_simple(c: &mut Criterion) {
             let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
             let mut program = parser.parse().ok()?;
 
-            let mut checker = TypeChecker::new(handler, &interner, &common_ids)
+            let mut checker = TypeChecker::new_with_stdlib(handler, &interner, &common_ids)
                 .with_options(CompilerOptions::default());
             checker.check_program(black_box(&mut program)).ok()
         })
@@ -56,7 +56,7 @@ fn bench_type_checker_function(c: &mut Criterion) {
             let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
             let mut program = parser.parse().ok()?;
 
-            let mut checker = TypeChecker::new(handler, &interner, &common_ids)
+            let mut checker = TypeChecker::new_with_stdlib(handler, &interner, &common_ids)
                 .with_options(CompilerOptions::default());
             checker.check_program(black_box(&mut program)).ok()
         })
@@ -94,7 +94,7 @@ fn bench_type_checker_class(c: &mut Criterion) {
             let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
             let mut program = parser.parse().ok()?;
 
-            let mut checker = TypeChecker::new(handler, &interner, &common_ids)
+            let mut checker = TypeChecker::new_with_stdlib(handler, &interner, &common_ids)
                 .with_options(CompilerOptions::default());
             checker.check_program(black_box(&mut program)).ok()
         })
@@ -141,7 +141,7 @@ fn bench_type_checker_interface(c: &mut Criterion) {
             let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
             let mut program = parser.parse().ok()?;
 
-            let mut checker = TypeChecker::new(handler, &interner, &common_ids)
+            let mut checker = TypeChecker::new_with_stdlib(handler, &interner, &common_ids)
                 .with_options(CompilerOptions::default());
             checker.check_program(black_box(&mut program)).ok()
         })
@@ -173,7 +173,7 @@ fn bench_type_checker_scaling(c: &mut Criterion) {
                 let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
                 let mut program = parser.parse().ok()?;
 
-                let mut checker = TypeChecker::new(handler, &interner, &common_ids)
+                let mut checker = TypeChecker::new_with_stdlib(handler, &interner, &common_ids)
                     .with_options(CompilerOptions::default());
                 checker.check_program(black_box(&mut program)).ok()
             })

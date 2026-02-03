@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
-use typedlua_core::typechecker::TypeChecker;
+use typedlua_core::TypeChecker;
 use typedlua_parser::lexer::Lexer;
 use typedlua_parser::parser::Parser;
 use typedlua_parser::string_interner::StringInterner;
@@ -14,7 +14,8 @@ fn type_check(source: &str) -> Result<(), String> {
     let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
     let mut program = parser.parse().map_err(|e| format!("{:?}", e))?;
 
-    let mut checker = TypeChecker::new(handler, &interner, &common_ids);
+    let mut checker = TypeChecker::new_with_stdlib(handler, &interner, &common_ids)
+        .expect("Failed to load stdlib");
     checker.check_program(&mut program).map_err(|e| e.message)?;
 
     Ok(())

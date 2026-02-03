@@ -11,7 +11,7 @@ use typedlua_core::diagnostics::{
     CollectingDiagnosticHandler as CoreCollectingDiagnosticHandler,
     DiagnosticHandler as CoreDiagnosticHandler, DiagnosticLevel,
 };
-use typedlua_core::typechecker::TypeChecker;
+use typedlua_core::TypeChecker;
 use typedlua_parser::diagnostics::{
     CollectingDiagnosticHandler as ParserCollectingDiagnosticHandler,
     DiagnosticHandler as ParserDiagnosticHandler,

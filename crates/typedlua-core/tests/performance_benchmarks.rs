@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use typedlua_core::codegen::CodeGenerator;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
-use typedlua_core::typechecker::TypeChecker;
+use typedlua_core::TypeChecker;
 use typedlua_parser::lexer::Lexer;
 use typedlua_parser::parser::Parser;
 use typedlua_parser::string_interner::StringInterner;
@@ -102,7 +102,8 @@ fn benchmark_typecheck(source: &str) -> Result<Duration, String> {
 
     // Time only type checking
     let start = Instant::now();
-    let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids);
+    let mut type_checker = TypeChecker::new_with_stdlib(handler.clone(), &interner, &common_ids)
+        .expect("Failed to load stdlib");
     type_checker
         .check_program(&mut program)
         .map_err(|e| e.message)?;
@@ -132,7 +133,8 @@ fn benchmark_full_compile(source: &str) -> Result<Duration, String> {
         .map_err(|e| format!("Parsing failed: {:?}", e))?;
 
     // Type check
-    let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids);
+    let mut type_checker = TypeChecker::new_with_stdlib(handler.clone(), &interner, &common_ids)
+        .expect("Failed to load stdlib");
     type_checker
         .check_program(&mut program)
         .map_err(|e| e.message)?;
@@ -365,7 +367,8 @@ fn benchmark_optimization_level(
         .map_err(|e| format!("Parsing failed: {:?}", e))?;
 
     // Type check (not timed)
-    let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids);
+    let mut type_checker = TypeChecker::new_with_stdlib(handler.clone(), &interner, &common_ids)
+        .expect("Failed to load stdlib");
     type_checker
         .check_program(&mut program)
         .map_err(|e| e.message)?;
@@ -993,7 +996,7 @@ fn test_rich_enum_instance_precomputation() {
 use typedlua_core::cache::{CacheManager, CachedModule};
 use typedlua_core::config::CompilerOptions;
 use typedlua_core::module_resolver::ModuleExports;
-use typedlua_core::typechecker::SerializableSymbolTable;
+use typedlua_core::SerializableSymbolTable;
 
 /// Benchmark incremental compilation: re-typecheck after single-file change
 #[test]
@@ -1057,7 +1060,9 @@ fn test_incremental_retypecheck_single_file_change() {
         let mut program = parser.parse().expect("Parsing failed");
 
         let mut type_checker =
-            TypeChecker::new(handler.clone(), &interner, &common_ids).with_options(config.clone());
+            TypeChecker::new_with_stdlib(handler.clone(), &interner, &common_ids)
+                .expect("Failed to load stdlib")
+                .with_options(config.clone());
         type_checker
             .check_program(&mut program)
             .expect("Type checking failed");
@@ -1106,8 +1111,10 @@ fn test_incremental_retypecheck_single_file_change() {
             let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
             let mut program = parser.parse().expect("Parsing failed");
 
-            let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids)
-                .with_options(config.clone());
+            let mut type_checker =
+                TypeChecker::new_with_stdlib(handler.clone(), &interner, &common_ids)
+                    .expect("Failed to load stdlib")
+                    .with_options(config.clone());
             type_checker
                 .check_program(&mut program)
                 .expect("Type checking failed");
@@ -1191,7 +1198,9 @@ fn test_cache_hit_rate_unchanged_modules() {
         let mut program = parser.parse().expect("Parsing failed");
 
         let mut type_checker =
-            TypeChecker::new(handler.clone(), &interner, &common_ids).with_options(config.clone());
+            TypeChecker::new_with_stdlib(handler.clone(), &interner, &common_ids)
+                .expect("Failed to load stdlib")
+                .with_options(config.clone());
         type_checker
             .check_program(&mut program)
             .expect("Type checking failed");

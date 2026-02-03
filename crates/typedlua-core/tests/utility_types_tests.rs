@@ -17,8 +17,7 @@ fn compile_and_check(source: &str) -> Result<(), String> {
     let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
     let mut ast = parser.parse().map_err(|e| e.to_string())?;
 
-    let mut type_checker =
-        typedlua_core::typechecker::TypeChecker::new(handler.clone(), &interner, &common_ids);
+    let mut type_checker = typedlua_core::TypeChecker::new(handler.clone(), &interner, &common_ids);
     type_checker
         .check_program(&mut ast)
         .map_err(|e| format!("{:?}", e))?;

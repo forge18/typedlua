@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use super::{CacheError, Result};
 use crate::module_resolver::ModuleExports;
-use crate::typechecker::SerializableSymbolTable;
+use crate::SerializableSymbolTable;
 use typedlua_parser::ast::Program;
 
 /// Cached module data
@@ -65,7 +65,7 @@ impl CachedModule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::typechecker::SerializableSymbolTable;
+    use crate::SerializableSymbolTable;
     use typedlua_parser::span::Span;
 
     fn make_test_program() -> Program {

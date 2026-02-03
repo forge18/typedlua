@@ -3,7 +3,7 @@ use std::sync::Arc;
 use typedlua_core::{
     codegen::CodeGenerator,
     diagnostics::{CollectingDiagnosticHandler, DiagnosticHandler, DiagnosticLevel},
-    typechecker::TypeChecker,
+    TypeChecker,
 };
 use typedlua_parser::lexer::Lexer;
 use typedlua_parser::parser::Parser;

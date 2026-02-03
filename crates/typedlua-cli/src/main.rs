@@ -460,7 +460,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
     // Pre-populate registry with cached exports for non-stale files
     for (canonical, cached) in &cached_modules {
         let module_id = ModuleId::new(canonical.clone());
-        let symbol_table = Arc::new(typedlua_core::typechecker::SymbolTable::from_serializable(
+        let symbol_table = Arc::new(typedlua_core::SymbolTable::from_serializable(
             cached.symbol_table.clone(),
         ));
         registry.register_from_cache(module_id, cached.exports.clone(), symbol_table);
@@ -592,7 +592,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
             }
 
             // Type check the program (with module support for import resolution)
-            use typedlua_core::typechecker::TypeChecker;
+            use typedlua_core::TypeChecker;
 
             let module_id = ModuleId::new(canonical.clone());
             let mut type_checker = TypeChecker::new_with_module_support(
@@ -602,7 +602,9 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
                 registry.clone(),
                 module_id.clone(),
                 resolver.clone(),
-            );
+            )
+            .with_stdlib()
+            .expect("Failed to load standard library");
 
             if type_checker.check_program(&mut program).is_err() {
                 return CompilationResult {

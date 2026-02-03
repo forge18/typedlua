@@ -6,7 +6,7 @@ use typedlua_core::fs::{FileSystem, MockFileSystem};
 use typedlua_core::module_resolver::{
     DependencyGraph, ModuleConfig, ModuleId, ModuleRegistry, ModuleResolver,
 };
-use typedlua_core::typechecker::{SymbolTable, TypeChecker};
+use typedlua_core::{SymbolTable, TypeChecker};
 use typedlua_parser::ast::Program;
 use typedlua_parser::lexer::Lexer;
 use typedlua_parser::parser::Parser;
@@ -283,7 +283,9 @@ class Circle implements Shape {
         Arc::new(SymbolTable::new()),
     );
 
-    let mut types_checker = TypeChecker::new(types_handler.clone(), &interner, &common_ids);
+    let mut types_checker =
+        TypeChecker::new_with_stdlib(types_handler.clone(), &interner, &common_ids)
+            .expect("Failed to load stdlib");
     // Type check FIRST to populate symbol table
     let types_result = types_checker.check_program(&mut types_ast);
     if types_result.is_err() || types_handler.has_errors() {
@@ -316,7 +318,9 @@ class Circle implements Shape {
         Arc::new(SymbolTable::new()),
     );
 
-    let mut circle_checker = TypeChecker::new(circle_handler.clone(), &interner, &common_ids);
+    let mut circle_checker =
+        TypeChecker::new_with_stdlib(circle_handler.clone(), &interner, &common_ids)
+            .expect("Failed to load stdlib");
     // Type check FIRST to populate symbol table
     let circle_result = circle_checker.check_program(&mut circle_ast);
     if let Err(ref e) = circle_result {
@@ -384,7 +388,9 @@ const user: User = { name: "Alice", age: 30 }
         Arc::new(SymbolTable::new()),
     );
 
-    let mut types_checker = TypeChecker::new(types_handler.clone(), &interner, &common_ids);
+    let mut types_checker =
+        TypeChecker::new_with_stdlib(types_handler.clone(), &interner, &common_ids)
+            .expect("Failed to load stdlib");
     types_checker
         .check_program(&mut types_ast)
         .expect("Failed to type check types.tl");

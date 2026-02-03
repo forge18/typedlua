@@ -1,5 +1,5 @@
 use crate::config::OptimizationLevel;
-use crate::errors::CompilationError;
+
 use crate::optimizer::OptimizationPass;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -28,7 +28,7 @@ impl OptimizationPass for ConstantFoldingPass {
         OptimizationLevel::O1
     }
 
-    fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
+    fn run(&mut self, program: &mut Program) -> Result<bool, String> {
         let mut changed = false;
 
         for stmt in &mut program.statements {
@@ -246,7 +246,7 @@ impl OptimizationPass for DeadCodeEliminationPass {
         OptimizationLevel::O1
     }
 
-    fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
+    fn run(&mut self, program: &mut Program) -> Result<bool, String> {
         let original_len = program.statements.len();
         self.eliminate_dead_code(&mut program.statements);
         Ok(program.statements.len() != original_len)
@@ -323,7 +323,7 @@ impl OptimizationPass for AlgebraicSimplificationPass {
         OptimizationLevel::O1
     }
 
-    fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
+    fn run(&mut self, program: &mut Program) -> Result<bool, String> {
         let mut changed = false;
 
         for stmt in &mut program.statements {
@@ -545,7 +545,7 @@ impl OptimizationPass for TablePreallocationPass {
         OptimizationLevel::O1
     }
 
-    fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
+    fn run(&mut self, program: &mut Program) -> Result<bool, String> {
         // Analyze table constructors and collect size information
         // This pass doesn't modify the AST directly, but could add metadata
         // for codegen to generate table.create() calls with size hints
@@ -677,7 +677,7 @@ impl OptimizationPass for GlobalLocalizationPass {
         OptimizationLevel::O1
     }
 
-    fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
+    fn run(&mut self, program: &mut Program) -> Result<bool, String> {
         // Apply global localization to the top-level program statements as a block.
         // This ensures that frequently used globals are hoisted to a local variable at the program scope.
         let mut block = Block {
@@ -1354,7 +1354,7 @@ impl OptimizationPass for FunctionInliningPass {
         OptimizationLevel::O2
     }
 
-    fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
+    fn run(&mut self, program: &mut Program) -> Result<bool, String> {
         self.next_temp_id = 0;
         self.functions.clear();
 
@@ -2283,7 +2283,7 @@ impl OptimizationPass for LoopOptimizationPass {
         OptimizationLevel::O2
     }
 
-    fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
+    fn run(&mut self, program: &mut Program) -> Result<bool, String> {
         let mut changed = false;
         let mut i = 0;
 
@@ -2993,7 +2993,7 @@ impl OptimizationPass for StringConcatOptimizationPass {
         OptimizationLevel::O2
     }
 
-    fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
+    fn run(&mut self, program: &mut Program) -> Result<bool, String> {
         self.next_temp_id = 0;
 
         let mut changed = false;
@@ -3580,7 +3580,7 @@ impl OptimizationPass for DeadStoreEliminationPass {
         OptimizationLevel::O2
     }
 
-    fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
+    fn run(&mut self, program: &mut Program) -> Result<bool, String> {
         let mut program_block = Block {
             statements: std::mem::take(&mut program.statements),
             span: program.span,
@@ -4434,7 +4434,7 @@ impl OptimizationPass for TailCallOptimizationPass {
         OptimizationLevel::O2
     }
 
-    fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
+    fn run(&mut self, program: &mut Program) -> Result<bool, String> {
         for stmt in &program.statements {
             self.analyze_statement_tail_calls(stmt);
         }
@@ -4503,96 +4503,10 @@ impl TailCallOptimizationPass {
 }
 
 // =============================================================================
-// O3: Operator Inlining Pass
-// =============================================================================
-
-/// Operator inlining pass
-/// Inlines operator overload implementations when types are known
-#[allow(dead_code)]
-pub struct OperatorInliningPass;
-
-impl OptimizationPass for OperatorInliningPass {
-    fn name(&self) -> &'static str {
-        "operator-inlining"
-    }
-
-    fn min_level(&self) -> OptimizationLevel {
-        OptimizationLevel::O3
-    }
-
-    fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
-        // Collect classes that might have operator overloads
-        // Note: Operator overloads are implemented as methods in TypedLua
-        let mut _class_count = 0;
-
-        for stmt in &program.statements {
-            if let Statement::Class(class) = stmt {
-                // Count classes for potential operator analysis
-                _class_count += 1;
-                // Methods could potentially be operators (based on naming convention)
-                let _method_count = class
-                    .members
-                    .iter()
-                    .filter(|m| {
-                        matches!(m, typedlua_parser::ast::statement::ClassMember::Method(_))
-                    })
-                    .count();
-            }
-        }
-
-        // Analysis only - actual inlining requires type information
-        Ok(false)
-    }
-}
-
-// =============================================================================
-// O3: Interface Method Inlining Pass
-// =============================================================================
-
-/// Interface method inlining pass
-/// Inlines interface method implementations when type is known
-#[allow(dead_code)]
-pub struct InterfaceMethodInliningPass;
-
-impl OptimizationPass for InterfaceMethodInliningPass {
-    fn name(&self) -> &'static str {
-        "interface-method-inlining"
-    }
-
-    fn min_level(&self) -> OptimizationLevel {
-        OptimizationLevel::O3
-    }
-
-    fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
-        // Collect interface methods
-        let mut _interface_method_count = 0;
-
-        for stmt in &program.statements {
-            if let Statement::Interface(iface) = stmt {
-                // Count methods in interfaces for potential inlining analysis
-                _interface_method_count += iface
-                    .members
-                    .iter()
-                    .filter(|m| {
-                        matches!(
-                            m,
-                            typedlua_parser::ast::statement::InterfaceMember::Method(_)
-                        )
-                    })
-                    .count();
-            }
-        }
-
-        // Analysis only
-        Ok(false)
-    }
-}
-
-// =============================================================================
 // O3: Generic Specialization Pass
 // =============================================================================
 
-use crate::typechecker::{build_substitutions, instantiate_function_declaration};
+use crate::{build_substitutions, instantiate_function_declaration};
 use rustc_hash::FxHashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -5024,7 +4938,7 @@ impl OptimizationPass for GenericSpecializationPass {
         OptimizationLevel::O3
     }
 
-    fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
+    fn run(&mut self, program: &mut Program) -> Result<bool, String> {
         // Reset state for fresh run
         self.specializations.clear();
         self.generic_functions.clear();

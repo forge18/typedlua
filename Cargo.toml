@@ -81,3 +81,13 @@ strip = true
 # Abort on panic instead of unwinding (smaller, faster binaries)
 # TypedLua doesn't rely on panic unwinding, so this is safe
 panic = "abort"
+
+# Patch external dependencies to use local versions
+[patch.crates-io]
+typedlua-parser = { path = "crates/typedlua-parser" }
+
+[patch."https://github.com/forge18/typed-lua.git"]
+typedlua-parser = { path = "crates/typedlua-parser" }
+
+[patch."https://github.com/forge18/typedlua-parser.git"]
+typedlua-parser = { path = "crates/typedlua-parser" }

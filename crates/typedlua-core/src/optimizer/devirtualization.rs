@@ -8,7 +8,7 @@
 //! by the O2 `MethodToFunctionConversionPass`.
 
 use crate::config::OptimizationLevel;
-use crate::errors::CompilationError;
+
 use crate::optimizer::OptimizationPass;
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
@@ -139,15 +139,11 @@ impl ClassHierarchy {
 /// Analyzes method calls and marks safe ones for devirtualization by setting
 /// the `receiver_class` field. The actual transformation is performed by
 /// the O2 `MethodToFunctionConversionPass`.
-pub struct DevirtualizationPass {
-    /// Interner for debugging/diagnostics (currently unused but kept for future use)
-    #[allow(dead_code)]
-    interner: Rc<StringInterner>,
-}
+pub struct DevirtualizationPass;
 
 impl DevirtualizationPass {
-    pub fn new(interner: Rc<StringInterner>) -> Self {
-        Self { interner }
+    pub fn new(_interner: Rc<StringInterner>) -> Self {
+        Self
     }
 
     /// Process a statement, looking for method calls to devirtualize
@@ -439,7 +435,7 @@ impl OptimizationPass for DevirtualizationPass {
         OptimizationLevel::O3
     }
 
-    fn run(&mut self, program: &mut Program) -> Result<bool, CompilationError> {
+    fn run(&mut self, program: &mut Program) -> Result<bool, String> {
         // Build class hierarchy for safety analysis
         let hierarchy = ClassHierarchy::build(program);
 
@@ -454,11 +450,8 @@ impl OptimizationPass for DevirtualizationPass {
 }
 
 impl Default for DevirtualizationPass {
-    #[allow(clippy::arc_with_non_send_sync)]
     fn default() -> Self {
-        Self {
-            interner: Rc::new(StringInterner::new()),
-        }
+        Self
     }
 }
 

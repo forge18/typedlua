@@ -22,6 +22,7 @@ tracing.workspace = true
 typedlua-runtime = { path = "../typedlua-runtime" }
 lua-sourcemap = { path = "../typedlua-sourcemap" }
 typedlua-parser = { path = "../typedlua-parser" }
+typedlua-typechecker = { git = "https://github.com/forge18/typedlua-typechecker", branch = "main" }
 
 [dev-dependencies]
 insta.workspace = true

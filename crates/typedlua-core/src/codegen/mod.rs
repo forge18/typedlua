@@ -545,13 +545,13 @@ impl CodeGenerator {
 
 #[cfg(test)]
 mod tests {
+    use super::CodeGenerator;
+    use super::LuaTarget;
     use crate::codegen::strategies::CodeGenStrategy;
     use crate::codegen::strategies::{
         lua51::Lua51Strategy, lua52::Lua52Strategy, lua53::Lua53Strategy,
     };
     use crate::diagnostics::CollectingDiagnosticHandler;
-    use crate::CodeGenerator;
-    use crate::LuaTarget;
     use std::rc::Rc;
     use std::sync::Arc;
     use typedlua_parser::ast::expression::BinaryOp;

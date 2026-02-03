@@ -8,7 +8,7 @@ use typedlua_core::fs::MockFileSystem;
 use typedlua_core::module_resolver::{
     LuaFilePolicy, ModuleConfig, ModuleId, ModuleRegistry, ModuleResolver,
 };
-use typedlua_core::typechecker::TypeChecker;
+use typedlua_core::TypeChecker;
 use typedlua_parser::lexer::Lexer;
 use typedlua_parser::parser::Parser;
 use typedlua_parser::string_interner::StringInterner;
@@ -30,8 +30,9 @@ fn compile_and_check(source: &str) -> Result<String, String> {
 
     let options = CompilerOptions::default();
 
-    let mut type_checker =
-        TypeChecker::new(handler.clone(), &interner, &common_ids).with_options(options);
+    let mut type_checker = TypeChecker::new_with_stdlib(handler.clone(), &interner, &common_ids)
+        .expect("Failed to load stdlib")
+        .with_options(options);
     type_checker
         .check_program(&mut program)
         .map_err(|e| e.message)?;
@@ -105,6 +106,8 @@ fn compile_modules_with_registry(modules: Vec<(&str, &str)>) -> Result<Vec<Strin
             module_id.clone(),
             resolver.clone(),
         )
+        .with_stdlib()
+        .expect("Failed to load stdlib")
         .with_options(options.clone());
 
         type_checker
