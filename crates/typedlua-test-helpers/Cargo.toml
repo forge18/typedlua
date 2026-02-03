@@ -7,8 +7,13 @@ license.workspace = true
 repository.workspace = true
 description = "Test utilities and fixtures for TypedLua"
 
+[features]
+lsp = ["typedlua-lsp", "lsp-types"]
+
 [dependencies]
 typedlua-core = { path = "../typedlua-core" }
 typedlua-parser = { git = "https://github.com/forge18/typedlua-parser.git" }
+typedlua-lsp = { path = "../typedlua-lsp", optional = true }
+lsp-types = { version = "0.97", optional = true }
 
 [dev-dependencies]
