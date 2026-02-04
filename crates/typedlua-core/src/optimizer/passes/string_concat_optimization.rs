@@ -591,11 +591,16 @@ impl StringConcatOptimizationPass {
         *expr = concat_call;
     }
 
+    #[cold]
+    fn unreachable_interner(&self) -> ! {
+        unsafe { std::hint::unreachable_unchecked() }
+    }
+
     fn interner_get_or_intern(&self, name: &str) -> StringId {
         if let Some(interner) = self.get_interner() {
             interner.get_or_intern(name)
         } else {
-            unsafe { std::hint::unreachable_unchecked() }
+            self.unreachable_interner()
         }
     }
 

@@ -127,7 +127,12 @@ impl Container {
             .map_err(|e| e.message)?;
 
         let mut optimizer = Optimizer::new(level, typecheck_handler.clone(), interner.clone());
-        let _ = optimizer.optimize(&mut program);
+        if let Err(err_msg) = optimizer.optimize(&mut program) {
+            typecheck_handler.warning(
+                typedlua_parser::span::Span::dummy(),
+                &format!("Optimization warning: {}", err_msg),
+            );
+        }
 
         let mut codegen = CodeGenerator::new(interner.clone());
         let output = codegen.generate(&mut program);
@@ -183,7 +188,12 @@ impl Container {
             .map_err(|e| e.message)?;
 
         let mut optimizer = Optimizer::new(level, typecheck_handler.clone(), interner.clone());
-        let _ = optimizer.optimize(&mut program);
+        if let Err(err_msg) = optimizer.optimize(&mut program) {
+            typecheck_handler.warning(
+                typedlua_parser::span::Span::dummy(),
+                &format!("Optimization warning: {}", err_msg),
+            );
+        }
 
         let mut codegen = CodeGenerator::new(interner.clone());
         let output = codegen.generate(&mut program);

@@ -985,6 +985,11 @@ impl AggressiveInliningPass {
         subst
     }
 
+    #[cold]
+    fn unreachable_interner(&self) -> ! {
+        unsafe { std::hint::unreachable_unchecked() }
+    }
+
     fn create_temp_variable(&mut self) -> StringId {
         let name = format!("_inline_result_{}", self.next_temp_id);
         self.next_temp_id += 1;
@@ -994,7 +999,7 @@ impl AggressiveInliningPass {
         );
         match &self.interner {
             Some(interner) => interner.get_or_intern(&name),
-            None => unsafe { std::hint::unreachable_unchecked() },
+            None => self.unreachable_interner(),
         }
     }
 
