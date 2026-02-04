@@ -1,7 +1,9 @@
 use super::codegen::CodeGenerator;
 use super::config::{CompilerConfig, OptimizationLevel};
-use super::diagnostics::{ConsoleDiagnosticHandler, DiagnosticHandler};
-use super::fs::{FileSystem, RealFileSystem};
+use super::diagnostics::{
+    CollectingDiagnosticHandler, ConsoleDiagnosticHandler, DiagnosticHandler,
+};
+use super::fs::{FileSystem, MockFileSystem, RealFileSystem};
 use super::optimizer::Optimizer;
 use std::any::{Any, TypeId};
 use std::rc::Rc;
@@ -84,6 +86,19 @@ impl DiContainer {
         );
 
         container
+    }
+
+    pub fn test_default() -> Self {
+        let config = CompilerConfig::default();
+        let diagnostics = Arc::new(CollectingDiagnosticHandler::new());
+        let fs = Arc::new(MockFileSystem::new());
+        Self::test(config, diagnostics, fs)
+    }
+
+    pub fn test_with_config(config: CompilerConfig) -> Self {
+        let diagnostics = Arc::new(CollectingDiagnosticHandler::new());
+        let fs = Arc::new(MockFileSystem::new());
+        Self::test(config, diagnostics, fs)
     }
 
     pub fn register<T>(
@@ -294,7 +309,6 @@ impl TypeCheckHelper for DiContainer {
 }
 
 use std::collections::HashMap;
-use typedlua_typechecker::diagnostics::CollectingDiagnosticHandler;
 
 pub trait TypeCheckHelper {
     fn type_check_source(&self, source: &str) -> Result<(), String>;
