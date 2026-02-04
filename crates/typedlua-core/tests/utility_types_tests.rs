@@ -4,7 +4,7 @@ use typedlua_core::di::DiContainer;
 /// Helper to parse and type-check source code
 fn compile_and_check(source: &str) -> Result<(), String> {
     let config = CompilerConfig::default();
-    let container = DiContainer::production(config);
+    let mut container = DiContainer::production(config);
     container.compile(source)?;
     Ok(())
 }

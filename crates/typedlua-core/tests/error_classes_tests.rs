@@ -3,7 +3,7 @@ use typedlua_core::di::DiContainer;
 
 fn compile_and_check(source: &str) -> Result<String, String> {
     let config = CompilerConfig::default();
-    let container = DiContainer::production(config);
+    let mut container = DiContainer::production(config);
     container.compile_with_stdlib(source)
 }
 

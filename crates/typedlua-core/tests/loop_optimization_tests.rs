@@ -3,7 +3,7 @@ use typedlua_core::di::DiContainer;
 
 fn compile_with_opt_level(source: &str, level: OptimizationLevel) -> Result<String, String> {
     let config = CompilerConfig::default();
-    let container = DiContainer::production(config);
+    let mut container = DiContainer::production(config);
     container.compile_with_stdlib_and_optimization(source, level)
 }
 

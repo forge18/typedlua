@@ -3,7 +3,7 @@ use typedlua_core::di::DiContainer;
 
 fn compile(source: &str) -> Result<String, String> {
     let config = CompilerConfig::default();
-    let container = DiContainer::production(config);
+    let mut container = DiContainer::production(config);
     container.compile_with_stdlib(source)
 }
 
@@ -16,7 +16,7 @@ fn compile_with_target(source: &str, target: &str) -> Result<String, String> {
         "5.4" => typedlua_core::config::LuaVersion::Lua54,
         _ => typedlua_core::config::LuaVersion::Lua54,
     };
-    let container = DiContainer::test(
+    let mut container = DiContainer::test(
         config,
         std::sync::Arc::new(typedlua_core::diagnostics::CollectingDiagnosticHandler::new()),
         std::sync::Arc::new(typedlua_core::fs::RealFileSystem::new()),

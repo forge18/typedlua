@@ -13,6 +13,7 @@ use typedlua_parser::string_interner::StringInterner;
 use typedlua_parser::{Lexer, Parser};
 use typedlua_typechecker::TypeChecker;
 
+#[derive(Clone, Copy)]
 pub enum ServiceLifetime {
     Transient,
     Singleton,
@@ -116,33 +117,31 @@ impl DiContainer {
         self.factories.insert(type_id, (boxed_factory, lifetime));
     }
 
-    pub fn resolve<T: Clone + 'static + Send + Sync>(&self) -> Option<T> {
+    pub fn resolve<T: Clone + 'static + Send + Sync>(&mut self) -> Option<T> {
         let type_id = TypeId::of::<T>();
 
-        if let Some((_, ServiceLifetime::Singleton)) = self.factories.get(&type_id) {
+        let is_singleton = self
+            .factories
+            .get(&type_id)
+            .map_or(false, |(_, l)| matches!(*l, ServiceLifetime::Singleton));
+
+        if is_singleton {
             if let Some(cached) = self.singletons.get(&type_id) {
                 return cached.downcast_ref::<T>().cloned();
             }
         }
 
-        if let Some((factory, lifetime)) = self.factories.get(&type_id) {
-            let factory = factory.clone();
+        if let Some((factory, lifetime)) = self.factories.get(&type_id).cloned() {
             let result = (factory)(self);
 
             if let ServiceLifetime::Singleton = lifetime {
                 let arc_result: Arc<dyn Any + Send + Sync> = Arc::from(result);
                 let cloned = arc_result.clone();
                 self.singletons.insert(type_id, arc_result);
-                return cloned.downcast::<T>().ok().map(|v| {
-                    let boxed: Box<T> = v;
-                    *boxed
-                });
+                return cloned.downcast::<T>().ok().map(|arc_t| (*arc_t).clone());
             }
 
-            return result.downcast::<T>().ok().map(|v| {
-                let boxed: Box<T> = v;
-                *boxed
-            });
+            return result.downcast::<T>().ok().map(|boxed| *boxed);
         }
 
         None
@@ -160,34 +159,34 @@ impl DiContainer {
         self.singletons.len()
     }
 
-    pub fn has_errors(&self) -> bool {
+    pub fn has_errors(&mut self) -> bool {
         self.resolve::<Arc<dyn DiagnosticHandler>>()
             .map(|h| h.has_errors())
             .unwrap_or(false)
     }
 
-    pub fn error_count(&self) -> usize {
+    pub fn error_count(&mut self) -> usize {
         self.resolve::<Arc<dyn DiagnosticHandler>>()
             .map(|h| h.error_count())
             .unwrap_or(0)
     }
 
-    pub fn warning_count(&self) -> usize {
+    pub fn warning_count(&mut self) -> usize {
         self.resolve::<Arc<dyn DiagnosticHandler>>()
             .map(|h| h.warning_count())
             .unwrap_or(0)
     }
 
-    pub fn config(&self) -> Arc<CompilerConfig> {
+    pub fn config(&mut self) -> Arc<CompilerConfig> {
         self.resolve::<Arc<CompilerConfig>>().unwrap()
     }
 
-    pub fn compile(&self, source: &str) -> Result<String, String> {
+    pub fn compile(&mut self, source: &str) -> Result<String, String> {
         self.compile_with_optimization(source, OptimizationLevel::O0)
     }
 
     pub fn compile_with_optimization(
-        &self,
+        &mut self,
         source: &str,
         level: OptimizationLevel,
     ) -> Result<String, String> {
@@ -228,12 +227,12 @@ impl DiContainer {
         Ok(output)
     }
 
-    pub fn compile_with_stdlib(&self, source: &str) -> Result<String, String> {
+    pub fn compile_with_stdlib(&mut self, source: &str) -> Result<String, String> {
         self.compile_with_stdlib_and_optimization(source, OptimizationLevel::O0)
     }
 
     pub fn compile_with_stdlib_and_optimization(
-        &self,
+        &mut self,
         source: &str,
         level: OptimizationLevel,
     ) -> Result<String, String> {
@@ -324,7 +323,7 @@ mod tests {
     #[test]
     fn test_container_creation() {
         let config = CompilerConfig::default();
-        let container = DiContainer::production(config);
+        let mut container = DiContainer::production(config);
 
         assert_eq!(container.error_count(), 0);
         assert!(!container.has_errors());
@@ -336,7 +335,7 @@ mod tests {
         let diagnostics = Arc::new(CollectingDiagnosticHandler::new());
         let fs = Arc::new(MockFileSystem::new());
 
-        let container = DiContainer::test(config, diagnostics.clone(), fs);
+        let mut container = DiContainer::test(config, diagnostics.clone(), fs);
 
         container
             .resolve::<Arc<dyn DiagnosticHandler>>()
@@ -352,7 +351,7 @@ mod tests {
         let mut config = CompilerConfig::default();
         config.compiler_options.strict_null_checks = false;
 
-        let container = DiContainer::production(config);
+        let mut container = DiContainer::production(config);
 
         assert!(!container.config().compiler_options.strict_null_checks);
     }
@@ -365,7 +364,7 @@ mod tests {
         "#;
 
         let config = CompilerConfig::default();
-        let container = DiContainer::production(config);
+        let mut container = DiContainer::production(config);
 
         let result = container.compile(source);
         assert!(result.is_ok());
@@ -381,7 +380,7 @@ mod tests {
         "#;
 
         let config = CompilerConfig::default();
-        let container = DiContainer::production(config);
+        let mut container = DiContainer::production(config);
 
         let result = container.compile_with_optimization(source, OptimizationLevel::O2);
         assert!(result.is_ok());
@@ -395,7 +394,7 @@ mod tests {
         "#;
 
         let config = CompilerConfig::default();
-        let container = DiContainer::production(config);
+        let mut container = DiContainer::production(config);
 
         let result = container.compile_with_stdlib(source);
         assert!(result.is_ok());
@@ -411,7 +410,7 @@ mod tests {
         "#;
 
         let config = CompilerConfig::default();
-        let container = DiContainer::production(config);
+        let mut container = DiContainer::production(config);
 
         let result = container.compile_with_stdlib_and_optimization(source, OptimizationLevel::O2);
         assert!(result.is_ok());
@@ -425,7 +424,7 @@ mod tests {
         "#;
 
         let config = CompilerConfig::default();
-        let container = DiContainer::production(config);
+        let mut container = DiContainer::production(config);
 
         let result = container.compile(source);
         assert!(result.is_ok() || container.has_errors());
@@ -440,7 +439,7 @@ mod tests {
         "#;
 
         let config = CompilerConfig::default();
-        let container = DiContainer::production(config);
+        let mut container = DiContainer::production(config);
 
         let _ = container.compile(source);
         let _ = container.warning_count();
@@ -449,7 +448,7 @@ mod tests {
     #[test]
     fn test_container_file_system_access() {
         let config = CompilerConfig::default();
-        let container = DiContainer::production(config);
+        let mut container = DiContainer::production(config);
 
         let _fs = container.resolve::<Arc<dyn FileSystem>>();
         assert!(true);
@@ -458,7 +457,7 @@ mod tests {
     #[test]
     fn test_container_default_options() {
         let config = CompilerConfig::default();
-        let container = DiContainer::production(config);
+        let mut container = DiContainer::production(config);
 
         let cfg = container.config();
         assert!(cfg.compiler_options.strict_null_checks);
@@ -477,12 +476,13 @@ mod tests {
     #[test]
     fn test_transient_service() {
         let mut container = DiContainer::new();
-        let mut counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter_for_check = counter.clone();
 
         container.register(
             move |_| {
                 counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                Arc::new(counter.clone()) as Arc<std::sync::atomic::AtomicUsize>
+                counter.clone() as Arc<std::sync::atomic::AtomicUsize>
             },
             ServiceLifetime::Transient,
         );
@@ -491,7 +491,10 @@ mod tests {
         let _ = container.resolve::<Arc<std::sync::atomic::AtomicUsize>>();
         let _ = container.resolve::<Arc<std::sync::atomic::AtomicUsize>>();
 
-        assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 3);
+        assert_eq!(
+            counter_for_check.load(std::sync::atomic::Ordering::SeqCst),
+            3
+        );
     }
 
     #[test]
@@ -503,15 +506,15 @@ mod tests {
         container.register(
             move |_| {
                 counter_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let value = *counter_clone.load(std::sync::atomic::Ordering::SeqCst);
-                Arc::new(value) as Arc<i32>
+                let value = counter_clone.load(std::sync::atomic::Ordering::SeqCst);
+                Arc::new(value) as Arc<usize>
             },
             ServiceLifetime::Singleton,
         );
 
-        let _ = container.resolve::<Arc<i32>>();
-        let _ = container.resolve::<Arc<i32>>();
-        let _ = container.resolve::<Arc<i32>>();
+        let _ = container.resolve::<Arc<usize>>();
+        let _ = container.resolve::<Arc<usize>>();
+        let _ = container.resolve::<Arc<usize>>();
 
         assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 1);
         assert_eq!(container.singleton_count(), 1);
