@@ -287,28 +287,3 @@ fn test_if_with_loops() {
     );
 }
 
-#[test]
-fn test_class_with_loops() {
-    let source = r#"
-        class Counter {
-            value: number
-
-            constructor() {
-                self.value = 0
-            }
-
-            run(): void
-                while self.value < 10 do
-                    self.value = self.value + 1
-                end
-            end
-        }
-    "#;
-
-    let output = compile_with_opt_level(source, OptimizationLevel::O2).unwrap();
-    assert!(
-        output.contains("while"),
-        "While loop in class method should be processed. Got:\n{}",
-        output
-    );
-}

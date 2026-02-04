@@ -1,4 +1,5 @@
 use clap::Parser;
+use glob::glob;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 use tracing_subscriber::EnvFilter;
@@ -114,6 +115,9 @@ fn main() -> anyhow::Result<()> {
 
     // Load configuration
     let (config, files) = load_config_and_files(&cli)?;
+
+    // Expand glob patterns to discover all files
+    let files = expand_glob_patterns(&files, &config)?;
 
     // Validate that we have input files
     if files.is_empty() {
@@ -349,6 +353,210 @@ fn load_config_and_files(
     Ok((config, files))
 }
 
+/// Expand glob patterns in the input files and config
+fn expand_glob_patterns(
+    cli_files: &[PathBuf],
+    config: &typedlua_core::config::CompilerConfig,
+) -> anyhow::Result<Vec<PathBuf>> {
+    use std::collections::HashSet;
+
+    let mut files: HashSet<PathBuf> = HashSet::new();
+
+    // 1. Add explicitly specified CLI files (expand if glob pattern)
+    for file in cli_files {
+        let path_str = file.to_string_lossy();
+        if path_str.contains('*') {
+            // Glob pattern - expand
+            for path in (glob(&path_str)?).flatten() {
+                if path.extension().is_some_and(|e| e == "tl") {
+                    files.insert(path);
+                }
+            }
+        } else {
+            // Explicit file - add if exists and is .tl
+            if file.exists() && file.extension().is_some_and(|e| e == "tl") {
+                files.insert(file.clone());
+            }
+        }
+    }
+
+    // 2. Expand include patterns from config
+    for pattern in &config.include {
+        let resolved_pattern = resolve_path_pattern(pattern, &std::env::current_dir()?)?;
+        for path in (glob(&resolved_pattern)?).flatten() {
+            if path.extension().is_some_and(|e| e == "tl") {
+                // Skip excluded patterns
+                if !is_excluded(&path, &config.exclude, &std::env::current_dir()?) {
+                    files.insert(path);
+                }
+            }
+        }
+    }
+
+    // 3. Convert to vec and sort
+    let mut result: Vec<PathBuf> = files.into_iter().collect();
+    result.sort();
+
+    Ok(result)
+}
+
+/// Resolve a glob pattern to an absolute path
+fn resolve_path_pattern(pattern: &str, base: &Path) -> anyhow::Result<String> {
+    let path = base.join(pattern);
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Check if a file matches any exclusion pattern
+fn is_excluded(path: &Path, exclude_patterns: &[String], base: &Path) -> bool {
+    let path_str = path.to_string_lossy();
+    for pattern in exclude_patterns {
+        let resolved_pattern = resolve_path_pattern(pattern, base).unwrap_or_default();
+        // Simple substring check for now
+        if path_str.contains(&resolved_pattern) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Represents a collected import
+struct CollectedImport {
+    source: String,
+}
+
+/// Collect all imports from a parsed program (lightweight - only lexer + parser)
+fn collect_imports(
+    source: &str,
+    handler: &std::sync::Arc<typedlua_core::diagnostics::CollectingDiagnosticHandler>,
+) -> anyhow::Result<Vec<CollectedImport>> {
+    use typedlua_parser::lexer::Lexer;
+    use typedlua_parser::parser::Parser;
+    use typedlua_parser::string_interner::StringInterner;
+
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let interner = std::rc::Rc::new(interner);
+
+    // Lex the source
+    let mut lexer = Lexer::new(source, handler.clone(), &interner);
+    let tokens = lexer.tokenize()?;
+
+    // Parse the tokens
+    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
+    let program = parser.parse()?;
+
+    // Extract imports
+    let mut imports = Vec::new();
+    for stmt in &program.statements {
+        if let typedlua_parser::ast::statement::Statement::Import(import_decl) = stmt {
+            imports.push(CollectedImport {
+                source: import_decl.source.clone(),
+            });
+        }
+    }
+
+    Ok(imports)
+}
+
+/// Result of dependency discovery
+struct DependencyResult {
+    ordered_files: Vec<PathBuf>,
+}
+
+/// Discover dependencies and determine compilation order
+fn discover_dependencies(
+    files: &[PathBuf],
+    fs: &std::sync::Arc<dyn typedlua_core::fs::FileSystem>,
+    resolver: &typedlua_core::module_resolver::ModuleResolver,
+) -> anyhow::Result<DependencyResult> {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use typedlua_core::diagnostics::{CollectingDiagnosticHandler, DiagnosticHandler};
+    use typedlua_core::module_resolver::{DependencyGraph, ModuleId};
+
+    // 1. Build dependency graph
+    let mut dep_graph = DependencyGraph::new();
+    let mut file_map: HashMap<PathBuf, PathBuf> = HashMap::new();
+
+    info!("Discovering dependencies for {} files...", files.len());
+
+    for file_path in files {
+        let canonical = file_path
+            .canonicalize()
+            .unwrap_or_else(|_| file_path.clone());
+        file_map.insert(canonical.clone(), file_path.clone());
+
+        // Read file
+        let source = match fs.read_file(file_path) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!("Failed to read {:?}: {}", file_path, e);
+                continue;
+            }
+        };
+
+        // Create lightweight handler for parse errors
+        let handler = Arc::new(CollectingDiagnosticHandler::new());
+
+        // Collect imports
+        let imports = match collect_imports(&source, &handler) {
+            Ok(imports) => imports,
+            Err(e) => {
+                warn!("Failed to parse {:?}: {}", file_path, e);
+                if handler.has_errors() {
+                    // Could print warnings here
+                }
+                continue;
+            }
+        };
+
+        // Resolve imports to module IDs
+        let module_id = ModuleId::new(canonical.clone());
+        let mut dependencies: Vec<ModuleId> = Vec::new();
+
+        for import in &imports {
+            match resolver.resolve(&import.source, file_path) {
+                Ok(dep_id) => {
+                    dependencies.push(dep_id);
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to resolve import '{}' in {:?}: {}",
+                        import.source, file_path, e
+                    );
+                }
+            }
+        }
+
+        // Add to dependency graph
+        dep_graph.add_module(module_id, dependencies);
+    }
+
+    // 2. Get topological order (also validates - detects cycles)
+    info!("Computing compilation order...");
+    let ordered_ids = match dep_graph.topological_sort() {
+        Ok(ids) => ids,
+        Err(e) => {
+            return Err(anyhow::anyhow!("{}", e));
+        }
+    };
+
+    // 3. Convert ModuleIds back to PathBufs
+    let mut ordered_files: Vec<PathBuf> = Vec::new();
+    for module_id in ordered_ids {
+        let path = module_id.path();
+        if let Some(original_path) = file_map.get(path) {
+            ordered_files.push(original_path.clone());
+        }
+    }
+
+    info!("Compilation order: {} files", ordered_files.len());
+    for (i, file) in ordered_files.iter().enumerate() {
+        debug!("  {}. {:?}", i + 1, file);
+    }
+
+    Ok(DependencyResult { ordered_files })
+}
+
 /// Result of compiling a single file
 struct CompilationResult {
     file_path: PathBuf,
@@ -371,7 +579,6 @@ struct CompilationError {
 
 /// Compile the input files
 fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Result<()> {
-    use rayon::prelude::*;
     use rustc_hash::FxHashSet;
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -390,7 +597,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
     // --- DI Container setup ---
     let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let compiler_config = CompilerConfig::default();
-    let container = typedlua_core::di::DiContainer::production(compiler_config);
+    let mut container = typedlua_core::di::DiContainer::production(compiler_config);
     let use_cache = !cli.no_cache;
 
     // Determine which files need recompilation
@@ -448,11 +655,16 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
     // --- Module registry and resolver for cross-file type resolution ---
     let registry = Arc::new(ModuleRegistry::new());
 
+    // Resolve FileSystem from DI Container for use in parallel section
+    let file_system = container
+        .resolve::<Arc<dyn typedlua_core::fs::FileSystem>>()
+        .unwrap();
+
     // Create module resolver using FileSystem from DI Container
     let module_config =
         ModuleConfig::from_compiler_options(&CompilerOptions::default(), &project_root);
     let resolver = Arc::new(ModuleResolver::new(
-        container.file_system().clone(),
+        file_system.clone(),
         module_config,
         project_root.clone(),
     ));
@@ -466,10 +678,19 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
         registry.register_from_cache(module_id, cached.exports.clone(), symbol_table);
     }
 
+    // --- Discover dependencies and determine compilation order ---
+    let dep_result = match discover_dependencies(&cli.files, &file_system, &resolver) {
+        Ok(result) => result,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+    };
+    let ordered_files = dep_result.ordered_files;
+
     // --- Compile files ---
-    let results: Vec<CompilationResult> = cli
-        .files
-        .par_iter()
+    let results: Vec<CompilationResult> = ordered_files
+        .iter()
         .map(|file_path| {
             let canonical = file_path
                 .canonicalize()
@@ -530,7 +751,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
             debug!("Compiling {:?}...", file_path);
 
             // Read input file using FileSystem abstraction from DI Container
-            let source = match container.file_system().read_file(file_path) {
+            let source = match file_system.read_file(file_path) {
                 Ok(s) => s,
                 Err(e) => {
                     return CompilationResult {
@@ -559,7 +780,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
                         file_path: file_path.clone(),
                         result: Err(CompilationError {
                             diagnostics: handler.get_diagnostics(),
-                            source,
+                            source: source.to_string(),
                         }),
                     };
                 }
@@ -574,7 +795,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
                         file_path: file_path.clone(),
                         result: Err(CompilationError {
                             diagnostics: handler.get_diagnostics(),
-                            source,
+                            source: source.to_string(),
                         }),
                     };
                 }
@@ -586,7 +807,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
                     file_path: file_path.clone(),
                     result: Err(CompilationError {
                         diagnostics: handler.get_diagnostics(),
-                        source,
+                        source: source.to_string(),
                     }),
                 };
             }
@@ -611,7 +832,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
                     file_path: file_path.clone(),
                     result: Err(CompilationError {
                         diagnostics: handler.get_diagnostics(),
-                        source,
+                        source: source.to_string(),
                     }),
                 };
             }
@@ -622,7 +843,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
                     file_path: file_path.clone(),
                     result: Err(CompilationError {
                         diagnostics: handler.get_diagnostics(),
-                        source,
+                        source: source.to_string(),
                     }),
                 };
             }

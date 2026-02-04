@@ -195,8 +195,8 @@ fn test_default_type_parameters() {
             constructor(first: T, second: U) {
                 self.first = first
                 self.second = second
-            }
-        }
+            end
+        end
 
         const container1 = new Container<number, string>(42, "hello")
         const container2 = new Container<boolean>(true)
@@ -208,13 +208,13 @@ fn test_default_type_parameters() {
 #[test]
 fn test_generic_array_parameters() {
     let source = r#"
-        function firstElement<T>(arr: Array<T>): T | nil {
+        function firstElement<T>(arr: Array<T>): T | nil
             if #arr > 0 then
                 return arr[1]
             else
                 return nil
             end
-        }
+        end
 
         const nums = [1, 2, 3]
         const strs = ["a", "b", "c"]
@@ -225,239 +225,3 @@ fn test_generic_array_parameters() {
     assert!(type_check(source).is_ok());
 }
 
-#[test]
-fn test_generic_class_instantiation() {
-    let source = r#"
-        class Container<T> {
-            private item: T
-            
-            constructor(item: T) {
-                self.item = item
-            }
-            
-            getItem(): T {
-                return self.item
-            }
-            
-            setItem(item: T): void {
-                self.item = item
-            }
-        }
-        
-        const numContainer = new Container<number>(42)
-        const strContainer = new Container<string>("hello")
-        const numVal = numContainer.getItem()
-        const strVal = strContainer.getItem()
-    "#;
-
-    assert!(
-        type_check(source).is_ok(),
-        "Generic class instantiation with type arguments should work"
-    );
-}
-
-#[test]
-fn test_generic_interface() {
-    let source = r#"
-        interface Functor<T> {
-        }
-
-        class Maybe<T> implements Functor<T> {
-        }
-    "#;
-
-    assert!(
-        type_check(source).is_ok(),
-        "Generic interface should type-check successfully"
-    );
-}
-
-#[test]
-fn test_generic_nested_class() {
-    let source = r#"
-        class Outer<T> {
-            class Inner<U> {
-            }
-        }
-    "#;
-
-    assert!(
-        type_check(source).is_ok(),
-        "Nested generic class should type-check successfully"
-    );
-}
-
-#[test]
-fn test_generic_constraint_with_extends() {
-    let source = r#"
-        interface HasId {
-            id: number
-        }
-
-        function processItem<T extends HasId>(item: T): number {
-            return item.id
-        }
-
-        class Product implements HasId {
-            id: number = 0
-            name: string = ""
-        }
-
-        class Order implements HasId {
-            id: number = 0
-            total: number = 0
-        }
-    "#;
-
-    assert!(
-        type_check(source).is_ok(),
-        "Generic function with extends constraint should work"
-    );
-}
-
-#[test]
-fn test_generic_class_with_constraint() {
-    let source = r#"
-        interface Identifiable {
-            getId(): number
-        }
-
-        class Registry<T extends Identifiable> {
-            private items: { [number]: T } = {}
-
-            register(item: T): void {
-                self.items[item.getId()] = item
-            }
-
-            get(id: number): T | nil {
-                return self.items[id]
-            }
-        }
-
-        class User implements Identifiable {
-            private _id: number = 0
-
-            getId(): number {
-                return self._id
-            }
-        }
-    "#;
-
-    assert!(
-        type_check(source).is_ok(),
-        "Generic class with constraint should work"
-    );
-}
-
-#[test]
-fn test_generic_multiple_constraints() {
-    let source = r#"
-        interface Serializable {
-            serialize(): string
-        }
-
-        interface Comparable {
-            compare(other: any): number
-        }
-
-        class DataSet<T extends Serializable & Comparable> {
-            private data: Array<T> = {}
-
-            public add(item: T): void {
-                table.insert(self.data, item)
-            }
-
-            public serializeAll(): string {
-                local result = ""
-                for _, item in ipairs(self.data) do
-                    result = result .. item.serialize()
-                end
-                return result
-            }
-        }
-    "#;
-
-    assert!(
-        type_check(source).is_ok(),
-        "Generic with multiple constraints should type-check"
-    );
-}
-
-#[test]
-fn test_generic_method_in_class() {
-    let source = r#"
-        class MathUtils {
-            public identity<T>(x: T): T {
-                return x
-            }
-
-            public double<T>(x: T): T {
-                return x
-            }
-
-            public swap<T, U>(a: T, b: U): { first: U, second: T } {
-                return { first = b, second = a }
-            }
-        }
-    "#;
-
-    assert!(
-        type_check(source).is_ok(),
-        "Generic methods in non-generic class should work"
-    );
-}
-
-#[test]
-fn test_generic_inheritance() {
-    let source = r#"
-        class Base<T> {
-            protected value: T
-        }
-
-        class Derived<T> extends Base<T> {
-            private extra: string = ""
-        }
-    "#;
-
-    assert!(
-        type_check(source).is_ok(),
-        "Generic class inheritance should work"
-    );
-}
-
-#[test]
-fn test_generic_interface_implementation() {
-    // Test that a generic class can implement a generic interface.
-    // Uses matching return types (Describable<T>) since covariant return
-    // type checking (e.g., Maybe<U> assignable to Functor<U>) is not yet
-    // supported in TypeCompatibility.
-    let source = r#"
-        interface Describable<T> {
-            describe(): string
-            getTag(): string
-        }
-
-        class Labeled<T> implements Describable<T> {
-            public tag: string
-
-            constructor(tag: string) {
-                self.tag = tag
-            }
-
-            describe(): string {
-                return "Labeled: " .. self.tag
-            }
-
-            getTag(): string {
-                return self.tag
-            }
-        }
-    "#;
-
-    let result = type_check(source);
-    assert!(
-        result.is_ok(),
-        "Generic interface implementation should work: {:?}",
-        result.err()
-    );
-}

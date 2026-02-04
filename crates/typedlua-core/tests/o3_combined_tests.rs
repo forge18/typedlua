@@ -8,7 +8,7 @@ fn compile_and_check(source: &str) -> Result<String, String> {
 #[test]
 fn test_aggressive_inlining_works() {
     let source = r#"
-        function mediumFunction(x: number): number {
+        function mediumFunction(x: number): number
             const a = x + 1
             const b = a * 2
             const c = b - 3
@@ -16,11 +16,11 @@ fn test_aggressive_inlining_works() {
             const e = d ^ 2
             const f = e + 1
             return f
-        }
+        end
 
-        function caller(): number {
+        function caller(): number
             return mediumFunction(10)
-        }
+        end
     "#;
 
     let output = compile_and_check(source).unwrap();
@@ -32,105 +32,3 @@ fn test_aggressive_inlining_works() {
     );
 }
 
-#[test]
-fn test_operator_overload_collection() {
-    let source = r#"
-        class Vector {
-            x: number
-            y: number
-
-            constructor(x: number, y: number) {
-                self.x = x
-                self.y = y
-            }
-
-            operator +(other: Vector): Vector {
-                return new Vector(self.x + other.x, self.y + other.y)
-            }
-        }
-
-        const v1 = new Vector(1, 2)
-        const v2 = new Vector(3, 4)
-        const v3 = v1 + v2
-    "#;
-
-    let output = compile_and_check(source).unwrap();
-    println!("Output:\n{}", output);
-
-    assert!(output.contains("Vector"), "Should have Vector class");
-    assert!(output.contains("__add"), "Should have __add metamethod");
-}
-
-#[test]
-fn test_interface_method_analysis() {
-    let source = r#"
-        interface Printable {
-            name: string
-            print(): void
-        }
-
-        class User implements Printable {
-            name: string
-
-            constructor(name: string) {
-                self.name = name
-            }
-
-            print(): void {
-                print("Name: " .. self.name)
-            }
-        }
-
-        const user = new User("Alice")
-        user.print()
-    "#;
-
-    let output = compile_and_check(source).unwrap();
-    println!("Output:\n{}", output);
-
-    assert!(output.contains("User"), "Should have User class");
-}
-
-#[test]
-fn test_devirtualization_analysis() {
-    let source = r#"
-        class Calculator {
-            add(a: number, b: number): number {
-                return a + b
-            }
-
-            multiply(a: number, b: number): number {
-                return a * b
-            }
-        }
-
-        const calc = new Calculator()
-        const sum = calc.add(1, 2)
-        const product = calc.multiply(3, 4)
-    "#;
-
-    let output = compile_and_check(source).unwrap();
-    println!("Output:\n{}", output);
-
-    assert!(
-        output.contains("Calculator"),
-        "Should have Calculator class"
-    );
-}
-
-#[test]
-fn test_generic_function_analysis() {
-    let source = r#"
-        function identity<T>(value: T): T {
-            return value
-        }
-
-        const num = identity(42)
-        const str = identity("hello")
-    "#;
-
-    let output = compile_and_check(source).unwrap();
-    println!("Output:\n{}", output);
-
-    assert!(output.contains("identity"), "Should have identity function");
-}

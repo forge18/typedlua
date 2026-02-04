@@ -45,17 +45,14 @@ impl DiContainer {
 
         container.register(
             |_| {
-                let handler =
-                    Arc::new(ConsoleDiagnosticHandler::new(false)) as Arc<dyn DiagnosticHandler>;
-                handler
+                Arc::new(ConsoleDiagnosticHandler::new(false)) as Arc<dyn DiagnosticHandler>
             },
             ServiceLifetime::Singleton,
         );
 
         container.register(
             |_| {
-                let fs = Arc::new(RealFileSystem::new()) as Arc<dyn FileSystem>;
-                fs
+                Arc::new(RealFileSystem::new()) as Arc<dyn FileSystem>
             },
             ServiceLifetime::Singleton,
         );
@@ -123,7 +120,7 @@ impl DiContainer {
         let is_singleton = self
             .factories
             .get(&type_id)
-            .map_or(false, |(_, l)| matches!(*l, ServiceLifetime::Singleton));
+            .is_some_and(|(_, l)| matches!(*l, ServiceLifetime::Singleton));
 
         if is_singleton {
             if let Some(cached) = self.singletons.get(&type_id) {

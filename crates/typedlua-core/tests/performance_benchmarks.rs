@@ -558,12 +558,12 @@ fn test_code_size_reduction_at_each_level() {
 fn test_optimization_preserves_correctness() {
     // Test that all optimization levels produce semantically equivalent code
     let source = r#"
-        function compute(x: number): number {
+        function compute(x: number): number
             const a = x + 1
             const b = x * 2
             const c = a + b
             return c
-        }
+        end
         
         const result = compute(5)
     "#;

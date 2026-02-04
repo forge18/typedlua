@@ -99,12 +99,12 @@ fn test_nested_concat_optimization() {
 #[test]
 fn test_concat_in_function_return() {
     let source = r#"
-        function greet(name: string): string {
+        function greet(name: string): string
             const greeting = "Hello"
             const sep = " "
             const suffix = "!"
             return greeting .. sep .. name .. suffix
-        }
+        end
     "#;
 
     let output = compile_with_optimization_level(source, OptimizationLevel::O2).unwrap();

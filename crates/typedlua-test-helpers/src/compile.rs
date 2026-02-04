@@ -21,7 +21,7 @@ use typedlua_parser::{Lexer, Parser};
 /// The generated Lua code or an error message
 pub fn compile(source: &str) -> Result<String, String> {
     let config = CompilerConfig::default();
-    let container = DiContainer::production(config);
+    let mut container = DiContainer::production(config);
     container.compile(source)
 }
 
@@ -35,7 +35,7 @@ pub fn compile(source: &str) -> Result<String, String> {
 /// The generated Lua code or an error message
 pub fn compile_with_optimization(source: &str, level: OptimizationLevel) -> Result<String, String> {
     let config = CompilerConfig::default();
-    let container = DiContainer::production(config);
+    let mut container = DiContainer::production(config);
     container.compile_with_optimization(source, level)
 }
 
@@ -51,7 +51,7 @@ pub fn compile_with_optimization(source: &str, level: OptimizationLevel) -> Resu
 /// The generated Lua code or an error message
 pub fn compile_with_stdlib(source: &str) -> Result<String, String> {
     let config = CompilerConfig::default();
-    let container = DiContainer::production(config);
+    let mut container = DiContainer::production(config);
     container.compile_with_stdlib(source)
 }
 
@@ -70,7 +70,7 @@ pub fn compile_with_stdlib_and_optimization(
     level: OptimizationLevel,
 ) -> Result<String, String> {
     let config = CompilerConfig::default();
-    let container = DiContainer::production(config);
+    let mut container = DiContainer::production(config);
     container.compile_with_stdlib_and_optimization(source, level)
 }
 
@@ -86,6 +86,7 @@ pub fn compile_with_stdlib_and_optimization(
 pub fn type_check(source: &str) -> Result<(), String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let interner = std::rc::Rc::new(interner);
 
     let mut lexer = Lexer::new(source, handler.clone(), &interner);
     let tokens = lexer
