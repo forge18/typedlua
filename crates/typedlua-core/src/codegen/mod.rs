@@ -136,6 +136,8 @@ pub struct CodeGenerator {
     strategy: Box<dyn strategies::CodeGenStrategy>,
     /// Enforce access modifiers (private/protected/public) at runtime
     enforce_access_modifiers: bool,
+    /// Whole-program analysis for O3+ cross-module optimizations
+    whole_program_analysis: Option<crate::optimizer::WholeProgramAnalysis>,
 }
 
 impl CodeGenerator {
@@ -160,6 +162,7 @@ impl CodeGenerator {
             registered_types: std::collections::HashMap::new(),
             strategy: Self::create_strategy(target),
             enforce_access_modifiers: false,
+            whole_program_analysis: None,
         }
     }
 
@@ -209,12 +212,26 @@ impl CodeGenerator {
         self
     }
 
+    pub fn with_whole_program_analysis(
+        mut self,
+        analysis: crate::optimizer::WholeProgramAnalysis,
+    ) -> Self {
+        self.whole_program_analysis = Some(analysis);
+        self
+    }
+
     pub fn generate(&mut self, program: &mut Program) -> String {
         // Run optimizer before code generation if optimization level > O0
         if self.optimization_level != crate::config::OptimizationLevel::O0 {
             let handler = Arc::new(crate::diagnostics::CollectingDiagnosticHandler::new());
             let mut optimizer =
                 Optimizer::new(self.optimization_level, handler, self.interner.clone());
+
+            // Pass whole-program analysis if available (for O3+ cross-module optimizations)
+            if let Some(ref analysis) = self.whole_program_analysis {
+                optimizer.set_whole_program_analysis(analysis.clone());
+            }
+
             let _ = optimizer.optimize(program);
         }
 

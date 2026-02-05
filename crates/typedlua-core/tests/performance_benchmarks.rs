@@ -4,7 +4,6 @@
 //! - Type checking: 1K, 10K, 100K lines of code
 //! - Full compilation (parse + typecheck + codegen)
 
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use typedlua_core::codegen::CodeGenerator;
@@ -87,7 +86,7 @@ fn generate_test_code(target_lines: usize) -> String {
 fn benchmark_typecheck(source: &str) -> Result<Duration, String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
-    let interner = Rc::new(interner);
+    let interner = Arc::new(interner);
 
     // Lex and parse first (not timed)
     let mut lexer = Lexer::new(source, handler.clone(), &interner);
@@ -116,7 +115,7 @@ fn benchmark_typecheck(source: &str) -> Result<Duration, String> {
 fn benchmark_full_compile(source: &str) -> Result<Duration, String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
-    let interner = Rc::new(interner);
+    let interner = Arc::new(interner);
 
     let start = Instant::now();
 
@@ -353,7 +352,7 @@ fn benchmark_optimization_level(
 ) -> Result<(Duration, usize), String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
-    let interner = Rc::new(interner);
+    let interner = Arc::new(interner);
 
     // Lex and parse first (not timed)
     let mut lexer = Lexer::new(source, handler.clone(), &interner);
@@ -1047,7 +1046,7 @@ fn test_incremental_retypecheck_single_file_change() {
 
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
-    let interner = Rc::new(interner);
+    let interner = Arc::new(interner);
 
     let full_compile_start = Instant::now();
 
@@ -1188,7 +1187,7 @@ fn test_cache_hit_rate_unchanged_modules() {
     // First compile - populate cache
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
-    let interner = Rc::new(interner);
+    let interner = Arc::new(interner);
 
     for file_path in &file_paths {
         let source = std::fs::read_to_string(file_path).unwrap();

@@ -33,6 +33,10 @@ impl WholeProgramPass for DeadCodeEliminationPass {
         self.eliminate_dead_code(&mut program.statements);
         Ok(program.statements.len() != original_len)
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 impl DeadCodeEliminationPass {

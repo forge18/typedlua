@@ -1278,6 +1278,21 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
 
     info!("Type checking complete. {} modules ready for codegen.", checked_modules.len());
 
+    // --- Phase 1.5: Whole-program analysis (for O3+ optimizations) ---
+    // Build cross-module analysis before parallel codegen
+    // Note: Currently uses O0 (no optimization), but infrastructure is in place for future use
+    let optimization_level = typedlua_core::config::OptimizationLevel::O0;
+    let whole_program_analysis = if optimization_level >= typedlua_core::config::OptimizationLevel::O3 {
+        info!("Building whole-program analysis for O3 optimizations...");
+        let ast_refs: Vec<&typedlua_parser::ast::Program> = checked_modules
+            .iter()
+            .map(|m| &m.ast)
+            .collect();
+        Some(typedlua_core::optimizer::WholeProgramAnalysis::build(&ast_refs, optimization_level))
+    } else {
+        None
+    };
+
     // --- Phase 2: Parallel code generation ---
     // Each module's codegen is independent - can run in parallel
     let results: Vec<CompilationResult> = checked_modules
@@ -1290,6 +1305,11 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
 
             if module.enable_source_map {
                 builder = builder.source_map(module.file_path.to_string_lossy().to_string());
+            }
+
+            // Pass whole-program analysis if available
+            if let Some(ref analysis) = whole_program_analysis {
+                builder = builder.with_whole_program_analysis(analysis.clone());
             }
 
             let mut generator = builder.build();

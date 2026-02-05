@@ -42,6 +42,10 @@ impl WholeProgramPass for TablePreallocationPass {
         // Currently a no-op analysis pass - codegen handles preallocation
         Ok(false)
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 impl TablePreallocationPass {

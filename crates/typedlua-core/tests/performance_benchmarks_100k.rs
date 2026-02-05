@@ -1,7 +1,7 @@
 //! Simplified performance benchmarks
 
-use std::rc::Rc;
 use std::sync::Arc;
+
 use std::time::{Duration, Instant};
 use typedlua_core::codegen::CodeGenerator;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
@@ -33,7 +33,7 @@ fn generate_simple_code(target_lines: usize) -> String {
 fn benchmark_typecheck(source: &str) -> Result<Duration, String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
-    let interner = Rc::new(interner);
+    let interner = Arc::new(interner);
 
     let mut lexer = Lexer::new(source, handler.clone(), &interner);
     let tokens = lexer
@@ -56,7 +56,7 @@ fn benchmark_typecheck(source: &str) -> Result<Duration, String> {
 fn benchmark_full_compile(source: &str) -> Result<Duration, String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
-    let interner = Rc::new(interner);
+    let interner = Arc::new(interner);
 
     let start = Instant::now();
 

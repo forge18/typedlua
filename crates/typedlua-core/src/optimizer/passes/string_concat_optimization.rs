@@ -75,6 +75,10 @@ impl WholeProgramPass for StringConcatOptimizationPass {
 
         Ok(changed)
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 impl StringConcatOptimizationPass {

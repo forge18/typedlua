@@ -44,6 +44,10 @@ impl WholeProgramPass for GlobalLocalizationPass {
         program.span = block.span; // preserve span (unchanged)
         Ok(changed)
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 impl GlobalLocalizationPass {

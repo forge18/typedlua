@@ -19,6 +19,10 @@ use method_to_function_conversion::MethodToFunctionConversionPass;
 
 mod devirtualization;
 use devirtualization::DevirtualizationPass;
+pub use devirtualization::ClassHierarchy;
+
+mod whole_program_analysis;
+pub use whole_program_analysis::WholeProgramAnalysis;
 
 mod operator_inlining;
 use operator_inlining::OperatorInliningPass;
@@ -100,6 +104,9 @@ pub trait WholeProgramPass {
     /// `Ok(true)` if changes were made, `Ok(false)` if no changes,
     /// `Err` if an error occurred
     fn run(&mut self, program: &mut Program) -> Result<bool, String>;
+
+    /// Downcast support for accessing concrete pass types
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
 // =============================================================================
@@ -595,6 +602,9 @@ pub struct Optimizer {
 
     // Standalone passes (whole-program analysis)
     standalone_passes: Vec<Box<dyn WholeProgramPass>>,
+
+    // Whole-program analysis results (for O3+ cross-module optimizations)
+    whole_program_analysis: Option<crate::optimizer::WholeProgramAnalysis>,
 }
 
 impl Optimizer {
@@ -613,11 +623,30 @@ impl Optimizer {
             func_pass: None,
             data_pass: None,
             standalone_passes: Vec::new(),
+            whole_program_analysis: None,
         };
 
         // Register optimization passes based on level
         optimizer.register_passes();
         optimizer
+    }
+
+    /// Set whole-program analysis results for cross-module optimizations
+    ///
+    /// This should be called after construction if whole-program analysis
+    /// is available (typically for O3+ optimizations). The analysis will
+    /// be passed to relevant optimization passes that benefit from
+    /// cross-module information.
+    pub fn set_whole_program_analysis(&mut self, analysis: crate::optimizer::WholeProgramAnalysis) {
+        self.whole_program_analysis = Some(analysis.clone());
+
+        // Update passes that need cross-module information
+        for pass in &mut self.standalone_passes {
+            // Check if this is a DevirtualizationPass using trait object downcasting
+            if let Some(devirt) = pass.as_any_mut().downcast_mut::<DevirtualizationPass>() {
+                devirt.set_class_hierarchy(analysis.class_hierarchy.clone());
+            }
+        }
     }
 
     /// Register optimization passes based on the optimization level

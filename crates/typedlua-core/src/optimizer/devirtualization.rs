@@ -90,6 +90,66 @@ impl ClassHierarchy {
         hierarchy
     }
 
+    /// Build class hierarchy by scanning all class declarations across multiple modules
+    ///
+    /// This enables whole-program analysis for cross-module devirtualization.
+    /// Each program's AST is scanned to build a complete class hierarchy that
+    /// spans module boundaries.
+    pub fn build_multi_module(programs: &[&Program]) -> Self {
+        let mut hierarchy = ClassHierarchy::default();
+
+        // Scan all modules to build complete hierarchy
+        for program in programs {
+            for stmt in &program.statements {
+                if let Statement::Class(class) = stmt {
+                    let class_id = class.name.node;
+
+                    // Mark as known class
+                    hierarchy.known_classes.insert(class_id, true);
+
+                    // Record finality
+                    hierarchy.is_final.insert(class_id, class.is_final);
+
+                    // Record parent relationship
+                    let parent_id = class.extends.as_ref().and_then(|ext| {
+                        if let TypeKind::Reference(type_ref) = &ext.kind {
+                            Some(type_ref.name.node)
+                        } else {
+                            None
+                        }
+                    });
+                    hierarchy.parent_of.insert(class_id, parent_id);
+
+                    // Add to parent's children list
+                    if let Some(parent) = parent_id {
+                        hierarchy
+                            .children_of
+                            .entry(parent)
+                            .or_default()
+                            .push(class_id);
+                    }
+
+                    // Record methods declared in this class
+                    for member in &class.members {
+                        if let ClassMember::Method(method) = member {
+                            let method_id = method.name.node;
+                            hierarchy
+                                .declares_method
+                                .insert((class_id, method_id), true);
+
+                            // Record method finality
+                            if method.is_final {
+                                hierarchy.final_methods.insert((class_id, method_id), true);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        hierarchy
+    }
+
     /// Check if a class is known (vs an interface)
     pub fn is_known_class(&self, class: StringId) -> bool {
         self.known_classes.contains_key(&class)
@@ -139,11 +199,24 @@ impl ClassHierarchy {
 /// Analyzes method calls and marks safe ones for devirtualization by setting
 /// the `receiver_class` field. The actual transformation is performed by
 /// the O2 `MethodToFunctionConversionPass`.
-pub struct DevirtualizationPass;
+pub struct DevirtualizationPass {
+    /// Pre-built class hierarchy from whole-program analysis (optional)
+    class_hierarchy: Option<Arc<ClassHierarchy>>,
+}
 
 impl DevirtualizationPass {
     pub fn new(_interner: Arc<StringInterner>) -> Self {
-        Self
+        Self {
+            class_hierarchy: None,
+        }
+    }
+
+    /// Set the pre-built class hierarchy from whole-program analysis
+    ///
+    /// When set, this hierarchy will be used instead of building one from the
+    /// single module being optimized, enabling cross-module devirtualization.
+    pub fn set_class_hierarchy(&mut self, hierarchy: Arc<ClassHierarchy>) {
+        self.class_hierarchy = Some(hierarchy);
     }
 
     /// Process a statement, looking for method calls to devirtualize
@@ -436,8 +509,15 @@ impl WholeProgramPass for DevirtualizationPass {
     }
 
     fn run(&mut self, program: &mut Program) -> Result<bool, String> {
-        // Build class hierarchy for safety analysis
-        let hierarchy = ClassHierarchy::build(program);
+        // Use pre-built hierarchy if available (cross-module analysis),
+        // otherwise build from this module only (single-module analysis)
+        let hierarchy = if let Some(ref hierarchy) = self.class_hierarchy {
+            // Use the pre-built cross-module hierarchy
+            hierarchy.clone()
+        } else {
+            // Build hierarchy from this module only
+            Arc::new(ClassHierarchy::build(program))
+        };
 
         // Process all statements
         let mut changed = false;
@@ -447,11 +527,17 @@ impl WholeProgramPass for DevirtualizationPass {
 
         Ok(changed)
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 impl Default for DevirtualizationPass {
     fn default() -> Self {
-        Self
+        Self {
+            class_hierarchy: None,
+        }
     }
 }
 

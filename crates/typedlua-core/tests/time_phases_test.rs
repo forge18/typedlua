@@ -1,6 +1,5 @@
 #[test]
 fn time_100k_phases() {
-    use std::rc::Rc;
     use std::sync::Arc;
     use std::time::Instant;
     use typedlua_core::diagnostics::CollectingDiagnosticHandler;
@@ -64,7 +63,7 @@ fn time_100k_phases() {
 
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
-    let interner = Rc::new(interner);
+    let interner = Arc::new(interner);
 
     let start = Instant::now();
     let mut lexer = Lexer::new(&source, handler.clone(), &interner);

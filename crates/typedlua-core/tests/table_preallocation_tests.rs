@@ -1,5 +1,5 @@
-use std::rc::Rc;
 use std::sync::Arc;
+
 use typedlua_core::config::OptimizationLevel;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_core::optimizer::Optimizer;
@@ -15,7 +15,7 @@ use typedlua_parser::string_interner::StringInterner;
 
 fn create_optimizer(level: OptimizationLevel) -> Optimizer {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
-    let interner = Rc::new(StringInterner::new());
+    let interner = Arc::new(StringInterner::new());
     Optimizer::new(level, handler, interner)
 }
 
@@ -189,7 +189,7 @@ fn test_optimization_level_comparison() {
 fn test_global_localization_creates_local_references() {
     use typedlua_parser::ast::{Program, Spanned};
 
-    let interner = Rc::new(StringInterner::new());
+    let interner = Arc::new(StringInterner::new());
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let mut optimizer = Optimizer::new(OptimizationLevel::O1, handler, interner.clone());
 
@@ -256,7 +256,7 @@ fn test_global_localization_creates_local_references() {
 
 #[test]
 fn test_table_preallocation_hint() {
-    let interner = Rc::new(StringInterner::new());
+    let interner = Arc::new(StringInterner::new());
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let mut optimizer = Optimizer::new(OptimizationLevel::O1, handler, interner.clone());
 
@@ -291,7 +291,7 @@ fn test_table_preallocation_hint() {
 
 #[test]
 fn test_constant_folding() {
-    let interner = Rc::new(StringInterner::new());
+    let interner = Arc::new(StringInterner::new());
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let mut optimizer = Optimizer::new(OptimizationLevel::O1, handler, interner.clone());
 

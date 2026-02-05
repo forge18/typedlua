@@ -22,6 +22,7 @@ use typedlua_parser::string_interner::StringInterner;
 
 use super::{CodeGenMode, CodeGenerator, LuaTarget};
 use crate::config::{OptimizationLevel, OutputFormat};
+use crate::optimizer::WholeProgramAnalysis;
 
 /// Builder for configuring and constructing a [`CodeGenerator`] instance.
 ///
@@ -57,6 +58,7 @@ pub struct CodeGeneratorBuilder {
     mode: CodeGenMode,
     optimization_level: OptimizationLevel,
     output_format: OutputFormat,
+    whole_program_analysis: Option<WholeProgramAnalysis>,
 }
 
 impl CodeGeneratorBuilder {
@@ -90,6 +92,7 @@ impl CodeGeneratorBuilder {
             mode: CodeGenMode::Require,
             optimization_level: OptimizationLevel::O0,
             output_format: OutputFormat::Readable,
+            whole_program_analysis: None,
         }
     }
 
@@ -236,6 +239,37 @@ impl CodeGeneratorBuilder {
         self
     }
 
+    /// Sets the whole-program analysis for cross-module optimizations.
+    ///
+    /// This is optional and only needed for O3+ optimizations that benefit
+    /// from cross-module analysis (e.g., devirtualization).
+    ///
+    /// # Arguments
+    ///
+    /// * `analysis` - The [`WholeProgramAnalysis`] results from scanning all modules
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use std::sync::Arc;
+    /// use typedlua_parser::string_interner::StringInterner;
+    /// use typedlua_core::codegen::CodeGeneratorBuilder;
+    /// use typedlua_core::optimizer::WholeProgramAnalysis;
+    /// use typedlua_core::config::OptimizationLevel;
+    ///
+    /// let interner = Arc::new(StringInterner::new());
+    /// // Assume analysis was built from all checked modules
+    /// // let analysis = WholeProgramAnalysis::build(&programs, OptimizationLevel::O3);
+    /// // let generator = CodeGeneratorBuilder::new(interner)
+    /// //     .optimization_level(OptimizationLevel::O3)
+    /// //     .with_whole_program_analysis(analysis)
+    /// //     .build();
+    /// ```
+    pub fn with_whole_program_analysis(mut self, analysis: WholeProgramAnalysis) -> Self {
+        self.whole_program_analysis = Some(analysis);
+        self
+    }
+
     /// Builds and returns a configured [`CodeGenerator`] instance.
     ///
     /// This consumes the builder and creates the generator with all
@@ -268,6 +302,10 @@ impl CodeGeneratorBuilder {
 
         if let Some(source_file) = self.source_map {
             generator = generator.with_source_map(source_file);
+        }
+
+        if let Some(analysis) = self.whole_program_analysis {
+            generator = generator.with_whole_program_analysis(analysis);
         }
 
         generator
