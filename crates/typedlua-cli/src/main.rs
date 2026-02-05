@@ -939,6 +939,20 @@ struct CompilationError {
     source: String,
 }
 
+/// Module that has been type-checked and is ready for parallel code generation
+struct CheckedModule {
+    file_path: PathBuf,
+    ast: typedlua_parser::ast::Program,
+    interner: std::sync::Arc<typedlua_parser::string_interner::StringInterner>,
+    output_path: PathBuf,
+    enable_source_map: bool,
+    cache_entry: Option<(PathBuf, typedlua_core::cache::CachedModule, Vec<PathBuf>)>,
+}
+
+// SAFETY: All fields are Send after StringInterner migration to ThreadedRodeo.
+// The AST is safe to send across threads since StringInterner no longer uses Rc.
+unsafe impl Send for CheckedModule {}
+
 /// Parse a single source file for parallel parsing
 fn parse_single_file(
     file_path: &Path,
@@ -986,8 +1000,8 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
     use typedlua_core::diagnostics::{CollectingDiagnosticHandler, DiagnosticHandler};
 
     use typedlua_core::module_resolver::{ModuleConfig, ModuleId, ModuleRegistry, ModuleResolver};
-    use typedlua_parser::lexer::Lexer;
-    use typedlua_parser::parser::Parser;
+    
+    
     use typedlua_parser::string_interner::StringInterner;
 
     info!("Compiling {} file(s)...", cli.files.len());
@@ -1132,9 +1146,11 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
         .collect();
 
     // --- Compile files ---
-    let results: Vec<CompilationResult> = ordered_files
+    // --- Phase 1: Sequential type checking + cache building ---
+    // This phase MUST be sequential to maintain dependency order
+    let checked_modules: Vec<CheckedModule> = ordered_files
         .iter()
-        .map(|file_path| {
+        .filter_map(|file_path| {
             let canonical = file_path
                 .canonicalize()
                 .unwrap_or_else(|_| file_path.to_path_buf());
@@ -1146,47 +1162,24 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
                     debug!("Cache hit: {:?}", file_path);
 
                     if cli.no_emit {
-                        return CompilationResult {
-                            file_path: file_path.clone(),
-                            result: Ok(CompilationOutput {
-                                lua_code: String::new(),
-                                source_map: None,
-                                output_path: PathBuf::new(),
-                                cache_entry: None,
-                            }),
-                        };
+                        return None; // Skip codegen for no-emit mode
                     }
 
-                    // Reconstruct interner from cached strings
-                    let interner = std::rc::Rc::new(StringInterner::from_strings(
+                    // Reconstruct interner from cached strings and prepare for codegen
+                    let interner = Arc::new(StringInterner::from_strings(
                         cached.interner_strings.clone(),
                     ));
-                    let mut program = cached.ast.clone();
-
-                    // Use CodeGeneratorBuilder for fluent configuration
-                    let output_format = parse_output_format(&cli.format);
-                    let mut builder = CodeGeneratorBuilder::new(interner)
-                        .target(target)
-                        .output_format(output_format);
-                    if cli.source_map || cli.inline_source_map {
-                        builder = builder.source_map(file_path.to_string_lossy().to_string());
-                    }
-                    let mut generator = builder.build();
-
-                    let lua_code = generator.generate(&mut program);
-
+                    let program = cached.ast.clone();
                     let output_path = determine_output_path(file_path, &cli);
-                    let source_map = generator.take_source_map();
 
-                    return CompilationResult {
+                    return Some(CheckedModule {
                         file_path: file_path.clone(),
-                        result: Ok(CompilationOutput {
-                            lua_code,
-                            source_map,
-                            output_path,
-                            cache_entry: None,
-                        }),
-                    };
+                        ast: program,
+                        interner,
+                        output_path,
+                        enable_source_map: cli.source_map || cli.inline_source_map,
+                        cache_entry: None, // Cache already saved
+                    });
                 }
             }
 
@@ -1195,16 +1188,11 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
                 Some(parsed) => parsed,
                 None => {
                     // This shouldn't happen since we already filtered for stale files
-                    return CompilationResult {
-                        file_path: file_path.clone(),
-                        result: Err(CompilationError {
-                            diagnostics: vec![],
-                            source: format!(
-                                "Internal error: parsed module not found for {:?} (is_stale={})",
-                                file_path, is_stale
-                            ),
-                        }),
-                    };
+                    warn!(
+                        "Internal error: parsed module not found for {:?} (is_stale={})",
+                        file_path, is_stale
+                    );
+                    return None;
                 }
             };
 
@@ -1230,25 +1218,13 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
             .with_stdlib()
             .expect("Failed to load standard library");
 
-            if type_checker.check_program(&mut program).is_err() {
-                return CompilationResult {
-                    file_path: file_path.clone(),
-                    result: Err(CompilationError {
-                        diagnostics: handler.get_diagnostics(),
-                        source: String::new(),
-                    }),
-                };
-            }
-
-            // Check for type errors
-            if handler.has_errors() {
-                return CompilationResult {
-                    file_path: file_path.clone(),
-                    result: Err(CompilationError {
-                        diagnostics: handler.get_diagnostics(),
-                        source: String::new(),
-                    }),
-                };
+            if type_checker.check_program(&mut program).is_err() || handler.has_errors() {
+                warn!(
+                    "Type check failed for {:?}: {} errors",
+                    file_path,
+                    handler.get_diagnostics().len()
+                );
+                return None; // Skip modules with type errors
             }
 
             // Register exports in shared registry for other files
@@ -1281,49 +1257,61 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
                 None
             };
 
-            // Generate Lua code
+            // Return CheckedModule ready for parallel codegen
             if cli.no_emit {
-                return CompilationResult {
-                    file_path: file_path.clone(),
-                    result: Ok(CompilationOutput {
-                        lua_code: String::new(),
-                        source_map: None,
-                        output_path: PathBuf::new(),
-                        cache_entry,
-                    }),
-                };
+                return None; // Skip codegen for no-emit mode
             }
 
-            // Use CodeGeneratorBuilder for fluent configuration
+            let output_path = determine_output_path(file_path, &cli);
+            let interner_arc = Arc::new(parsed.interner.clone());
+
+            Some(CheckedModule {
+                file_path: file_path.clone(),
+                ast: program,
+                interner: interner_arc,
+                output_path,
+                enable_source_map: cli.source_map || cli.inline_source_map,
+                cache_entry,
+            })
+        })
+        .collect();
+
+    info!("Type checking complete. {} modules ready for codegen.", checked_modules.len());
+
+    // --- Phase 2: Parallel code generation ---
+    // Each module's codegen is independent - can run in parallel
+    let results: Vec<CompilationResult> = checked_modules
+        .into_par_iter()
+        .map(|module| {
             let output_format = parse_output_format(&cli.format);
-            let interner_rc = std::rc::Rc::new(parsed.interner.clone());
-            let mut builder = CodeGeneratorBuilder::new(interner_rc)
+            let mut builder = CodeGeneratorBuilder::new(module.interner.clone())
                 .target(target)
                 .output_format(output_format);
 
-            if cli.source_map || cli.inline_source_map {
-                builder = builder.source_map(file_path.to_string_lossy().to_string());
+            if module.enable_source_map {
+                builder = builder.source_map(module.file_path.to_string_lossy().to_string());
             }
 
             let mut generator = builder.build();
-            let lua_code = generator.generate(&mut program);
-
-            let output_path = determine_output_path(file_path, &cli);
+            let mut ast = module.ast;
+            let lua_code = generator.generate(&mut ast);
             let source_map = generator.take_source_map();
 
             CompilationResult {
-                file_path: file_path.clone(),
+                file_path: module.file_path,
                 result: Ok(CompilationOutput {
                     lua_code,
                     source_map,
-                    output_path,
-                    cache_entry,
+                    output_path: module.output_path,
+                    cache_entry: module.cache_entry,
                 }),
             }
         })
         .collect();
 
-    // --- Save cache entries (sequential — CacheManager needs &mut self) ---
+    info!("Code generation complete for {} modules.", results.len());
+
+    // --- Phase 3: Save cache entries (sequential — CacheManager needs &mut self) ---
     if use_cache {
         let config = CompilerOptions::default();
         if let Ok(mut cache_manager) = CacheManager::new(&project_root, &config) {

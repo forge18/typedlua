@@ -8,7 +8,7 @@ use crate::{build_substitutions, instantiate_function_declaration};
 use rustc_hash::FxHashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::rc::Rc;
+use std::sync::Arc;
 use typedlua_parser::ast::expression::{ArrayElement, Expression, ExpressionKind, ObjectProperty};
 use typedlua_parser::ast::statement::{ForStatement, FunctionDeclaration, Statement};
 use typedlua_parser::ast::types::Type;
@@ -29,7 +29,7 @@ fn hash_type_args(type_args: &[Type]) -> u64 {
 /// Creates specialized versions of generic functions for known types
 #[derive(Default)]
 pub struct GenericSpecializationPass {
-    interner: Option<Rc<StringInterner>>,
+    interner: Option<Arc<StringInterner>>,
     /// Maps (function_name, type_args_hash) -> specialized_function_name
     specializations: FxHashMap<(StringId, u64), StringId>,
     /// Counter for generating unique specialization IDs
@@ -41,7 +41,7 @@ pub struct GenericSpecializationPass {
 }
 
 impl GenericSpecializationPass {
-    pub fn new(interner: Rc<StringInterner>) -> Self {
+    pub fn new(interner: Arc<StringInterner>) -> Self {
         Self {
             interner: Some(interner),
             specializations: FxHashMap::default(),

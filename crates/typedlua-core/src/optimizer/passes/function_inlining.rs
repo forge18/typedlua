@@ -4,7 +4,7 @@
 use crate::config::OptimizationLevel;
 use crate::optimizer::{PreAnalysisPass, StmtVisitor, WholeProgramPass};
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::sync::Arc;
 use typedlua_parser::ast::expression::{ArrowBody, Expression, ExpressionKind};
 use typedlua_parser::ast::pattern::Pattern;
 use typedlua_parser::ast::statement::{
@@ -32,7 +32,7 @@ pub struct FunctionInliningPass {
     threshold: usize,
     next_temp_id: usize,
     functions: HashMap<StringId, FunctionDeclaration>,
-    interner: Option<Rc<StringInterner>>,
+    interner: Option<Arc<StringInterner>>,
 }
 
 impl Default for FunctionInliningPass {
@@ -47,7 +47,7 @@ impl Default for FunctionInliningPass {
 }
 
 impl FunctionInliningPass {
-    pub fn new(interner: Rc<StringInterner>) -> Self {
+    pub fn new(interner: Arc<StringInterner>) -> Self {
         Self {
             threshold: 5,
             next_temp_id: 0,

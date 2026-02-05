@@ -21,7 +21,7 @@ use crate::config::OptimizationLevel;
 
 use crate::optimizer::{StmtVisitor, WholeProgramPass};
 use rustc_hash::FxHashMap;
-use std::rc::Rc;
+use std::sync::Arc;
 use typedlua_parser::ast::expression::{AssignmentOp, Expression, ExpressionKind};
 use typedlua_parser::ast::pattern::Pattern;
 use typedlua_parser::ast::statement::{Block, ClassMember, InterfaceMember, Statement};
@@ -296,7 +296,7 @@ impl InterfaceImplementationMap {
 pub struct InterfaceMethodInliningPass;
 
 impl InterfaceMethodInliningPass {
-    pub fn new(_interner: Rc<StringInterner>) -> Self {
+    pub fn new(_interner: Arc<StringInterner>) -> Self {
         Self
     }
 

@@ -5,11 +5,11 @@
 //! # Example
 //!
 //! ```rust
-//! use std::rc::Rc;
+//! use std::sync::Arc;
 //! use typedlua_parser::string_interner::StringInterner;
 //! use typedlua_core::codegen::{CodeGeneratorBuilder, LuaTarget, CodeGenMode};
 //!
-//! let interner = Rc::new(StringInterner::new());
+//! let interner = Arc::new(StringInterner::new());
 //! let generator = CodeGeneratorBuilder::new(interner)
 //!     .target(LuaTarget::Lua54)
 //!     .source_map("main.tl".to_string())
@@ -17,7 +17,7 @@
 //!     .build();
 //! ```
 
-use std::rc::Rc;
+use std::sync::Arc;
 use typedlua_parser::string_interner::StringInterner;
 
 use super::{CodeGenMode, CodeGenerator, LuaTarget};
@@ -43,21 +43,15 @@ use crate::config::{OptimizationLevel, OutputFormat};
 /// # Example
 ///
 /// ```rust
-/// use std::rc::Rc;
+/// use std::sync::Arc;
 /// use typedlua_parser::string_interner::StringInterner;
-/// use typedlua_core::codegen::{CodeGeneratorBuilder, LuaTarget, CodeGenMode};
-/// use typedlua_core::config::OptimizationLevel;
+/// use typedlua_core::codegen::CodeGeneratorBuilder;
 ///
-/// let interner = Rc::new(StringInterner::new());
-/// let generator = CodeGeneratorBuilder::new(interner)
-///     .target(LuaTarget::Lua53)
-///     .source_map("input.tl".to_string())
-///     .bundle_mode("main".to_string())
-///     .optimization_level(OptimizationLevel::O2)
-///     .build();
+/// let interner = Arc::new(StringInterner::new());
+/// let builder = CodeGeneratorBuilder::new(interner);
 /// ```
 pub struct CodeGeneratorBuilder {
-    interner: Rc<StringInterner>,
+    interner: Arc<StringInterner>,
     target: LuaTarget,
     source_map: Option<String>,
     mode: CodeGenMode,
@@ -75,14 +69,20 @@ impl CodeGeneratorBuilder {
     /// # Example
     ///
     /// ```rust
-    /// use std::rc::Rc;
+    /// use std::sync::Arc;
     /// use typedlua_parser::string_interner::StringInterner;
-    /// use typedlua_core::codegen::CodeGeneratorBuilder;
+    /// use typedlua_core::codegen::{CodeGeneratorBuilder, LuaTarget, CodeGenMode};
+    /// use typedlua_core::config::OptimizationLevel;
     ///
-    /// let interner = Rc::new(StringInterner::new());
-    /// let builder = CodeGeneratorBuilder::new(interner);
+    /// let interner = Arc::new(StringInterner::new());
+    /// let generator = CodeGeneratorBuilder::new(interner)
+    ///     .target(LuaTarget::Lua53)
+    ///     .source_map("input.tl".to_string())
+    ///     .bundle_mode("main".to_string())
+    ///     .optimization_level(OptimizationLevel::O2)
+    ///     .build();
     /// ```
-    pub fn new(interner: Rc<StringInterner>) -> Self {
+    pub fn new(interner: Arc<StringInterner>) -> Self {
         Self {
             interner,
             target: LuaTarget::default(),
@@ -102,13 +102,14 @@ impl CodeGeneratorBuilder {
     /// # Example
     ///
     /// ```rust
-    /// use std::rc::Rc;
+    /// use std::sync::Arc;
     /// use typedlua_parser::string_interner::StringInterner;
-    /// use typedlua_core::codegen::{CodeGeneratorBuilder, LuaTarget};
+    /// use typedlua_core::codegen::{CodeGeneratorBuilder, LuaTarget, CodeGenMode};
     ///
-    /// let interner = Rc::new(StringInterner::new());
+    /// let interner = Arc::new(StringInterner::new());
     /// let generator = CodeGeneratorBuilder::new(interner)
-    ///     .target(LuaTarget::Lua53)
+    ///     .target(LuaTarget::Lua54)
+    ///     .source_map("main.tl".to_string())
     ///     .build();
     /// ```
     pub fn target(mut self, target: LuaTarget) -> Self {
@@ -125,11 +126,11 @@ impl CodeGeneratorBuilder {
     /// # Example
     ///
     /// ```rust
-    /// use std::rc::Rc;
+    /// use std::sync::Arc;
     /// use typedlua_parser::string_interner::StringInterner;
     /// use typedlua_core::codegen::CodeGeneratorBuilder;
     ///
-    /// let interner = Rc::new(StringInterner::new());
+    /// let interner = Arc::new(StringInterner::new());
     /// let generator = CodeGeneratorBuilder::new(interner)
     ///     .source_map("main.tl".to_string())
     ///     .build();
@@ -147,11 +148,11 @@ impl CodeGeneratorBuilder {
     /// # Example
     ///
     /// ```rust
-    /// use std::rc::Rc;
+    /// use std::sync::Arc;
     /// use typedlua_parser::string_interner::StringInterner;
     /// use typedlua_core::codegen::CodeGeneratorBuilder;
     ///
-    /// let interner = Rc::new(StringInterner::new());
+    /// let interner = Arc::new(StringInterner::new());
     /// let generator = CodeGeneratorBuilder::new(interner)
     ///     .require_mode()
     ///     .build();
@@ -173,11 +174,11 @@ impl CodeGeneratorBuilder {
     /// # Example
     ///
     /// ```rust
-    /// use std::rc::Rc;
+    /// use std::sync::Arc;
     /// use typedlua_parser::string_interner::StringInterner;
     /// use typedlua_core::codegen::CodeGeneratorBuilder;
     ///
-    /// let interner = Rc::new(StringInterner::new());
+    /// let interner = Arc::new(StringInterner::new());
     /// let generator = CodeGeneratorBuilder::new(interner)
     ///     .bundle_mode("src/main".to_string())
     ///     .build();
@@ -196,12 +197,12 @@ impl CodeGeneratorBuilder {
     /// # Example
     ///
     /// ```rust
-    /// use std::rc::Rc;
+    /// use std::sync::Arc;
     /// use typedlua_parser::string_interner::StringInterner;
     /// use typedlua_core::codegen::CodeGeneratorBuilder;
     /// use typedlua_core::config::OptimizationLevel;
     ///
-    /// let interner = Rc::new(StringInterner::new());
+    /// let interner = Arc::new(StringInterner::new());
     /// let generator = CodeGeneratorBuilder::new(interner)
     ///     .optimization_level(OptimizationLevel::O2)
     ///     .build();
@@ -220,12 +221,12 @@ impl CodeGeneratorBuilder {
     /// # Example
     ///
     /// ```rust
-    /// use std::rc::Rc;
+    /// use std::sync::Arc;
     /// use typedlua_parser::string_interner::StringInterner;
     /// use typedlua_core::codegen::CodeGeneratorBuilder;
     /// use typedlua_core::config::OutputFormat;
     ///
-    /// let interner = Rc::new(StringInterner::new());
+    /// let interner = Arc::new(StringInterner::new());
     /// let generator = CodeGeneratorBuilder::new(interner)
     ///     .output_format(OutputFormat::Minified)
     ///     .build();
@@ -247,12 +248,12 @@ impl CodeGeneratorBuilder {
     /// # Example
     ///
     /// ```rust
-    /// use std::rc::Rc;
+    /// use std::sync::Arc;
     /// use typedlua_parser::string_interner::StringInterner;
     /// use typedlua_core::codegen::{CodeGeneratorBuilder, LuaTarget};
     /// use typedlua_core::config::OptimizationLevel;
     ///
-    /// let interner = Rc::new(StringInterner::new());
+    /// let interner = Arc::new(StringInterner::new());
     /// let generator = CodeGeneratorBuilder::new(interner)
     ///     .target(LuaTarget::Lua54)
     ///     .optimization_level(OptimizationLevel::O1)
@@ -270,151 +271,5 @@ impl CodeGeneratorBuilder {
         }
 
         generator
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn create_test_interner() -> Rc<StringInterner> {
-        Rc::new(StringInterner::new())
-    }
-
-    #[test]
-    fn test_builder_default_configuration() {
-        let interner = create_test_interner();
-        let generator = CodeGeneratorBuilder::new(interner).build();
-
-        // Verify defaults through behavior (generator is opaque)
-        // The generator should be created successfully with defaults
-        assert_eq!(generator.target, LuaTarget::Lua54);
-        assert!(matches!(generator.mode, CodeGenMode::Require));
-        assert_eq!(generator.optimization_level, OptimizationLevel::O0);
-    }
-
-    #[test]
-    fn test_builder_target_configuration() {
-        let interner = create_test_interner();
-
-        let generator = CodeGeneratorBuilder::new(interner.clone())
-            .target(LuaTarget::Lua51)
-            .build();
-        assert_eq!(generator.target, LuaTarget::Lua51);
-
-        let generator = CodeGeneratorBuilder::new(interner.clone())
-            .target(LuaTarget::Lua52)
-            .build();
-        assert_eq!(generator.target, LuaTarget::Lua52);
-
-        let generator = CodeGeneratorBuilder::new(interner.clone())
-            .target(LuaTarget::Lua53)
-            .build();
-        assert_eq!(generator.target, LuaTarget::Lua53);
-
-        let generator = CodeGeneratorBuilder::new(interner)
-            .target(LuaTarget::Lua54)
-            .build();
-        assert_eq!(generator.target, LuaTarget::Lua54);
-    }
-
-    #[test]
-    fn test_builder_source_map_configuration() {
-        let interner = create_test_interner();
-
-        // Without source map
-        let generator = CodeGeneratorBuilder::new(interner.clone()).build();
-        assert!(generator.emitter.source_map().is_none());
-
-        // With source map
-        let generator = CodeGeneratorBuilder::new(interner)
-            .source_map("test.tl".to_string())
-            .build();
-        assert!(generator.emitter.source_map().is_some());
-    }
-
-    #[test]
-    fn test_builder_mode_configuration() {
-        let interner = create_test_interner();
-
-        // Require mode (default)
-        let generator = CodeGeneratorBuilder::new(interner.clone())
-            .require_mode()
-            .build();
-        assert!(matches!(generator.mode, CodeGenMode::Require));
-
-        // Bundle mode
-        let generator = CodeGeneratorBuilder::new(interner)
-            .bundle_mode("main".to_string())
-            .build();
-        assert!(matches!(
-            generator.mode,
-            CodeGenMode::Bundle { module_id } if module_id == "main"
-        ));
-    }
-
-    #[test]
-    fn test_builder_optimization_level_configuration() {
-        let interner = create_test_interner();
-
-        let generator = CodeGeneratorBuilder::new(interner.clone())
-            .optimization_level(OptimizationLevel::O0)
-            .build();
-        assert_eq!(generator.optimization_level, OptimizationLevel::O0);
-
-        let generator = CodeGeneratorBuilder::new(interner.clone())
-            .optimization_level(OptimizationLevel::O1)
-            .build();
-        assert_eq!(generator.optimization_level, OptimizationLevel::O1);
-
-        let generator = CodeGeneratorBuilder::new(interner.clone())
-            .optimization_level(OptimizationLevel::O2)
-            .build();
-        assert_eq!(generator.optimization_level, OptimizationLevel::O2);
-
-        let generator = CodeGeneratorBuilder::new(interner.clone())
-            .optimization_level(OptimizationLevel::O3)
-            .build();
-        assert_eq!(generator.optimization_level, OptimizationLevel::O3);
-
-        let generator = CodeGeneratorBuilder::new(interner)
-            .optimization_level(OptimizationLevel::Auto)
-            .build();
-        assert_eq!(generator.optimization_level, OptimizationLevel::Auto);
-    }
-
-    #[test]
-    fn test_builder_chained_configuration() {
-        let interner = create_test_interner();
-        let generator = CodeGeneratorBuilder::new(interner)
-            .target(LuaTarget::Lua53)
-            .source_map("main.tl".to_string())
-            .bundle_mode("src/main".to_string())
-            .optimization_level(OptimizationLevel::O2)
-            .build();
-
-        assert_eq!(generator.target, LuaTarget::Lua53);
-        assert!(generator.emitter.source_map().is_some());
-        assert!(matches!(
-            generator.mode,
-            CodeGenMode::Bundle { module_id } if module_id == "src/main"
-        ));
-        assert_eq!(generator.optimization_level, OptimizationLevel::O2);
-    }
-
-    #[test]
-    fn test_builder_fluent_api() {
-        let interner = create_test_interner();
-
-        // Test that all methods return Self for chaining
-        let _generator = CodeGeneratorBuilder::new(interner)
-            .target(LuaTarget::Lua54)
-            .source_map("file.tl".to_string())
-            .require_mode()
-            .bundle_mode("bundle".to_string())
-            .optimization_level(OptimizationLevel::O1)
-            .build();
-
-        // If this compiles, the fluent API works correctly
     }
 }

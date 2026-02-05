@@ -6,7 +6,6 @@ use super::diagnostics::{
 use super::fs::{FileSystem, MockFileSystem, RealFileSystem};
 use super::optimizer::Optimizer;
 use std::any::{Any, TypeId};
-use std::rc::Rc;
 use std::sync::Arc;
 use typedlua_parser::diagnostics::CollectingDiagnosticHandler as ParserCollectingHandler;
 use typedlua_parser::string_interner::StringInterner;
@@ -189,7 +188,7 @@ impl DiContainer {
             .resolve::<Arc<dyn DiagnosticHandler>>()
             .unwrap_or_else(|| Arc::new(ConsoleDiagnosticHandler::new(false)));
         let (interner, common_ids) = StringInterner::new_with_common_identifiers();
-        let interner = Rc::new(interner);
+        let interner = Arc::new(interner);
 
         let mut lexer = Lexer::new(source, parser_handler.clone(), &interner);
         let tokens = lexer
@@ -235,7 +234,7 @@ impl DiContainer {
             .resolve::<Arc<dyn DiagnosticHandler>>()
             .unwrap_or_else(|| Arc::new(ConsoleDiagnosticHandler::new(false)));
         let (interner, common_ids) = StringInterner::new_with_common_identifiers();
-        let interner = Rc::new(interner);
+        let interner = Arc::new(interner);
 
         let mut lexer = Lexer::new(source, parser_handler.clone(), &interner);
         let tokens = lexer
@@ -279,7 +278,7 @@ impl TypeCheckHelper for DiContainer {
     fn type_check_source(&self, source: &str) -> Result<(), String> {
         let handler = Arc::new(CollectingDiagnosticHandler::new());
         let (interner, common_ids) = StringInterner::new_with_common_identifiers();
-        let interner = Rc::new(interner);
+        let interner = Arc::new(interner);
 
         let mut lexer = Lexer::new(source, handler.clone(), &interner);
         let tokens = lexer

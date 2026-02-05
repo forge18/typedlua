@@ -4,7 +4,7 @@
 
 use crate::config::OptimizationLevel;
 use crate::optimizer::{ExprVisitor, WholeProgramPass};
-use std::rc::Rc;
+use std::sync::Arc;
 use typedlua_parser::ast::expression::{
     Argument, ArrayElement, AssignmentOp, BinaryOp, Expression, ExpressionKind, Literal,
 };
@@ -21,11 +21,11 @@ const MIN_CONCAT_PARTS_FOR_OPTIMIZATION: usize = 3;
 
 pub struct StringConcatOptimizationPass {
     next_temp_id: usize,
-    interner: Rc<StringInterner>,
+    interner: Arc<StringInterner>,
 }
 
 impl StringConcatOptimizationPass {
-    pub fn new(interner: Rc<StringInterner>) -> Self {
+    pub fn new(interner: Arc<StringInterner>) -> Self {
         Self {
             next_temp_id: 0,
             interner,
@@ -612,6 +612,6 @@ impl StringConcatOptimizationPass {
 
 impl Default for StringConcatOptimizationPass {
     fn default() -> Self {
-        Self::new(Rc::new(StringInterner::new()))
+        Self::new(Arc::new(StringInterner::new()))
     }
 }

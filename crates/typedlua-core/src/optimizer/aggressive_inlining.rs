@@ -2,7 +2,7 @@ use crate::config::OptimizationLevel;
 
 use crate::optimizer::{StmtVisitor, WholeProgramPass};
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
+use std::sync::Arc;
 use typedlua_parser::ast::expression::{
     Argument, ArrowBody, Expression, ExpressionKind, MatchArmBody,
 };
@@ -31,7 +31,7 @@ pub struct AggressiveInliningPass {
     max_code_bloat_ratio: f64,
     next_temp_id: usize,
     functions: HashMap<StringId, FunctionDeclaration>,
-    interner: Option<Rc<StringInterner>>,
+    interner: Option<Arc<StringInterner>>,
     hot_paths: HashSet<StringId>,
 }
 
@@ -51,7 +51,7 @@ impl Default for AggressiveInliningPass {
 }
 
 impl AggressiveInliningPass {
-    pub fn new(interner: Rc<StringInterner>) -> Self {
+    pub fn new(interner: Arc<StringInterner>) -> Self {
         Self {
             interner: Some(interner),
             ..Default::default()

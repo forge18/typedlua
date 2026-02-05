@@ -1,7 +1,7 @@
 use crate::config::OptimizationLevel;
 use crate::optimizer::WholeProgramPass;
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
+use std::sync::Arc;
 use typedlua_parser::ast::expression::{Expression, ExpressionKind};
 use typedlua_parser::ast::pattern::Pattern;
 use typedlua_parser::ast::statement::{
@@ -13,12 +13,12 @@ use typedlua_parser::span::Span;
 use typedlua_parser::string_interner::StringInterner;
 
 pub struct GlobalLocalizationPass {
-    interner: Rc<StringInterner>,
+    interner: Arc<StringInterner>,
 }
 
 impl GlobalLocalizationPass {
     /// Create a new pass with the given string interner
-    pub fn new(interner: Rc<StringInterner>) -> Self {
+    pub fn new(interner: Arc<StringInterner>) -> Self {
         GlobalLocalizationPass { interner }
     }
 }

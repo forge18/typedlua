@@ -1,7 +1,6 @@
 use crate::config::OptimizationLevel;
 use crate::diagnostics::DiagnosticHandler;
 
-use std::rc::Rc;
 use std::sync::Arc;
 use typedlua_parser::ast::expression::Expression;
 use typedlua_parser::ast::statement::{Block, ForStatement, Statement};
@@ -586,7 +585,7 @@ pub struct Optimizer {
     level: OptimizationLevel,
     #[allow(dead_code)]
     handler: Arc<dyn DiagnosticHandler>,
-    interner: Rc<StringInterner>,
+    interner: Arc<StringInterner>,
 
     // Composite passes (merged traversals)
     expr_pass: Option<ExpressionCompositePass>,
@@ -603,7 +602,7 @@ impl Optimizer {
     pub fn new(
         level: OptimizationLevel,
         handler: Arc<dyn DiagnosticHandler>,
-        interner: Rc<StringInterner>,
+        interner: Arc<StringInterner>,
     ) -> Self {
         let mut optimizer = Self {
             level,

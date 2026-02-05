@@ -11,7 +11,7 @@ use crate::config::OptimizationLevel;
 
 use crate::optimizer::WholeProgramPass;
 use rustc_hash::FxHashMap;
-use std::rc::Rc;
+use std::sync::Arc;
 use typedlua_parser::ast::expression::{Expression, ExpressionKind, ReceiverClassInfo};
 use typedlua_parser::ast::statement::{ClassMember, Statement};
 use typedlua_parser::ast::types::TypeKind;
@@ -142,7 +142,7 @@ impl ClassHierarchy {
 pub struct DevirtualizationPass;
 
 impl DevirtualizationPass {
-    pub fn new(_interner: Rc<StringInterner>) -> Self {
+    pub fn new(_interner: Arc<StringInterner>) -> Self {
         Self
     }
 
