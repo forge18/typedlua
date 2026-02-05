@@ -21,7 +21,7 @@
 |-------------------------|---------------------|--------------------|------------------------|-----------------|----------------------|------|
 | Multi-pass AST          | Yes (18 passes)     | Yes                | **3 merged passes**    | Yes             | Yes                  | Yes  |
 | Fixed-point iteration   | Yes (max 10)        | No                 | No                     | No              | No                   | No   |
-| Parallel compilation    | **No**              | No (Go port: Yes)  | **Yes (goroutines)**   | **Yes (rayon)** | No                   | No   |
+| Parallel compilation    | **Yes (rayon)**     | No (Go port: Yes)  | **Yes (goroutines)**   | **Yes (rayon)** | No                   | No   |
 | Incremental compilation | Yes (bincode cache) | Yes (.tsbuildinfo) | No                     | Partial         | **Yes (beam cache)** | N/A  |
 | Bundling mode           | Yes                 | No (needs bundler) | **Yes (core feature)** | Yes             | No                   | N/A  |
 
@@ -91,22 +91,22 @@ Merging Groups A-D could reduce 14 passes down to 4, cutting AST traversals sign
 - Parallel type checking across modules
 - Shared memory between threads
 
-### TypedLua Status: Single-threaded pipeline
+### TypedLua Status: Parallel parsing and codegen ✅
 
-**Gap**: TypedLua processes everything sequentially. For multi-file projects, this means:
+**Implemented** (using Rust's `rayon` crate):
 
-- Files are parsed one at a time
-- Type checking is sequential
-- Optimization passes run on each file sequentially
-- Code generation is sequential
+1. ✅ **Parallel file parsing** - Each file is parsed independently with its own `StringInterner` (ThreadedRodeo)
+2. ✅ **Parallel code generation** - After sequential type checking, each module's codegen runs in parallel
+3. ⏳ **Sequential type checking** - Must remain sequential to maintain dependency order
+4. ⏳ **Sequential optimization** - Per-module optimization could be parallelized (Phase 3.3)
 
-**Opportunity**: Rust's `rayon` crate could enable:
+**Architecture:**
 
-1. Parallel file parsing (each file is independent until type checking)
-2. Parallel code generation (after type checking, each module's codegen is independent)
-3. Parallel optimization passes (per-module, after whole-program analysis)
+- Three-phase pipeline: Sequential type checking → Parallel codegen → Sequential output
+- Each parsed module owns its `StringInterner` (no merging needed)
+- `Arc<StringInterner>` enables thread-safe sharing during codegen
 
-**Estimated impact**: 2-4x improvement on multi-file projects (based on SWC/esbuild data).
+**Expected impact**: 2-4x improvement on multi-file projects (based on SWC/esbuild data).
 
 ---
 
@@ -373,64 +373,123 @@ let changed = run_composite_expr_pass(
 
 #### 3.1 Parallel Parsing (easy)
 
+- **Status: ✅ COMPLETE** (implemented with ThreadedRodeo architecture)
 - Files parse independently with no shared mutable state
-- Use per-thread `StringInterner` instances, merge after parsing
-- Wrap file parsing loop in `par_iter`
-- Files to modify:
-  - `crates/typedlua-core/Cargo.toml`
-  - `crates/typedlua-cli/src/main.rs` (multi-file compilation loop)
-- Status: **Not started**
+- Each thread creates its own `StringInterner` (backed by `ThreadedRodeo` for thread safety)
+- Files modified:
+  - `crates/typedlua-core/src/lib.rs` - Added `ParsedModule` struct
+  - `crates/typedlua-cli/src/main.rs` - Added `parse_single_file()` and parallel parsing loop
+
+**Implementation:**
 
 ```rust
-// Cargo.toml
-[dependencies]
-rayon = "1"
+// crates/typedlua-core/src/lib.rs:42
+/// A module after parsing, before type checking.
+/// Foundation for parallel parsing infrastructure.
+pub struct ParsedModule {
+    pub path: PathBuf,
+    pub ast: Program,
+    pub interner: StringInterner,  // Owns its StringInterner (ThreadedRodeo internally)
+    pub common_ids: CommonIdentifiers,
+    pub diagnostics: Vec<Diagnostic>,
+}
 
-// crates/typedlua-cli/src/main.rs
-use rayon::prelude::*;
-
-// Per-thread parsing with local interners, merged after
-let parsed_modules: Vec<ParsedModule> = source_files
+// crates/typedlua-cli/src/main.rs:1122
+// Parallel parsing - each thread gets its own interner
+let parsed_modules: Vec<ParsedModule> = stale_file_paths
     .par_iter()
-    .map(|file| {
-        let (mut interner, common) = StringInterner::new_with_common_identifiers();
-        let tokens = Lexer::new(&file.content, &mut interner).tokenize()?;
-        let ast = Parser::new(tokens, &mut interner, &common).parse()?;
-        Ok(ParsedModule {
-            path: file.path.clone(),
-            ast,
-            interner,
-        })
+    .map(|file_path| {
+        parse_single_file(file_path, &file_system)
     })
-    .collect::<Result<Vec<_>, Error>>()?;
+    .collect::<Result<Vec<_>, _>>()?;
 
-// Merge interners into a single shared interner for type checking
-let mut master_interner = StringInterner::new();
-let remap_tables: Vec<_> = parsed_modules.iter()
-    .map(|m| master_interner.merge_from(&m.interner))
-    .collect();
-// Remap StringIds in each AST using remap_tables
+// parse_single_file creates a new StringInterner per thread
+fn parse_single_file(
+    file_path: &Path,
+    file_system: &Arc<dyn FileSystem>,
+) -> anyhow::Result<ParsedModule> {
+    let source = file_system.read_file(file_path)?;
+    let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let interner = Rc::new(interner);  // Temporary Rc for parser API
+
+    let mut lexer = Lexer::new(&source, handler, &interner);
+    let tokens = lexer.tokenize()?;
+    let mut parser = Parser::new(tokens, handler, &interner, &common_ids);
+    let ast = parser.parse()?;
+
+    Ok(ParsedModule {
+        path: file_path.to_path_buf(),
+        ast,
+        interner: Rc::unwrap_or_clone(interner),  // Unwrap to transfer ownership
+        common_ids,
+        diagnostics,
+    })
+}
 ```
+
+**Key architectural decision:** No interner merging needed during parsing phase. Each `ParsedModule` owns its `StringInterner`, and integration happens later during type checking when modules are processed sequentially (maintaining dependency order).
 
 #### 3.2 Parallel Codegen (easy)
 
+- **Status: ✅ COMPLETE** (three-phase compilation pipeline)
 - After type checking, each module's code generation is independent
-- Same per-thread pattern as 3.1
-- Files to modify:
-  - `crates/typedlua-cli/src/main.rs` (codegen loop)
-- Status: **Not started**
+- Rc→Arc migration completed for thread safety (all optimizer passes updated)
+- Files modified:
+  - `crates/typedlua-cli/src/main.rs` - Three-phase pipeline with `CheckedModule`
+  - 9 optimizer pass files - Updated from `Rc<StringInterner>` to `Arc<StringInterner>`
+
+**Implementation:**
 
 ```rust
-// After sequential type checking completes:
-let outputs: Vec<(PathBuf, String)> = checked_modules
-    .par_iter()
-    .map(|module| {
-        let mut codegen = CodeGenerator::new(&module.ast, &interner, &options);
-        let lua_code = codegen.generate()?;
-        Ok((module.output_path.clone(), lua_code))
+// crates/typedlua-cli/src/main.rs:943
+/// Module that has been type-checked and is ready for parallel code generation
+struct CheckedModule {
+    file_path: PathBuf,
+    ast: Program,
+    interner: Arc<StringInterner>,  // Arc for thread-safe sharing
+    output_path: PathBuf,
+    enable_source_map: bool,
+    cache_entry: Option<(PathBuf, CachedModule, Vec<PathBuf>)>,
+}
+
+// SAFETY: All fields are Send after StringInterner migration to ThreadedRodeo
+unsafe impl Send for CheckedModule {}
+
+// Three-phase compilation pipeline:
+
+// Phase 1: Sequential type checking (maintains dependency order)
+let checked_modules: Vec<CheckedModule> = ordered_files
+    .iter()
+    .filter_map(|file_path| {
+        // Type check module...
+        Some(CheckedModule { ... })
     })
-    .collect::<Result<Vec<_>, Error>>()?;
+    .collect();
+
+// Phase 2: Parallel code generation (line 1284)
+let results: Vec<CompilationResult> = checked_modules
+    .into_par_iter()  // Parallel iteration
+    .map(|module| {
+        let mut builder = CodeGeneratorBuilder::new(module.interner.clone())
+            .target(target)
+            .output_format(output_format);
+        let mut generator = builder.build();
+        let lua_code = generator.generate(&mut module.ast)?;
+
+        CompilationResult {
+            file_path: module.file_path,
+            output_path: module.output_path,
+            lua_code,
+            source_map: generator.source_map(),
+            cache_entry: module.cache_entry,
+        }
+    })
+    .collect();
+
+// Phase 3: Sequential cache saving + output writing
 ```
+
+**Expected performance impact:** 2-4x speedup on multi-file projects based on SWC/esbuild data.
 
 #### 3.3 Parallel Optimization (moderate)
 
