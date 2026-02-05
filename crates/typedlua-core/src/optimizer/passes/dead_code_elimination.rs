@@ -1,11 +1,25 @@
 use crate::config::OptimizationLevel;
-use crate::optimizer::OptimizationPass;
+use crate::optimizer::{StmtVisitor, WholeProgramPass};
 use typedlua_parser::ast::statement::{ForStatement, Statement};
 use typedlua_parser::ast::Program;
 
 pub struct DeadCodeEliminationPass;
 
-impl OptimizationPass for DeadCodeEliminationPass {
+impl DeadCodeEliminationPass {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl StmtVisitor for DeadCodeEliminationPass {
+    fn visit_stmt(&mut self, _stmt: &mut Statement) -> bool {
+        // Dead code elimination happens at the block level, not individual statements
+        // The actual elimination is done in run() via eliminate_dead_code()
+        false
+    }
+}
+
+impl WholeProgramPass for DeadCodeEliminationPass {
     fn name(&self) -> &'static str {
         "dead-code-elimination"
     }
@@ -75,5 +89,11 @@ impl DeadCodeEliminationPass {
         }
 
         changed
+    }
+}
+
+impl Default for DeadCodeEliminationPass {
+    fn default() -> Self {
+        Self::new()
     }
 }

@@ -1,12 +1,26 @@
 use crate::config::OptimizationLevel;
-use crate::optimizer::OptimizationPass;
-use typedlua_parser::ast::expression::{Expression, ExpressionKind};
+use crate::optimizer::{ExprVisitor, WholeProgramPass};
+use typedlua_parser::ast::expression::Expression;
 use typedlua_parser::ast::statement::Statement;
 use typedlua_parser::ast::Program;
 
 pub struct TablePreallocationPass;
 
-impl OptimizationPass for TablePreallocationPass {
+impl TablePreallocationPass {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl ExprVisitor for TablePreallocationPass {
+    fn visit_expr(&mut self, _expr: &mut Expression) -> bool {
+        // This pass is currently analysis-only, no transformations
+        // Future: Could add metadata to table expressions for codegen hints
+        false
+    }
+}
+
+impl WholeProgramPass for TablePreallocationPass {
     fn name(&self) -> &'static str {
         "table-preallocation"
     }
@@ -32,6 +46,8 @@ impl OptimizationPass for TablePreallocationPass {
 
 impl TablePreallocationPass {
     fn count_tables_in_statement(&self, stmt: &Statement) -> usize {
+        use typedlua_parser::ast::statement::Statement;
+
         match stmt {
             Statement::Variable(decl) => self.count_tables_in_expression(&decl.initializer),
             Statement::Expression(expr) => self.count_tables_in_expression(expr),
@@ -64,6 +80,8 @@ impl TablePreallocationPass {
     }
 
     fn count_tables_in_expression(&self, expr: &Expression) -> usize {
+        use typedlua_parser::ast::expression::ExpressionKind;
+
         match &expr.kind {
             ExpressionKind::Object(fields) => {
                 let mut count = 1; // Count this table
@@ -117,5 +135,11 @@ impl TablePreallocationPass {
             }
             _ => 0,
         }
+    }
+}
+
+impl Default for TablePreallocationPass {
+    fn default() -> Self {
+        Self::new()
     }
 }

@@ -1,12 +1,23 @@
 use crate::config::OptimizationLevel;
-use crate::optimizer::OptimizationPass;
+use crate::optimizer::{ExprVisitor, WholeProgramPass};
 use typedlua_parser::ast::expression::{BinaryOp, Expression, ExpressionKind, Literal, UnaryOp};
-use typedlua_parser::ast::statement::{ForStatement, Statement};
 use typedlua_parser::ast::Program;
 
 pub struct ConstantFoldingPass;
 
-impl OptimizationPass for ConstantFoldingPass {
+impl ConstantFoldingPass {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl ExprVisitor for ConstantFoldingPass {
+    fn visit_expr(&mut self, expr: &mut Expression) -> bool {
+        self.fold_expression(expr)
+    }
+}
+
+impl WholeProgramPass for ConstantFoldingPass {
     fn name(&self) -> &'static str {
         "constant-folding"
     }
@@ -27,7 +38,9 @@ impl OptimizationPass for ConstantFoldingPass {
 }
 
 impl ConstantFoldingPass {
-    fn fold_statement(&mut self, stmt: &mut Statement) -> bool {
+    fn fold_statement(&mut self, stmt: &mut typedlua_parser::ast::statement::Statement) -> bool {
+        use typedlua_parser::ast::statement::{ForStatement, Statement};
+
         match stmt {
             Statement::Variable(decl) => self.fold_expression(&mut decl.initializer),
             Statement::Expression(expr) => self.fold_expression(expr),
@@ -80,7 +93,10 @@ impl ConstantFoldingPass {
         }
     }
 
-    fn fold_block_statements(&mut self, stmts: &mut [Statement]) -> bool {
+    fn fold_block_statements(
+        &mut self,
+        stmts: &mut [typedlua_parser::ast::statement::Statement],
+    ) -> bool {
         let mut changed = false;
         for stmt in stmts {
             changed |= self.fold_statement(stmt);
@@ -217,5 +233,11 @@ impl ConstantFoldingPass {
             BinaryOp::NotEqual => Some(left != right),
             _ => None,
         }
+    }
+}
+
+impl Default for ConstantFoldingPass {
+    fn default() -> Self {
+        Self::new()
     }
 }

@@ -19,7 +19,7 @@
 
 use crate::config::OptimizationLevel;
 
-use crate::optimizer::OptimizationPass;
+use crate::optimizer::{StmtVisitor, WholeProgramPass};
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
 use typedlua_parser::ast::expression::{AssignmentOp, Expression, ExpressionKind};
@@ -739,7 +739,15 @@ impl InterfaceMethodInliningPass {
     }
 }
 
-impl OptimizationPass for InterfaceMethodInliningPass {
+impl StmtVisitor for InterfaceMethodInliningPass {
+    fn visit_stmt(&mut self, _stmt: &mut Statement) -> bool {
+        // For visitor pattern, we need access to impl_map
+        // This is a simplified version - the actual run() method does the work
+        false
+    }
+}
+
+impl WholeProgramPass for InterfaceMethodInliningPass {
     fn name(&self) -> &'static str {
         "interface-method-inlining"
     }

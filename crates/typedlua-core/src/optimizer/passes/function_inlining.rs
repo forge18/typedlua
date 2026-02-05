@@ -2,7 +2,7 @@
 // =============================================================================
 
 use crate::config::OptimizationLevel;
-use crate::optimizer::OptimizationPass;
+use crate::optimizer::{PreAnalysisPass, StmtVisitor, WholeProgramPass};
 use std::collections::HashMap;
 use std::rc::Rc;
 use typedlua_parser::ast::expression::{ArrowBody, Expression, ExpressionKind};
@@ -47,12 +47,30 @@ impl Default for FunctionInliningPass {
 }
 
 impl FunctionInliningPass {
-    pub fn set_interner(&mut self, interner: Rc<StringInterner>) {
-        self.interner = Some(interner);
+    pub fn new(interner: Rc<StringInterner>) -> Self {
+        Self {
+            threshold: 5,
+            next_temp_id: 0,
+            functions: HashMap::new(),
+            interner: Some(interner),
+        }
     }
 }
 
-impl OptimizationPass for FunctionInliningPass {
+impl PreAnalysisPass for FunctionInliningPass {
+    fn analyze(&mut self, program: &Program) {
+        self.functions.clear();
+        self.collect_functions(program);
+    }
+}
+
+impl StmtVisitor for FunctionInliningPass {
+    fn visit_stmt(&mut self, stmt: &mut Statement) -> bool {
+        self.inline_in_statement(stmt)
+    }
+}
+
+impl WholeProgramPass for FunctionInliningPass {
     fn name(&self) -> &'static str {
         "function-inlining"
     }
@@ -63,13 +81,13 @@ impl OptimizationPass for FunctionInliningPass {
 
     fn run(&mut self, program: &mut Program) -> Result<bool, String> {
         self.next_temp_id = 0;
-        self.functions.clear();
 
-        self.collect_functions(program);
+        // Run pre-analysis
+        self.analyze(program);
 
         let mut changed = false;
         for stmt in &mut program.statements {
-            changed |= self.inline_in_statement(stmt);
+            changed |= self.visit_stmt(stmt);
         }
 
         Ok(changed)

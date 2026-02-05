@@ -1,12 +1,23 @@
 use crate::config::OptimizationLevel;
-use crate::optimizer::OptimizationPass;
+use crate::optimizer::{ExprVisitor, WholeProgramPass};
 use typedlua_parser::ast::expression::{BinaryOp, Expression, ExpressionKind, Literal, UnaryOp};
-use typedlua_parser::ast::statement::{ForStatement, Statement};
 use typedlua_parser::ast::Program;
 
 pub struct AlgebraicSimplificationPass;
 
-impl OptimizationPass for AlgebraicSimplificationPass {
+impl AlgebraicSimplificationPass {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl ExprVisitor for AlgebraicSimplificationPass {
+    fn visit_expr(&mut self, expr: &mut Expression) -> bool {
+        self.simplify_expression(expr)
+    }
+}
+
+impl WholeProgramPass for AlgebraicSimplificationPass {
     fn name(&self) -> &'static str {
         "algebraic-simplification"
     }
@@ -27,7 +38,12 @@ impl OptimizationPass for AlgebraicSimplificationPass {
 }
 
 impl AlgebraicSimplificationPass {
-    fn simplify_statement(&mut self, stmt: &mut Statement) -> bool {
+    fn simplify_statement(
+        &mut self,
+        stmt: &mut typedlua_parser::ast::statement::Statement,
+    ) -> bool {
+        use typedlua_parser::ast::statement::{ForStatement, Statement};
+
         match stmt {
             Statement::Variable(decl) => self.simplify_expression(&mut decl.initializer),
             Statement::Expression(expr) => self.simplify_expression(expr),
@@ -78,7 +94,10 @@ impl AlgebraicSimplificationPass {
         }
     }
 
-    fn simplify_block_statements(&mut self, stmts: &mut [Statement]) -> bool {
+    fn simplify_block_statements(
+        &mut self,
+        stmts: &mut [typedlua_parser::ast::statement::Statement],
+    ) -> bool {
         let mut changed = false;
         for stmt in stmts {
             changed |= self.simplify_statement(stmt);
@@ -217,4 +236,10 @@ fn is_one(expr: &ExpressionKind) -> bool {
         expr,
         ExpressionKind::Literal(Literal::Number(n)) if *n == 1.0
     )
+}
+
+impl Default for AlgebraicSimplificationPass {
+    fn default() -> Self {
+        Self::new()
+    }
 }

@@ -3,7 +3,7 @@
 // =============================================================================
 
 use crate::config::OptimizationLevel;
-use crate::optimizer::OptimizationPass;
+use crate::optimizer::WholeProgramPass;
 use crate::{build_substitutions, instantiate_function_declaration};
 use rustc_hash::FxHashMap;
 use std::collections::hash_map::DefaultHasher;
@@ -41,8 +41,14 @@ pub struct GenericSpecializationPass {
 }
 
 impl GenericSpecializationPass {
-    pub fn set_interner(&mut self, interner: Rc<StringInterner>) {
-        self.interner = Some(interner);
+    pub fn new(interner: Rc<StringInterner>) -> Self {
+        Self {
+            interner: Some(interner),
+            specializations: FxHashMap::default(),
+            next_spec_id: 0,
+            generic_functions: FxHashMap::default(),
+            new_functions: Vec::new(),
+        }
     }
 
     /// Collects all generic function declarations from the program
@@ -431,7 +437,7 @@ impl GenericSpecializationPass {
     }
 }
 
-impl OptimizationPass for GenericSpecializationPass {
+impl WholeProgramPass for GenericSpecializationPass {
     fn name(&self) -> &'static str {
         "generic-specialization"
     }

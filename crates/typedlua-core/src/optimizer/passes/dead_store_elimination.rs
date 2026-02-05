@@ -3,7 +3,7 @@
 // =============================================================================
 
 use crate::config::OptimizationLevel;
-use crate::optimizer::OptimizationPass;
+use crate::optimizer::{StmtVisitor, WholeProgramPass};
 use std::collections::HashSet;
 use typedlua_parser::ast::expression::{BinaryOp, Expression, ExpressionKind};
 use typedlua_parser::ast::pattern::Pattern;
@@ -15,7 +15,19 @@ use typedlua_parser::string_interner::StringId;
 /// Removes assignments to variables that are never read
 pub struct DeadStoreEliminationPass;
 
-impl OptimizationPass for DeadStoreEliminationPass {
+impl DeadStoreEliminationPass {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl StmtVisitor for DeadStoreEliminationPass {
+    fn visit_stmt(&mut self, stmt: &mut Statement) -> bool {
+        self.eliminate_dead_stores_in_statement(stmt)
+    }
+}
+
+impl WholeProgramPass for DeadStoreEliminationPass {
     fn name(&self) -> &'static str {
         "dead-store-elimination"
     }
@@ -857,5 +869,11 @@ impl DeadStoreEliminationPass {
             }
             _ => false,
         }
+    }
+}
+
+impl Default for DeadStoreEliminationPass {
+    fn default() -> Self {
+        Self::new()
     }
 }

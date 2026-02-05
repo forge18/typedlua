@@ -1,6 +1,6 @@
 use crate::config::OptimizationLevel;
 
-use crate::optimizer::OptimizationPass;
+use crate::optimizer::{StmtVisitor, WholeProgramPass};
 use std::rc::Rc;
 use typedlua_parser::ast::expression::{Expression, ExpressionKind, ReceiverClassInfo};
 use typedlua_parser::ast::statement::Statement;
@@ -265,7 +265,13 @@ impl MethodToFunctionConversionPass {
     }
 }
 
-impl OptimizationPass for MethodToFunctionConversionPass {
+impl StmtVisitor for MethodToFunctionConversionPass {
+    fn visit_stmt(&mut self, stmt: &mut Statement) -> bool {
+        self.convert_in_statement(stmt)
+    }
+}
+
+impl WholeProgramPass for MethodToFunctionConversionPass {
     fn name(&self) -> &'static str {
         "method-to-function-conversion"
     }

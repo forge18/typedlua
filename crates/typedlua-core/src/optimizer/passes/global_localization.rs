@@ -1,5 +1,5 @@
 use crate::config::OptimizationLevel;
-use crate::optimizer::OptimizationPass;
+use crate::optimizer::WholeProgramPass;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use typedlua_parser::ast::expression::{Expression, ExpressionKind};
@@ -23,7 +23,7 @@ impl GlobalLocalizationPass {
     }
 }
 
-impl OptimizationPass for GlobalLocalizationPass {
+impl WholeProgramPass for GlobalLocalizationPass {
     fn name(&self) -> &'static str {
         "global-localization"
     }

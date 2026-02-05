@@ -1,6 +1,6 @@
 use crate::config::OptimizationLevel;
 
-use crate::optimizer::OptimizationPass;
+use crate::optimizer::{StmtVisitor, WholeProgramPass};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use typedlua_parser::ast::expression::{
@@ -59,7 +59,13 @@ impl AggressiveInliningPass {
     }
 }
 
-impl OptimizationPass for AggressiveInliningPass {
+impl StmtVisitor for AggressiveInliningPass {
+    fn visit_stmt(&mut self, stmt: &mut Statement) -> bool {
+        self.inline_in_statement(stmt)
+    }
+}
+
+impl WholeProgramPass for AggressiveInliningPass {
     fn name(&self) -> &'static str {
         "aggressive-inlining"
     }

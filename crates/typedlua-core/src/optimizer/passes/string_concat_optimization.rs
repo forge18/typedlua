@@ -3,7 +3,7 @@
 // =============================================================================
 
 use crate::config::OptimizationLevel;
-use crate::optimizer::OptimizationPass;
+use crate::optimizer::{ExprVisitor, WholeProgramPass};
 use std::rc::Rc;
 use typedlua_parser::ast::expression::{
     Argument, ArrayElement, AssignmentOp, BinaryOp, Expression, ExpressionKind, Literal,
@@ -19,13 +19,35 @@ use typedlua_parser::string_interner::{StringId, StringInterner};
 
 const MIN_CONCAT_PARTS_FOR_OPTIMIZATION: usize = 3;
 
-#[derive(Default)]
 pub struct StringConcatOptimizationPass {
     next_temp_id: usize,
-    interner: Option<Rc<StringInterner>>,
+    interner: Rc<StringInterner>,
 }
 
-impl OptimizationPass for StringConcatOptimizationPass {
+impl StringConcatOptimizationPass {
+    pub fn new(interner: Rc<StringInterner>) -> Self {
+        Self {
+            next_temp_id: 0,
+            interner,
+        }
+    }
+}
+
+impl ExprVisitor for StringConcatOptimizationPass {
+    fn visit_expr(&mut self, expr: &mut Expression) -> bool {
+        // Check if this is a concat expression that can be optimized
+        if let ExpressionKind::Binary(BinaryOp::Concatenate, _left, _right) = &expr.kind {
+            let parts = self.flatten_concat_chain(expr);
+            if parts.len() >= MIN_CONCAT_PARTS_FOR_OPTIMIZATION {
+                self.replace_with_table_concat(expr, &parts);
+                return true;
+            }
+        }
+        false
+    }
+}
+
+impl WholeProgramPass for StringConcatOptimizationPass {
     fn name(&self) -> &'static str {
         "string-concat-optimization"
     }
@@ -56,10 +78,6 @@ impl OptimizationPass for StringConcatOptimizationPass {
 }
 
 impl StringConcatOptimizationPass {
-    pub fn set_interner(&mut self, interner: Rc<StringInterner>) {
-        self.interner = Some(interner);
-    }
-
     fn optimize_statement(&mut self, stmt: &mut Statement) -> bool {
         match stmt {
             Statement::Variable(decl) => self.optimize_concat_in_variable(decl),
@@ -305,7 +323,7 @@ impl StringConcatOptimizationPass {
         let temp_table_var = self.next_temp_id;
         self.next_temp_id += 1;
         let temp_table_name = format!("__str_concat_{}", temp_table_var);
-        let temp_table_id = self.interner_get_or_intern(&temp_table_name);
+        let temp_table_id = self.interner.get_or_intern(&temp_table_name);
 
         // Create: local __str_concat_N = {}
         let table_decl = Statement::Variable(VariableDeclaration {
@@ -330,10 +348,10 @@ impl StringConcatOptimizationPass {
                     Box::new(Expression::new(
                         ExpressionKind::Member(
                             Box::new(Expression::new(
-                                ExpressionKind::Identifier(self.interner_get_or_intern("table")),
+                                ExpressionKind::Identifier(self.interner.get_or_intern("table")),
                                 Span::dummy(),
                             )),
-                            Spanned::new(self.interner_get_or_intern("concat"), Span::dummy()),
+                            Spanned::new(self.interner.get_or_intern("concat"), Span::dummy()),
                         ),
                         Span::dummy(),
                     )),
@@ -437,12 +455,12 @@ impl StringConcatOptimizationPass {
                                         ExpressionKind::Member(
                                             Box::new(Expression::new(
                                                 ExpressionKind::Identifier(
-                                                    self.interner_get_or_intern("table"),
+                                                    self.interner.get_or_intern("table"),
                                                 ),
                                                 Span::dummy(),
                                             )),
                                             Spanned::new(
-                                                self.interner_get_or_intern("insert"),
+                                                self.interner.get_or_intern("insert"),
                                                 Span::dummy(),
                                             ),
                                         ),
@@ -482,12 +500,12 @@ impl StringConcatOptimizationPass {
                                     ExpressionKind::Member(
                                         Box::new(Expression::new(
                                             ExpressionKind::Identifier(
-                                                self.interner_get_or_intern("table"),
+                                                self.interner.get_or_intern("table"),
                                             ),
                                             Span::dummy(),
                                         )),
                                         Spanned::new(
-                                            self.interner_get_or_intern("insert"),
+                                            self.interner.get_or_intern("insert"),
                                             Span::dummy(),
                                         ),
                                     ),
@@ -571,10 +589,10 @@ impl StringConcatOptimizationPass {
                 Box::new(Expression::new(
                     ExpressionKind::Member(
                         Box::new(Expression::new(
-                            ExpressionKind::Identifier(self.interner_get_or_intern("table")),
+                            ExpressionKind::Identifier(self.interner.get_or_intern("table")),
                             Span::dummy(),
                         )),
-                        Spanned::new(self.interner_get_or_intern("concat"), Span::dummy()),
+                        Spanned::new(self.interner.get_or_intern("concat"), Span::dummy()),
                     ),
                     Span::dummy(),
                 )),
@@ -590,21 +608,10 @@ impl StringConcatOptimizationPass {
 
         *expr = concat_call;
     }
+}
 
-    #[cold]
-    fn unreachable_interner(&self) -> ! {
-        unsafe { std::hint::unreachable_unchecked() }
-    }
-
-    fn interner_get_or_intern(&self, name: &str) -> StringId {
-        if let Some(interner) = self.get_interner() {
-            interner.get_or_intern(name)
-        } else {
-            self.unreachable_interner()
-        }
-    }
-
-    fn get_interner(&self) -> Option<&Rc<StringInterner>> {
-        self.interner.as_ref()
+impl Default for StringConcatOptimizationPass {
+    fn default() -> Self {
+        Self::new(Rc::new(StringInterner::new()))
     }
 }

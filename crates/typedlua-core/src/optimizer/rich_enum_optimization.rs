@@ -1,12 +1,17 @@
 use crate::config::OptimizationLevel;
-
-use crate::optimizer::OptimizationPass;
+use crate::optimizer::WholeProgramPass;
 use typedlua_parser::ast::statement::{EnumDeclaration, Statement};
 use typedlua_parser::ast::Program;
 
 pub struct RichEnumOptimizationPass;
 
-impl OptimizationPass for RichEnumOptimizationPass {
+impl RichEnumOptimizationPass {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl WholeProgramPass for RichEnumOptimizationPass {
     fn name(&self) -> &'static str {
         "rich-enum-optimization"
     }
@@ -42,6 +47,12 @@ impl RichEnumOptimizationPass {
         !enum_decl.fields.is_empty()
             || enum_decl.constructor.is_some()
             || !enum_decl.methods.is_empty()
+    }
+}
+
+impl Default for RichEnumOptimizationPass {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -166,7 +177,7 @@ mod tests {
 
     #[test]
     fn test_rich_enum_detection() {
-        let mut pass = RichEnumOptimizationPass;
+        let mut pass = RichEnumOptimizationPass::new();
         let mut program = create_test_program_with_rich_enum();
         let result = pass.run(&mut program);
         assert!(result.is_ok());
@@ -174,7 +185,7 @@ mod tests {
 
     #[test]
     fn test_simple_enum_not_rich() {
-        let mut pass = RichEnumOptimizationPass;
+        let mut pass = RichEnumOptimizationPass::new();
         let mut program = create_test_program_with_simple_enum();
         let result = pass.run(&mut program);
         assert!(result.is_ok());
@@ -182,7 +193,7 @@ mod tests {
 
     #[test]
     fn test_pass_returns_no_changes() {
-        let mut pass = RichEnumOptimizationPass;
+        let mut pass = RichEnumOptimizationPass::new();
         let mut program = create_test_program_with_rich_enum();
         let result = pass.run(&mut program);
         assert!(!result.unwrap());

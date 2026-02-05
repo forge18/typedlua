@@ -10,7 +10,7 @@
 
 use crate::config::OptimizationLevel;
 
-use crate::optimizer::OptimizationPass;
+use crate::optimizer::{ExprVisitor, PreAnalysisPass, WholeProgramPass};
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
 use typedlua_parser::ast::expression::{BinaryOp, Expression, ExpressionKind, UnaryOp};
@@ -383,6 +383,299 @@ impl OperatorInliningPass {
     }
 }
 
+impl ExprVisitor for OperatorInliningPass {
+    fn visit_expr(&mut self, expr: &mut Expression) -> bool {
+        // Only process binary operations (the main transformation target)
+        if let ExpressionKind::Binary(op, left, right) = &mut expr.kind {
+            if let Some(new_kind) = self.convert_operator_call(op, left, right, expr.span) {
+                expr.kind = new_kind;
+                return true;
+            }
+        }
+        false
+    }
+}
+
+impl PreAnalysisPass for OperatorInliningPass {
+    fn analyze(&mut self, program: &Program) {
+        self.build_operator_catalog(program);
+    }
+}
+
+impl WholeProgramPass for OperatorInliningPass {
+    fn name(&self) -> &'static str {
+        "operator-inlining"
+    }
+
+    fn min_level(&self) -> OptimizationLevel {
+        OptimizationLevel::O3
+    }
+
+    fn run(&mut self, program: &mut Program) -> Result<bool, String> {
+        // Run analysis phase
+        self.analyze(program);
+
+        let mut changed = false;
+        for stmt in &mut program.statements {
+            changed |= self.process_statement(stmt);
+        }
+
+        Ok(changed)
+    }
+}
+
+impl OperatorInliningPass {
+    fn process_statement(&mut self, stmt: &mut Statement) -> bool {
+        let mut changed = false;
+
+        match stmt {
+            Statement::Function(func) => {
+                for s in &mut func.body.statements {
+                    changed |= self.process_statement(s);
+                }
+            }
+            Statement::If(if_stmt) => {
+                changed |= self.visit_expr(&mut if_stmt.condition);
+                for s in &mut if_stmt.then_block.statements {
+                    changed |= self.process_statement(s);
+                }
+                for else_if in &mut if_stmt.else_ifs {
+                    changed |= self.visit_expr(&mut else_if.condition);
+                    for s in &mut else_if.block.statements {
+                        changed |= self.process_statement(s);
+                    }
+                }
+                if let Some(else_block) = &mut if_stmt.else_block {
+                    for s in &mut else_block.statements {
+                        changed |= self.process_statement(s);
+                    }
+                }
+            }
+            Statement::While(while_stmt) => {
+                changed |= self.visit_expr(&mut while_stmt.condition);
+                for s in &mut while_stmt.body.statements {
+                    changed |= self.process_statement(s);
+                }
+            }
+            Statement::For(for_stmt) => {
+                use typedlua_parser::ast::statement::ForStatement;
+                let body = match &mut **for_stmt {
+                    ForStatement::Numeric(for_num) => &mut for_num.body,
+                    ForStatement::Generic(for_gen) => &mut for_gen.body,
+                };
+                for s in &mut body.statements {
+                    changed |= self.process_statement(s);
+                }
+            }
+            Statement::Repeat(repeat_stmt) => {
+                changed |= self.visit_expr(&mut repeat_stmt.until);
+                for s in &mut repeat_stmt.body.statements {
+                    changed |= self.process_statement(s);
+                }
+            }
+            Statement::Return(return_stmt) => {
+                for value in &mut return_stmt.values {
+                    changed |= self.visit_expr(value);
+                }
+            }
+            Statement::Expression(expr) => {
+                changed |= self.process_expression(expr);
+            }
+            Statement::Block(block) => {
+                for s in &mut block.statements {
+                    changed |= self.process_statement(s);
+                }
+            }
+            Statement::Try(try_stmt) => {
+                for s in &mut try_stmt.try_block.statements {
+                    changed |= self.process_statement(s);
+                }
+                for clause in &mut try_stmt.catch_clauses {
+                    for s in &mut clause.body.statements {
+                        changed |= self.process_statement(s);
+                    }
+                }
+                if let Some(finally) = &mut try_stmt.finally_block {
+                    for s in &mut finally.statements {
+                        changed |= self.process_statement(s);
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        changed
+    }
+
+    fn process_expression(&mut self, expr: &mut Expression) -> bool {
+        let mut changed = false;
+
+        // Visit children first
+        match &mut expr.kind {
+            ExpressionKind::Binary(_, left, right) => {
+                changed |= self.process_expression(left);
+                changed |= self.process_expression(right);
+            }
+            ExpressionKind::Call(func, args, _) => {
+                changed |= self.process_expression(func);
+                for arg in args.iter_mut() {
+                    changed |= self.process_expression(&mut arg.value);
+                }
+            }
+            ExpressionKind::MethodCall(obj, _, args, _) => {
+                changed |= self.process_expression(obj);
+                for arg in args.iter_mut() {
+                    changed |= self.process_expression(&mut arg.value);
+                }
+            }
+            ExpressionKind::Unary(_, operand) => {
+                changed |= self.process_expression(operand);
+            }
+            ExpressionKind::Conditional(cond, then_expr, else_expr) => {
+                changed |= self.process_expression(cond);
+                changed |= self.process_expression(then_expr);
+                changed |= self.process_expression(else_expr);
+            }
+            ExpressionKind::Pipe(left, right) => {
+                changed |= self.process_expression(left);
+                changed |= self.process_expression(right);
+            }
+            ExpressionKind::Match(match_expr) => {
+                changed |= self.process_expression(&mut match_expr.value);
+                for arm in &mut match_expr.arms {
+                    match &mut arm.body {
+                        typedlua_parser::ast::expression::MatchArmBody::Expression(e) => {
+                            changed |= self.process_expression(e);
+                        }
+                        typedlua_parser::ast::expression::MatchArmBody::Block(block) => {
+                            for s in &mut block.statements {
+                                changed |= self.process_statement(s);
+                            }
+                        }
+                    }
+                }
+            }
+            ExpressionKind::Arrow(arrow) => {
+                for param in &mut arrow.parameters {
+                    if let Some(default) = &mut param.default {
+                        changed |= self.process_expression(default);
+                    }
+                }
+                match &mut arrow.body {
+                    typedlua_parser::ast::expression::ArrowBody::Expression(e) => {
+                        changed |= self.process_expression(e);
+                    }
+                    typedlua_parser::ast::expression::ArrowBody::Block(block) => {
+                        for s in &mut block.statements {
+                            changed |= self.process_statement(s);
+                        }
+                    }
+                }
+            }
+            ExpressionKind::New(callee, args, _) => {
+                changed |= self.process_expression(callee);
+                for arg in args {
+                    changed |= self.process_expression(&mut arg.value);
+                }
+            }
+            ExpressionKind::Try(try_expr) => {
+                changed |= self.process_expression(&mut try_expr.expression);
+                changed |= self.process_expression(&mut try_expr.catch_expression);
+            }
+            ExpressionKind::ErrorChain(left, right) => {
+                changed |= self.process_expression(left);
+                changed |= self.process_expression(right);
+            }
+            ExpressionKind::OptionalMember(obj, _) => {
+                changed |= self.process_expression(obj);
+            }
+            ExpressionKind::OptionalIndex(obj, index) => {
+                changed |= self.process_expression(obj);
+                changed |= self.process_expression(index);
+            }
+            ExpressionKind::OptionalCall(obj, args, _) => {
+                changed |= self.process_expression(obj);
+                for arg in args {
+                    changed |= self.process_expression(&mut arg.value);
+                }
+            }
+            ExpressionKind::OptionalMethodCall(obj, _, args, _) => {
+                changed |= self.process_expression(obj);
+                for arg in args {
+                    changed |= self.process_expression(&mut arg.value);
+                }
+            }
+            ExpressionKind::Assignment(left, _, right) => {
+                changed |= self.process_expression(left);
+                changed |= self.process_expression(right);
+            }
+            ExpressionKind::Member(obj, _) => {
+                changed |= self.process_expression(obj);
+            }
+            ExpressionKind::Index(obj, index) => {
+                changed |= self.process_expression(obj);
+                changed |= self.process_expression(index);
+            }
+            ExpressionKind::Array(elements) => {
+                for elem in elements {
+                    match elem {
+                        typedlua_parser::ast::expression::ArrayElement::Expression(e) => {
+                            changed |= self.process_expression(e);
+                        }
+                        typedlua_parser::ast::expression::ArrayElement::Spread(e) => {
+                            changed |= self.process_expression(e);
+                        }
+                    }
+                }
+            }
+            ExpressionKind::Object(props) => {
+                for prop in props {
+                    match prop {
+                        typedlua_parser::ast::expression::ObjectProperty::Property {
+                            value,
+                            ..
+                        } => {
+                            changed |= self.process_expression(value);
+                        }
+                        typedlua_parser::ast::expression::ObjectProperty::Computed {
+                            key,
+                            value,
+                            ..
+                        } => {
+                            changed |= self.process_expression(key);
+                            changed |= self.process_expression(value);
+                        }
+                        typedlua_parser::ast::expression::ObjectProperty::Spread {
+                            value, ..
+                        } => {
+                            changed |= self.process_expression(value);
+                        }
+                    }
+                }
+            }
+            ExpressionKind::Parenthesized(inner) => {
+                changed |= self.process_expression(inner);
+            }
+            ExpressionKind::TypeAssertion(expr, _) => {
+                changed |= self.process_expression(expr);
+            }
+            _ => {}
+        }
+
+        // Then apply visitor transformation
+        changed |= self.visit_expr(expr);
+
+        changed
+    }
+}
+
+impl Default for OperatorInliningPass {
+    #[allow(clippy::arc_with_non_send_sync)]
+    fn default() -> Self {
+        Self::new(Rc::new(StringInterner::new()))
+    }
+}
+
 fn binary_op_to_operator_kind(
     op: &BinaryOp,
 ) -> Option<typedlua_parser::ast::statement::OperatorKind> {
@@ -582,276 +875,6 @@ fn expression_has_side_effects(expr: &Expression) -> bool {
         | ExpressionKind::Identifier(_)
         | ExpressionKind::SelfKeyword => false,
         _ => true,
-    }
-}
-
-impl OptimizationPass for OperatorInliningPass {
-    fn name(&self) -> &'static str {
-        "operator-inlining"
-    }
-
-    fn min_level(&self) -> OptimizationLevel {
-        OptimizationLevel::O3
-    }
-
-    fn run(&mut self, program: &mut Program) -> Result<bool, String> {
-        self.build_operator_catalog(program);
-
-        let mut changed = false;
-        for stmt in &mut program.statements {
-            changed |= self.process_statement(stmt);
-        }
-
-        Ok(changed)
-    }
-}
-
-impl OperatorInliningPass {
-    fn process_statement(&mut self, stmt: &mut Statement) -> bool {
-        match stmt {
-            Statement::Function(func) => {
-                let mut changed = false;
-                for s in &mut func.body.statements {
-                    changed |= self.process_statement(s);
-                }
-                changed
-            }
-            Statement::If(if_stmt) => {
-                let mut changed = self.process_expression(&mut if_stmt.condition);
-                changed |= self.process_block(&mut if_stmt.then_block);
-                for else_if in &mut if_stmt.else_ifs {
-                    changed |= self.process_expression(&mut else_if.condition);
-                    changed |= self.process_block(&mut else_if.block);
-                }
-                if let Some(else_block) = &mut if_stmt.else_block {
-                    changed |= self.process_block(else_block);
-                }
-                changed
-            }
-            Statement::While(while_stmt) => {
-                let mut changed = self.process_expression(&mut while_stmt.condition);
-                changed |= self.process_block(&mut while_stmt.body);
-                changed
-            }
-            Statement::For(for_stmt) => {
-                use typedlua_parser::ast::statement::ForStatement;
-                let body = match &mut **for_stmt {
-                    ForStatement::Numeric(for_num) => &mut for_num.body,
-                    ForStatement::Generic(for_gen) => &mut for_gen.body,
-                };
-                self.process_block(body)
-            }
-            Statement::Repeat(repeat_stmt) => {
-                let mut changed = self.process_expression(&mut repeat_stmt.until);
-                changed |= self.process_block(&mut repeat_stmt.body);
-                changed
-            }
-            Statement::Return(return_stmt) => {
-                let mut changed = false;
-                for value in &mut return_stmt.values {
-                    changed |= self.process_expression(value);
-                }
-                changed
-            }
-            Statement::Expression(expr) => self.process_expression(expr),
-            Statement::Block(block) => self.process_block(block),
-            Statement::Try(try_stmt) => {
-                let mut changed = self.process_block(&mut try_stmt.try_block);
-                for clause in &mut try_stmt.catch_clauses {
-                    changed |= self.process_block(&mut clause.body);
-                }
-                if let Some(finally) = &mut try_stmt.finally_block {
-                    changed |= self.process_block(finally);
-                }
-                changed
-            }
-            _ => false,
-        }
-    }
-
-    fn process_block(&mut self, block: &mut Block) -> bool {
-        let mut changed = false;
-        for stmt in &mut block.statements {
-            changed |= self.process_statement(stmt);
-        }
-        changed
-    }
-
-    fn process_expression(&mut self, expr: &mut Expression) -> bool {
-        match &mut expr.kind {
-            ExpressionKind::Binary(op, left, right) => {
-                let mut changed = self.process_expression(left);
-                changed |= self.process_expression(right);
-
-                if let Some(new_kind) = self.convert_operator_call(op, left, right, expr.span) {
-                    expr.kind = new_kind;
-                    changed = true;
-                }
-
-                changed
-            }
-            ExpressionKind::Call(func, args, _) => {
-                let mut changed = self.process_expression(func);
-                for arg in args.iter_mut() {
-                    changed |= self.process_expression(&mut arg.value);
-                }
-                changed
-            }
-            ExpressionKind::MethodCall(obj, _, args, _) => {
-                let mut changed = self.process_expression(obj);
-                for arg in args.iter_mut() {
-                    changed |= self.process_expression(&mut arg.value);
-                }
-                changed
-            }
-            ExpressionKind::Unary(_op, operand) => self.process_expression(operand),
-            ExpressionKind::Conditional(cond, then_expr, else_expr) => {
-                let mut changed = self.process_expression(cond);
-                changed |= self.process_expression(then_expr);
-                changed |= self.process_expression(else_expr);
-                changed
-            }
-            ExpressionKind::Pipe(left, right) => {
-                let mut changed = self.process_expression(left);
-                changed |= self.process_expression(right);
-                changed
-            }
-            ExpressionKind::Match(match_expr) => {
-                let mut changed = self.process_expression(&mut match_expr.value);
-                for arm in &mut match_expr.arms {
-                    match &mut arm.body {
-                        typedlua_parser::ast::expression::MatchArmBody::Expression(e) => {
-                            changed |= self.process_expression(e);
-                        }
-                        typedlua_parser::ast::expression::MatchArmBody::Block(block) => {
-                            changed |= self.process_block(block);
-                        }
-                    }
-                }
-                changed
-            }
-            ExpressionKind::Arrow(arrow) => {
-                let mut changed = false;
-                for param in &mut arrow.parameters {
-                    if let Some(default) = &mut param.default {
-                        changed |= self.process_expression(default);
-                    }
-                }
-                match &mut arrow.body {
-                    typedlua_parser::ast::expression::ArrowBody::Expression(e) => {
-                        changed |= self.process_expression(e);
-                    }
-                    typedlua_parser::ast::expression::ArrowBody::Block(block) => {
-                        changed |= self.process_block(block);
-                    }
-                }
-                changed
-            }
-            ExpressionKind::New(callee, args, _) => {
-                let mut changed = self.process_expression(callee);
-                for arg in args {
-                    changed |= self.process_expression(&mut arg.value);
-                }
-                changed
-            }
-            ExpressionKind::Try(try_expr) => {
-                let mut changed = self.process_expression(&mut try_expr.expression);
-                changed |= self.process_expression(&mut try_expr.catch_expression);
-                changed
-            }
-            ExpressionKind::ErrorChain(left, right) => {
-                let mut changed = self.process_expression(left);
-                changed |= self.process_expression(right);
-                changed
-            }
-            ExpressionKind::OptionalMember(obj, _) => self.process_expression(obj),
-            ExpressionKind::OptionalIndex(obj, index) => {
-                let mut changed = self.process_expression(obj);
-                changed |= self.process_expression(index);
-                changed
-            }
-            ExpressionKind::OptionalCall(obj, args, _) => {
-                let mut changed = self.process_expression(obj);
-                for arg in args {
-                    changed |= self.process_expression(&mut arg.value);
-                }
-                changed
-            }
-            ExpressionKind::OptionalMethodCall(obj, _, args, _) => {
-                let mut changed = self.process_expression(obj);
-                for arg in args {
-                    changed |= self.process_expression(&mut arg.value);
-                }
-                changed
-            }
-            ExpressionKind::Assignment(left, _op, right) => {
-                let mut changed = self.process_expression(left);
-                changed |= self.process_expression(right);
-                changed
-            }
-            ExpressionKind::Member(obj, _) => self.process_expression(obj),
-            ExpressionKind::Index(obj, index) => {
-                let mut changed = self.process_expression(obj);
-                changed |= self.process_expression(index);
-                changed
-            }
-            ExpressionKind::Array(elements) => {
-                let mut changed = false;
-                for elem in elements {
-                    match elem {
-                        typedlua_parser::ast::expression::ArrayElement::Expression(e) => {
-                            changed |= self.process_expression(e);
-                        }
-                        typedlua_parser::ast::expression::ArrayElement::Spread(e) => {
-                            changed |= self.process_expression(e);
-                        }
-                    }
-                }
-                changed
-            }
-            ExpressionKind::Object(props) => {
-                let mut changed = false;
-                for prop in props {
-                    match prop {
-                        typedlua_parser::ast::expression::ObjectProperty::Property {
-                            value,
-                            ..
-                        } => {
-                            changed |= self.process_expression(value);
-                        }
-                        typedlua_parser::ast::expression::ObjectProperty::Computed {
-                            key,
-                            value,
-                            ..
-                        } => {
-                            changed |= self.process_expression(key);
-                            changed |= self.process_expression(value);
-                        }
-                        typedlua_parser::ast::expression::ObjectProperty::Spread {
-                            value, ..
-                        } => {
-                            changed |= self.process_expression(value);
-                        }
-                    }
-                }
-                changed
-            }
-            ExpressionKind::Parenthesized(inner) => self.process_expression(inner),
-            ExpressionKind::TypeAssertion(expr, _) => self.process_expression(expr),
-            ExpressionKind::Identifier(_)
-            | ExpressionKind::Literal(_)
-            | ExpressionKind::SelfKeyword
-            | ExpressionKind::SuperKeyword
-            | ExpressionKind::Template(_)
-            | ExpressionKind::Function(_) => false,
-        }
-    }
-}
-
-impl Default for OperatorInliningPass {
-    #[allow(clippy::arc_with_non_send_sync)]
-    fn default() -> Self {
-        Self::new(Rc::new(StringInterner::new()))
     }
 }
 

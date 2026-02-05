@@ -3,7 +3,7 @@
 // =============================================================================
 
 use crate::config::OptimizationLevel;
-use crate::optimizer::OptimizationPass;
+use crate::optimizer::{StmtVisitor, WholeProgramPass};
 use typedlua_parser::ast::expression::Expression;
 use typedlua_parser::ast::expression::ExpressionKind;
 use typedlua_parser::ast::statement::{ForStatement, Statement};
@@ -14,7 +14,20 @@ use typedlua_parser::ast::Program;
 /// Lua automatically handles tail calls at runtime - this pass provides analysis and verification
 pub struct TailCallOptimizationPass;
 
-impl OptimizationPass for TailCallOptimizationPass {
+impl TailCallOptimizationPass {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl StmtVisitor for TailCallOptimizationPass {
+    fn visit_stmt(&mut self, _stmt: &mut Statement) -> bool {
+        // This pass is analysis-only, no transformations
+        false
+    }
+}
+
+impl WholeProgramPass for TailCallOptimizationPass {
     fn name(&self) -> &'static str {
         "tail-call-optimization"
     }
@@ -88,5 +101,11 @@ impl TailCallOptimizationPass {
             values[0].kind,
             ExpressionKind::Call(_, _, _) | ExpressionKind::MethodCall(_, _, _, _)
         )
+    }
+}
+
+impl Default for TailCallOptimizationPass {
+    fn default() -> Self {
+        Self::new()
     }
 }

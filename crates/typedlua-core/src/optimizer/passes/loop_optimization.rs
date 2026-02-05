@@ -3,7 +3,7 @@
 // =============================================================================
 
 use crate::config::OptimizationLevel;
-use crate::optimizer::OptimizationPass;
+use crate::optimizer::WholeProgramPass;
 use std::collections::HashSet;
 use typedlua_parser::ast::expression::{
     ArrayElement, BinaryOp, Expression, ExpressionKind, Literal, UnaryOp,
@@ -17,10 +17,15 @@ use typedlua_parser::string_interner::StringId;
 /// 1. Hoists loop-invariant local variable declarations
 /// 2. Removes dead loops (while false, zero-iteration for, repeat until true)
 /// 3. Handles all loop types including repeat...until
-#[derive(Default)]
 pub struct LoopOptimizationPass;
 
-impl OptimizationPass for LoopOptimizationPass {
+impl LoopOptimizationPass {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl WholeProgramPass for LoopOptimizationPass {
     fn name(&self) -> &'static str {
         "loop-optimization"
     }
@@ -715,5 +720,11 @@ impl LoopOptimizationPass {
         } else {
             start < end
         }
+    }
+}
+
+impl Default for LoopOptimizationPass {
+    fn default() -> Self {
+        Self::new()
     }
 }

@@ -9,7 +9,7 @@
 
 use crate::config::OptimizationLevel;
 
-use crate::optimizer::OptimizationPass;
+use crate::optimizer::WholeProgramPass;
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
 use typedlua_parser::ast::expression::{Expression, ExpressionKind, ReceiverClassInfo};
@@ -426,7 +426,7 @@ impl DevirtualizationPass {
     }
 }
 
-impl OptimizationPass for DevirtualizationPass {
+impl WholeProgramPass for DevirtualizationPass {
     fn name(&self) -> &'static str {
         "devirtualization"
     }
