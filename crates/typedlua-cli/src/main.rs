@@ -957,7 +957,7 @@ fn parse_single_file(
 
     let mut parser =
         typedlua_parser::parser::Parser::new(tokens, handler.clone(), &interner, &common_ids);
-    let mut ast = parser.parse()?;
+    let ast = parser.parse()?;
 
     if typedlua_core::diagnostics::DiagnosticHandler::has_errors(&*handler) {
         anyhow::bail!(
@@ -1092,7 +1092,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
         .filter(|file_path| {
             let canonical = file_path
                 .canonicalize()
-                .unwrap_or_else(|_| file_path.clone().to_path_buf());
+                .unwrap_or_else(|_| file_path.to_path_buf());
             stale_files.contains(&canonical)
         })
         .collect();
@@ -1137,7 +1137,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
         .map(|file_path| {
             let canonical = file_path
                 .canonicalize()
-                .unwrap_or_else(|_| file_path.clone().to_path_buf());
+                .unwrap_or_else(|_| file_path.to_path_buf());
             let is_stale = stale_files.contains(&canonical);
 
             // --- Cache hit: use cached AST, skip parse + type check ---
