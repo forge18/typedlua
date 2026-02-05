@@ -15,4 +15,11 @@
 |----|------|---|-------|------|
 | #6262 | 1:58 PM | 🔄 | Replaced embedded typechecker with external typedlua-typechecker crate | ~572 |
 | #6241 | 1:28 PM | ⚖️ | Plan created to migrate to external typedlua-typechecker crate | ~471 |
+
+### Feb 4, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #6828 | 8:25 PM | 🔵 | Complete TypedLua Optimization System Analysis Compiled | ~737 |
+| #6817 | 8:20 PM | 🔵 | TypedLua Compiler Pipeline Architecture with Configurable Optimization | ~457 |
 </claude-mem-context>
