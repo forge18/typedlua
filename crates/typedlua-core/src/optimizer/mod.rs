@@ -1083,75 +1083,6 @@ impl Optimizer {
                     }
                 }
             }
-            }
-
-            // Run elimination composite pass
-            if let Some(ref mut pass) = self.elim_pass {
-                if effective_level >= OptimizationLevel::O2
-                    && self.should_run_pass(&pass.required_features(), features, "elimination")
-                {
-                    let start = Instant::now();
-                    let pass_changed = pass.run(program)?;
-                    let elapsed = start.elapsed();
-                    debug!(
-                        "  [Iter {}] EliminationCompositePass: {:?} (changed: {})",
-                        iteration, elapsed, pass_changed
-                    );
-                    changed |= pass_changed;
-                }
-            }
-
-            // Run function composite pass
-            if let Some(ref mut pass) = self.func_pass {
-                if effective_level >= OptimizationLevel::O2
-                    && self.should_run_pass(&pass.required_features(), features, "function")
-                {
-                    let start = Instant::now();
-                    let pass_changed = pass.run(program)?;
-                    let elapsed = start.elapsed();
-                    debug!(
-                        "  [Iter {}] FunctionCompositePass: {:?} (changed: {})",
-                        iteration, elapsed, pass_changed
-                    );
-                    changed |= pass_changed;
-                }
-            }
-
-            // Run data structure composite pass
-            if let Some(ref mut pass) = self.data_pass {
-                if effective_level >= OptimizationLevel::O2
-                    && self.should_run_pass(&pass.required_features(), features, "data-structure")
-                {
-                    let start = Instant::now();
-                    let pass_changed = pass.run(program)?;
-                    let elapsed = start.elapsed();
-                    debug!(
-                        "  [Iter {}] DataStructureCompositePass: {:?} (changed: {})",
-                        iteration, elapsed, pass_changed
-                    );
-                    changed |= pass_changed;
-                }
-            }
-
-            // Run standalone passes
-            for pass in &mut self.standalone_passes {
-                if pass.min_level() <= effective_level {
-                    let required_features = pass.required_features();
-                    if self.should_run_pass(&required_features, features, pass.name()) {
-                        let start = Instant::now();
-                        let pass_changed = pass.run(program)?;
-                        let elapsed = start.elapsed();
-                        debug!(
-                            "  [Iter {}] {}: {:?} (changed: {})",
-                            iteration,
-                            pass.name(),
-                            elapsed,
-                            pass_changed
-                        );
-                        changed |= pass_changed;
-                    }
-                }
-            }
 
             // If no pass made changes, we've reached a fixed point
             if !changed {
@@ -1168,27 +1099,4 @@ impl Optimizer {
         Ok(())
     }
 
-    /// Check if a pass should run based on detected AST features and pass requirements
-    fn should_run_pass(
-        &self,
-        required: &AstFeatures,
-        detected: AstFeatures,
-        pass_name: &str,
-    ) -> bool {
-        if required.is_empty() {
-            // Pass has no specific requirements, always run
-            return true;
-        }
-
-        let has_required = detected.contains(*required);
-
-        if !has_required {
-            debug!(
-                "Skipping {} pass - AST missing required features: {:?}",
-                pass_name, required
-            );
-        }
-
-        has_required
-    }
 }
