@@ -114,16 +114,16 @@
 - [x] Add debug logging for invalidation decisions via tracing
 
 **Status:** **COMPLETE** - Incremental type checking infrastructure fully integrated.
-
+Is 
 #### Phase 2.5: Testing & Validation (Week 3)
 
-- [ ] Test: Signature-only change (params) → dependents re-checked
-- [ ] Test: Body-only change → dependents NOT re-checked
-- [ ] Test: New function → no invalidation
-- [ ] Test: Deleted function → dependents invalidated
-- [ ] Test: Transitive dependencies work correctly
-- [ ] Run benchmarks to measure 50-90% speedup on incremental edits
-- [ ] Test with real-world projects
+- [x] Test: Signature-only change (params) → dependents re-checked
+- [x] Test: Body-only change → dependents NOT re-checked
+- [x] Test: New function → no invalidation
+- [x] Test: Deleted function → dependents invalidated
+- [x] Test: Transitive dependencies work correctly
+- [x] Run benchmarks to measure 50-90% speedup on incremental edits
+- [x] Test with real-world projects
 
 **Expected:** 50-90% faster incremental edits (OOPSLA 2022 paper: 21-147× speedup)
 
