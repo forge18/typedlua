@@ -176,6 +176,8 @@ fn test_parser_error_reporting() {
 // ============================================================================
 
 /// Test --out-file concatenates multiple files
+/// Note: Uses --no-tree-shake because tree shaking would remove file2.tl
+/// since it's not imported from file1.tl
 #[test]
 fn test_out_file_concatenation() {
     let temp_dir = TempDir::new().unwrap();
@@ -191,6 +193,7 @@ fn test_out_file_concatenation() {
         .arg(&file2)
         .arg("--out-file")
         .arg(&out_file)
+        .arg("--no-tree-shake")
         .assert()
         .success();
 

@@ -801,6 +801,139 @@ pub struct ReferenceRewriter<'a> {
     current_module: String,
 }
 
+// ============================================================
+// Hoisting Context for Bundle Generation (Phase 5.6)
+// ============================================================
+
+/// Context for scope hoisting during bundle generation.
+///
+/// Tracks which declarations can be hoisted from each module and
+/// provides the mangled names for hoisted declarations.
+#[derive(Debug, Clone, Default)]
+pub struct HoistingContext {
+    /// Hoistable declarations per module
+    pub hoistable_by_module: std::collections::HashMap<String, HoistableDeclarations>,
+    /// Name mangler for collision-free naming
+    pub mangler: NameMangler,
+    /// Whether scope hoisting is enabled
+    pub enabled: bool,
+}
+
+impl HoistingContext {
+    /// Create a new hoisting context
+    pub fn new() -> Self {
+        Self {
+            hoistable_by_module: Default::default(),
+            mangler: NameMangler::new(),
+            enabled: true,
+        }
+    }
+
+    /// Create a disabled hoisting context (no-op)
+    pub fn disabled() -> Self {
+        Self {
+            hoistable_by_module: Default::default(),
+            mangler: NameMangler::new(),
+            enabled: false,
+        }
+    }
+
+    /// Set the entry module for name preservation
+    pub fn with_entry_module(mut self, entry_module_id: &str) -> Self {
+        self.mangler = self.mangler.with_entry_module(entry_module_id);
+        self
+    }
+
+    /// Analyze all modules and build the hoisting context
+    pub fn analyze_modules(
+        modules: &[(String, &typedlua_parser::ast::Program)],
+        interner: &StringInterner,
+        entry_module_id: &str,
+        enabled: bool,
+    ) -> Self {
+        if !enabled {
+            return Self::disabled();
+        }
+
+        let mut context = Self::new().with_entry_module(entry_module_id);
+
+        // Analyze each module for hoistable declarations
+        for (module_id, program) in modules {
+            let hoistable = EscapeAnalysis::analyze(program, interner);
+            if !hoistable.all_names().is_empty() {
+                context.hoistable_by_module.insert(module_id.clone(), hoistable);
+            }
+        }
+
+        // Mangle all hoistable names
+        let modules_iter: Vec<(&str, &HoistableDeclarations)> = context
+            .hoistable_by_module
+            .iter()
+            .map(|(k, v)| (k.as_str(), v))
+            .collect();
+        context.mangler.mangle_all(modules_iter.into_iter());
+
+        context
+    }
+
+    /// Check if a declaration is hoistable in a given module
+    pub fn is_hoistable(&self, module_id: &str, name: &str, kind: &DeclarationKind) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        self.hoistable_by_module
+            .get(module_id)
+            .map(|h| h.is_hoistable(name, kind))
+            .unwrap_or(false)
+    }
+
+    /// Get the mangled name for a hoisted declaration
+    pub fn get_mangled_name(&self, module_id: &str, name: &str) -> Option<&String> {
+        if !self.enabled {
+            return None;
+        }
+        self.mangler.get_mangled_name(module_id, name)
+    }
+
+    /// Check if a module has any hoistable declarations
+    pub fn has_hoistable_declarations(&self, module_id: &str) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        self.hoistable_by_module
+            .get(module_id)
+            .map(|h| !h.all_names().is_empty())
+            .unwrap_or(false)
+    }
+
+    /// Check if a module is fully hoistable (all declarations can be hoisted)
+    ///
+    /// A module is fully hoistable if:
+    /// 1. It has no exports (or all exports are hoisted)
+    /// 2. All top-level declarations are hoistable
+    ///
+    /// For fully hoistable modules, we can skip the module wrapper entirely.
+    pub fn is_module_fully_hoistable(&self, _module_id: &str) -> bool {
+        // For now, we don't support fully hoisting modules
+        // This would require checking that all declarations are hoistable
+        // AND that there are no side effects at the module level
+        false
+    }
+
+    /// Get all hoistable declarations for a module
+    pub fn get_hoistable_declarations(&self, module_id: &str) -> Option<&HoistableDeclarations> {
+        if !self.enabled {
+            return None;
+        }
+        self.hoistable_by_module.get(module_id)
+    }
+
+    /// Create a reference rewriter for a specific module
+    pub fn create_rewriter(&self, module_id: &str) -> ReferenceRewriter<'_> {
+        ReferenceRewriter::new(&self.mangler, module_id)
+    }
+}
+
 impl<'a> ReferenceRewriter<'a> {
     /// Create a new reference rewriter for a specific module.
     pub fn new(mangler: &'a NameMangler, current_module: &str) -> Self {

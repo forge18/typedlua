@@ -395,11 +395,18 @@ local result = module_a_foo()  -- Direct call
 
 #### Phase 5.6: Hoisting Transform (Days 5-6)
 
-- [ ] Update `generate_bundle()` to hoist declarations
-- [ ] Move hoistable declarations to top-level scope
-- [ ] Remove module wrapper boilerplate for hoisted modules
-- [ ] Preserve module structure for non-hoistable code
-- [ ] Add `--no-scope-hoist` flag for debugging
+- [x] Update `generate_bundle()` to hoist declarations
+- [x] Move hoistable declarations to top-level scope
+- [x] Remove module wrapper boilerplate for hoisted modules
+- [x] Preserve module structure for non-hoistable code
+- [x] Add `--no-scope-hoist` flag for debugging
+
+**Status:** **COMPLETE** - Implementation includes:
+
+- `HoistingContext` struct for per-bundle hoisting state
+- Integration with `generate_bundle_with_options()` function
+- `generate_hoisted_declaration_if_needed()` helper for emitting hoisted code
+- CLI flag `--no-scope-hoist` for debugging/disabling hoisting
 
 #### Phase 5.7: Testing & Validation (Day 7)
 

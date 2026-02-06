@@ -125,6 +125,10 @@ struct Cli {
     /// Disable tree shaking (for debugging)
     #[arg(long)]
     no_tree_shake: bool,
+
+    /// Disable scope hoisting (for debugging)
+    #[arg(long)]
+    no_scope_hoist: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -1469,14 +1473,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
 
             // Perform reachability analysis from entry point
             let entry_path = cli.files.first().map(|f| f.as_path()).unwrap_or_else(|| {
-                Path::new(
-                    cli.out_file
-                        .as_ref()
-                        .and_then(|f| f.file_stem())
-                        .map(|s| s.to_string_lossy().to_string())
-                        .map(|s| s.as_str())
-                        .unwrap_or("main"),
-                )
+                Path::new("main")
             });
             let interner = checked_modules
                 .first()
