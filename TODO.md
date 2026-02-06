@@ -84,19 +84,24 @@
 
 #### Phase 2.1: Signature Hashing (Week 1)
 
-- [ ] Create `typedlua-typechecker/src/incremental.rs`
-- [ ] Implement `DeclarationHash` for functions (name + params + return type)
-- [ ] Implement `DeclarationHash` for classes (name + fields + method signatures)
-- [ ] Implement `DeclarationHash` for interfaces
-- [ ] Add `compute_signature_hash()` helper using stable hashing
-- [ ] Add unit tests for hash stability
+- [x] Create `typedlua-typechecker/src/incremental.rs`
+- [x] Implement `DeclarationHash` for functions (name + params + return type)
+- [x] Implement `DeclarationHash` for classes (name + fields + method signatures)
+- [x] Implement `DeclarationHash` for interfaces
+- [x] Implement `DeclarationHash` for type aliases and enums
+- [x] Add `compute_signature_hash()` helper using stable FxHash
+- [x] Add unit tests for hash stability (3 tests passing)
+
+**Status:** **COMPLETE** - Core infrastructure for declaration-level incremental type checking implemented.
 
 #### Phase 2.2: Dependency Tracking (Week 2)
 
-- [ ] Implement `DependencyGraph` to track caller → callee relationships
-- [ ] Add visitor to collect dependencies during type checking
-- [ ] Implement `get_dependents(decl: &str) -> Vec<String>` query
-- [ ] Add unit tests for dependency graph operations
+- [x] Implement `DependencyGraph` to track caller → callee relationships
+- [x] Add visitor to collect dependencies during type checking
+- [x] Implement `get_dependents(decl: &str) -> Vec<String>` query
+- [x] Add unit tests for dependency graph operations
+
+**Status:** **COMPLETE** - Dependency graph implemented and tested.
 
 #### Phase 2.3: Invalidation Logic (Week 2)
 
