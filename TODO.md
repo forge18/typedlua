@@ -135,19 +135,20 @@ Is
 
 **Action Items:**
 
-- [ ] Add `InstantiationTracker` struct to `optimizer/mod.rs`
-- [ ] Add `track_instantiation(class_name: &str, location: Span)` method
-- [ ] Update AST visitor to detect `new ClassName()` expressions
-- [ ] Build map of `ClassName → Set<SubclassName>` for all instantiations
-- [ ] Update `devirtualization.rs` to accept RTA data from WholeProgramAnalysis
-- [ ] Add devirtualization logic: if only one subclass instantiated → devirtualize
-- [ ] Add debug logging showing:
-  - Which classes have single instantiations
-  - Which method calls are devirtualized via RTA
-- [ ] Test with single-instantiation scenario (should devirtualize)
-- [ ] Test with multi-instantiation scenario (should NOT devirtualize)
-- [ ] Test with no instantiations (should fall back to existing CHA logic)
-- [ ] Run benchmarks to measure devirtualization rate improvement
+- [x] Add instantiation tracking fields to `ClassHierarchy` struct
+- [x] Add `collect_instantiations()` method to detect `new ClassName()` expressions
+- [x] Add `record_instantiation_from_callee()` to extract class names from new expressions
+- [x] Add `add_instantiation_to_hierarchy()` to propagate instantiations up the parent chain
+- [x] Add `set_instantiated_subclasses()` and `compute_single_instantiated_subclasses()`
+- [x] Add `can_devirtualize_with_rta()` method combining CHA + RTA analysis
+- [x] Update `DevirtualizationPass::process_expression()` to use RTA subclass for devirtualization
+- [x] Add debug logging for RTA devirtualization decisions
+- [x] Add unit tests for single-instantiation scenario (should devirtualize)
+- [x] Add unit tests for multi-instantiation scenario (should NOT devirtualize)
+- [x] Add unit tests for no instantiations (should fall back to existing CHA logic)
+- [x] Run benchmarks to measure devirtualization rate improvement
+
+**Status:** **COMPLETE** - RTA devirtualization fully implemented. Tests verify single-instantiation devirtualization, multi-instantiation safety, and fallback to CHA when no RTA data is available.
 
 **Expected:** 30-50% more devirtualization opportunities
 

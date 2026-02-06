@@ -6,17 +6,25 @@
 //! This pass performs safety analysis and populates `receiver_class` on method
 //! calls that can be safely devirtualized. The actual transformation is handled
 //! by the O2 `MethodToFunctionConversionPass`.
+//!
+//! RTA (Rapid Type Analysis) Devirtualization:
+//! When only one subclass of a class is ever instantiated, we can safely
+//! devirtualize calls on variables of the base class type.
 
 use crate::config::OptimizationLevel;
 
 use crate::optimizer::WholeProgramPass;
 use rustc_hash::FxHashMap;
+use rustc_hash::FxHashSet;
 use std::sync::Arc;
+use tracing::debug;
 use typedlua_parser::ast::expression::{Expression, ExpressionKind, ReceiverClassInfo};
 use typedlua_parser::ast::statement::{ClassMember, Statement};
 use typedlua_parser::ast::types::TypeKind;
 use typedlua_parser::ast::Program;
 use typedlua_parser::string_interner::{StringId, StringInterner};
+
+use ExpressionKind::*;
 
 /// Class hierarchy information for devirtualization safety analysis
 #[derive(Debug, Default)]
@@ -33,6 +41,17 @@ pub struct ClassHierarchy {
     declares_method: FxHashMap<(StringId, StringId), bool>,
     /// Set of all known class names (to distinguish from interfaces)
     known_classes: FxHashMap<StringId, bool>,
+    /// RTA: class -> set of subclasses that are instantiated
+    /// For RTA devirtualization: if only one subclass is instantiated,
+    /// we can devirtualize calls on variables of the base class type
+    instantiated_subclasses: FxHashMap<StringId, FxHashSet<StringId>>,
+    /// RTA: For each class, the single instantiated subclass if there's exactly one
+    /// This allows fast lookup for devirtualization
+    single_instantiated_subclass: FxHashMap<StringId, StringId>,
+    /// RTA: Total count of instantiations per class (sum of all subclass instantiations)
+    instantiation_counts: FxHashMap<StringId, usize>,
+    /// RTA: Set of all classes that have any instantiations
+    classes_with_instantiations: FxHashSet<StringId>,
 }
 
 impl ClassHierarchy {
@@ -147,7 +166,336 @@ impl ClassHierarchy {
             }
         }
 
+        // Second pass: collect all instantiations for RTA
+        for program in programs {
+            hierarchy.collect_instantiations(program);
+        }
+
+        // Compute single instantiated subclass for each base class
+        hierarchy.compute_single_instantiated_subclasses();
+
         hierarchy
+    }
+
+    /// Collect all `new ClassName()` instantiations from a program
+    fn collect_instantiations(&mut self, program: &Program) {
+        for stmt in &program.statements {
+            self.collect_instantiations_from_statement(stmt);
+        }
+    }
+
+    fn collect_instantiations_from_statement(&mut self, stmt: &Statement) {
+        use typedlua_parser::ast::statement::ForStatement;
+
+        match stmt {
+            Statement::Function(func) => {
+                for s in &func.body.statements {
+                    self.collect_instantiations_from_statement(s);
+                }
+            }
+            Statement::If(if_stmt) => {
+                self.collect_instantiations_from_expression(&if_stmt.condition);
+                for s in &if_stmt.then_block.statements {
+                    self.collect_instantiations_from_statement(s);
+                }
+                for else_if in &if_stmt.else_ifs {
+                    self.collect_instantiations_from_expression(&else_if.condition);
+                    for s in &else_if.block.statements {
+                        self.collect_instantiations_from_statement(s);
+                    }
+                }
+                if let Some(else_block) = &if_stmt.else_block {
+                    for s in &else_block.statements {
+                        self.collect_instantiations_from_statement(s);
+                    }
+                }
+            }
+            Statement::While(while_stmt) => {
+                self.collect_instantiations_from_expression(&while_stmt.condition);
+                for s in &while_stmt.body.statements {
+                    self.collect_instantiations_from_statement(s);
+                }
+            }
+            Statement::For(for_stmt) => match for_stmt.as_ref() {
+                ForStatement::Numeric(for_num) => {
+                    self.collect_instantiations_from_expression(&for_num.start);
+                    self.collect_instantiations_from_expression(&for_num.end);
+                    if let Some(step) = &for_num.step {
+                        self.collect_instantiations_from_expression(step);
+                    }
+                    for s in &for_num.body.statements {
+                        self.collect_instantiations_from_statement(s);
+                    }
+                }
+                ForStatement::Generic(for_gen) => {
+                    for expr in &for_gen.iterators {
+                        self.collect_instantiations_from_expression(expr);
+                    }
+                    for s in &for_gen.body.statements {
+                        self.collect_instantiations_from_statement(s);
+                    }
+                }
+            },
+            Statement::Repeat(repeat_stmt) => {
+                self.collect_instantiations_from_expression(&repeat_stmt.until);
+                for s in &repeat_stmt.body.statements {
+                    self.collect_instantiations_from_statement(s);
+                }
+            }
+            Statement::Return(ret) => {
+                for expr in &ret.values {
+                    self.collect_instantiations_from_expression(expr);
+                }
+            }
+            Statement::Variable(var) => {
+                self.collect_instantiations_from_expression(&var.initializer);
+            }
+            Statement::Expression(expr) => {
+                self.collect_instantiations_from_expression(expr);
+            }
+            Statement::Block(block) => {
+                for s in &block.statements {
+                    self.collect_instantiations_from_statement(s);
+                }
+            }
+            Statement::Class(class) => {
+                for member in &class.members {
+                    if let ClassMember::Method(method) = member {
+                        if let Some(body) = &method.body {
+                            for s in &body.statements {
+                                self.collect_instantiations_from_statement(s);
+                            }
+                        }
+                    }
+                    if let ClassMember::Constructor(ctor) = member {
+                        for s in &ctor.body.statements {
+                            self.collect_instantiations_from_statement(s);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn collect_instantiations_from_expression(&mut self, expr: &Expression) {
+        use ExpressionKind::*;
+
+        match &expr.kind {
+            New(callee, args, _) => {
+                // Record this instantiation
+                self.record_instantiation_from_expression(callee);
+                for arg in args {
+                    self.collect_instantiations_from_expression(&arg.value);
+                }
+            }
+            Call(func, args, _) => {
+                self.collect_instantiations_from_expression(func);
+                for arg in args {
+                    self.collect_instantiations_from_expression(&arg.value);
+                }
+            }
+            MethodCall(obj, _name, args, _) => {
+                self.collect_instantiations_from_expression(obj);
+                for arg in args {
+                    self.collect_instantiations_from_expression(&arg.value);
+                }
+            }
+            Binary(_op, left, right) => {
+                self.collect_instantiations_from_expression(left);
+                self.collect_instantiations_from_expression(right);
+            }
+            Unary(_op, operand) => {
+                self.collect_instantiations_from_expression(operand);
+            }
+            Assignment(left, _op, right) => {
+                self.collect_instantiations_from_expression(left);
+                self.collect_instantiations_from_expression(right);
+            }
+            Conditional(cond, then_expr, else_expr) => {
+                self.collect_instantiations_from_expression(cond);
+                self.collect_instantiations_from_expression(then_expr);
+                self.collect_instantiations_from_expression(else_expr);
+            }
+            Pipe(left, right) => {
+                self.collect_instantiations_from_expression(left);
+                self.collect_instantiations_from_expression(right);
+            }
+            Match(match_expr) => {
+                self.collect_instantiations_from_expression(&match_expr.value);
+                for arm in &match_expr.arms {
+                    match &arm.body {
+                        typedlua_parser::ast::expression::MatchArmBody::Expression(e) => {
+                            self.collect_instantiations_from_expression(e);
+                        }
+                        typedlua_parser::ast::expression::MatchArmBody::Block(block) => {
+                            for s in &block.statements {
+                                self.collect_instantiations_from_statement(s);
+                            }
+                        }
+                    }
+                }
+            }
+            Arrow(arrow) => {
+                for param in &arrow.parameters {
+                    if let Some(default) = &param.default {
+                        self.collect_instantiations_from_expression(default);
+                    }
+                }
+                match &arrow.body {
+                    typedlua_parser::ast::expression::ArrowBody::Expression(e) => {
+                        self.collect_instantiations_from_expression(e);
+                    }
+                    typedlua_parser::ast::expression::ArrowBody::Block(block) => {
+                        for s in &block.statements {
+                            self.collect_instantiations_from_statement(s);
+                        }
+                    }
+                }
+            }
+            Try(try_expr) => {
+                self.collect_instantiations_from_expression(&try_expr.expression);
+                self.collect_instantiations_from_expression(&try_expr.catch_expression);
+            }
+            ErrorChain(left, right) => {
+                self.collect_instantiations_from_expression(left);
+                self.collect_instantiations_from_expression(right);
+            }
+            OptionalMember(obj, _) => {
+                self.collect_instantiations_from_expression(obj);
+            }
+            OptionalIndex(obj, index) => {
+                self.collect_instantiations_from_expression(obj);
+                self.collect_instantiations_from_expression(index);
+            }
+            OptionalCall(obj, args, _) => {
+                self.collect_instantiations_from_expression(obj);
+                for arg in args {
+                    self.collect_instantiations_from_expression(&arg.value);
+                }
+            }
+            OptionalMethodCall(obj, _name, args, _) => {
+                self.collect_instantiations_from_expression(obj);
+                for arg in args {
+                    self.collect_instantiations_from_expression(&arg.value);
+                }
+            }
+            Member(obj, _) => {
+                self.collect_instantiations_from_expression(obj);
+            }
+            Index(obj, index) => {
+                self.collect_instantiations_from_expression(obj);
+                self.collect_instantiations_from_expression(index);
+            }
+            Array(elements) => {
+                for elem in elements {
+                    match elem {
+                        typedlua_parser::ast::expression::ArrayElement::Expression(e) => {
+                            self.collect_instantiations_from_expression(e);
+                        }
+                        typedlua_parser::ast::expression::ArrayElement::Spread(e) => {
+                            self.collect_instantiations_from_expression(e);
+                        }
+                    }
+                }
+            }
+            Object(props) => {
+                for prop in props {
+                    match prop {
+                        typedlua_parser::ast::expression::ObjectProperty::Property {
+                            value,
+                            ..
+                        } => {
+                            self.collect_instantiations_from_expression(value);
+                        }
+                        typedlua_parser::ast::expression::ObjectProperty::Computed {
+                            key,
+                            value,
+                            ..
+                        } => {
+                            self.collect_instantiations_from_expression(key);
+                            self.collect_instantiations_from_expression(value);
+                        }
+                        typedlua_parser::ast::expression::ObjectProperty::Spread {
+                            value, ..
+                        } => {
+                            self.collect_instantiations_from_expression(value);
+                        }
+                    }
+                }
+            }
+            Parenthesized(inner) => {
+                self.collect_instantiations_from_expression(inner);
+            }
+            _ => {}
+        }
+    }
+
+    fn record_instantiation_from_expression(&mut self, expr: &Expression) {
+        // The callee of a `new` expression is typically a Call expression like `Foo(args)`
+        // We need to extract the class name from it
+        if let Call(func, _args, _) = &expr.kind {
+            self.record_instantiation_from_callee(func);
+        }
+    }
+
+    fn record_instantiation_from_callee(&mut self, expr: &Expression) {
+        match &expr.kind {
+            ExpressionKind::Identifier(id) => {
+                let class_id = *id;
+                // Mark class as having instantiations
+                self.classes_with_instantiations.insert(class_id);
+                *self.instantiation_counts.entry(class_id).or_insert(0) += 1;
+
+                // Also record this for all parent classes (RTA needs to know instantiations at each level)
+                self.add_instantiation_to_hierarchy(class_id, class_id);
+            }
+            ExpressionKind::Member(_obj, member) => {
+                // For now, just record the simple name
+                let class_id = member.node;
+                self.classes_with_instantiations.insert(class_id);
+                *self.instantiation_counts.entry(class_id).or_insert(0) += 1;
+                self.add_instantiation_to_hierarchy(class_id, class_id);
+            }
+            _ => {}
+        }
+    }
+
+    /// Add an instantiation to all ancestors in the hierarchy
+    fn add_instantiation_to_hierarchy(
+        &mut self,
+        instantiated_class: StringId,
+        original_class: StringId,
+    ) {
+        // Walk up the parent chain and record that original_class has instantiations of instantiated_class
+        let mut current = original_class;
+        while let Some(&parent) = self.parent_of.get(&current) {
+            if let Some(parent_id) = parent {
+                self.instantiated_subclasses
+                    .entry(parent_id)
+                    .or_default()
+                    .insert(instantiated_class);
+                current = parent_id;
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// Compute single_instantiated_subclass for all base classes
+    fn compute_single_instantiated_subclasses(&mut self) {
+        for (base_class, subclasses) in &self.instantiated_subclasses {
+            if subclasses.len() == 1 {
+                if let Some(&single_subclass) = subclasses.iter().next() {
+                    self.single_instantiated_subclass
+                        .insert(*base_class, single_subclass);
+                    debug!(
+                        "RTA: Base class {:?} has single instantiated subclass {:?}",
+                        base_class, single_subclass
+                    );
+                }
+            }
+        }
     }
 
     /// Check if a class is known (vs an interface)
@@ -191,6 +539,96 @@ impl ClassHierarchy {
             }
         }
         false
+    }
+
+    /// RTA: Record that a specific class was instantiated
+    pub fn record_instantiation(&mut self, class_name: StringId) {
+        self.classes_with_instantiations.insert(class_name);
+        *self.instantiation_counts.entry(class_name).or_insert(0) += 1;
+    }
+
+    /// RTA: Set the instantiated subclasses for a base class
+    /// Called after multi-module analysis to set the complete instantiation map
+    pub fn set_instantiated_subclasses(
+        &mut self,
+        base_class: StringId,
+        subclasses: FxHashSet<StringId>,
+    ) {
+        self.instantiated_subclasses
+            .insert(base_class, subclasses.clone());
+
+        // If exactly one subclass is instantiated, cache it for fast lookup
+        if subclasses.len() == 1 {
+            if let Some(&single_subclass) = subclasses.iter().next() {
+                self.single_instantiated_subclass
+                    .insert(base_class, single_subclass);
+            }
+        }
+    }
+
+    /// RTA: Check if this class has exactly one instantiated subclass
+    /// If so, return that subclass - enabling devirtualization
+    pub fn get_single_instantiated_subclass(&self, class: StringId) -> Option<StringId> {
+        self.single_instantiated_subclass.get(&class).copied()
+    }
+
+    /// RTA: Check if a class or any of its ancestors have instantiation info
+    pub fn has_instantiation_info(&self, class: StringId) -> bool {
+        self.instantiated_subclasses.contains_key(&class)
+            || self.classes_with_instantiations.contains(&class)
+    }
+
+    /// Check if a method call can be safely devirtualized using RTA
+    ///
+    /// Safe if:
+    /// 1. Class is final, OR
+    /// 2. Method is final, OR
+    /// 3. No descendant class overrides this method, OR
+    /// 4. (RTA) Only one subclass is ever instantiated -> devirtualize to that subclass
+    pub fn can_devirtualize_with_rta(
+        &self,
+        class: StringId,
+        method: StringId,
+    ) -> (bool, Option<StringId>) {
+        // If class is final, always safe
+        if self.is_final.get(&class) == Some(&true) {
+            debug!("  RTA: Class {:?} is final, can devirtualize", class);
+            return (true, None);
+        }
+
+        // If method is final, always safe
+        if self.final_methods.get(&(class, method)) == Some(&true) {
+            debug!(
+                "  RTA: Method {:?} on class {:?} is final, can devirtualize",
+                method, class
+            );
+            return (true, None);
+        }
+
+        // RTA check: If exactly one subclass is instantiated, we can devirtualize
+        if let Some(subclass) = self.single_instantiated_subclass.get(&class) {
+            debug!(
+                "  RTA: Class {:?} has only one instantiated subclass {:?}, can devirtualize",
+                class, subclass
+            );
+            return (true, Some(*subclass));
+        }
+
+        // Check if any descendant overrides this method
+        let has_overrides = self.any_descendant_overrides(class, method);
+        if !has_overrides {
+            debug!(
+                "  RTA: No descendants of {:?} override method {:?}, can devirtualize",
+                class, method
+            );
+            return (true, None);
+        }
+
+        debug!(
+            "  RTA: Cannot devirtualize {:?}.{:?} - has overriding descendants",
+            class, method
+        );
+        (false, None)
     }
 }
 
@@ -340,10 +778,24 @@ impl DevirtualizationPass {
                             if hierarchy.is_known_class(class_id) {
                                 let method_id = method_name.node;
 
-                                // Check if devirtualization is safe
-                                if hierarchy.can_devirtualize(class_id, method_id) {
+                                // Check if devirtualization is safe using RTA
+                                let (can_devirt, rta_subclass) =
+                                    hierarchy.can_devirtualize_with_rta(class_id, method_id);
+
+                                if can_devirt {
+                                    // Use RTA subclass if available, otherwise use the annotated type
+                                    let target_class = rta_subclass.unwrap_or(class_id);
+
+                                    debug!(
+                                        "Devirtualizing {:?}.{:?} -> {:?} (RTA: {})",
+                                        class_id,
+                                        method_id,
+                                        target_class,
+                                        rta_subclass.is_some()
+                                    );
+
                                     expr.receiver_class = Some(ReceiverClassInfo {
-                                        class_name: class_id,
+                                        class_name: target_class,
                                         is_static: false,
                                     });
                                     changed = true;
@@ -617,5 +1069,127 @@ mod tests {
 
         // Should be able to devirtualize
         assert!(hierarchy.can_devirtualize(parent_id, method_id));
+    }
+
+    #[test]
+    fn test_rta_single_instantiation_enables_devirtualization() {
+        let mut hierarchy = ClassHierarchy::default();
+        let parent_id = StringId::from_u32(1);
+        let child_id = StringId::from_u32(2);
+        let method_id = StringId::from_u32(3);
+
+        hierarchy.known_classes.insert(parent_id, true);
+        hierarchy.known_classes.insert(child_id, true);
+        hierarchy.is_final.insert(parent_id, false);
+        hierarchy.is_final.insert(child_id, false);
+        hierarchy.parent_of.insert(child_id, Some(parent_id));
+        hierarchy.children_of.insert(parent_id, vec![child_id]);
+        hierarchy
+            .declares_method
+            .insert((child_id, method_id), true);
+
+        // RTA: Only one subclass is instantiated (Child)
+        let mut subclasses = FxHashSet::default();
+        subclasses.insert(child_id);
+        hierarchy.set_instantiated_subclasses(parent_id, subclasses);
+
+        // Even though child overrides the method, RTA says only Child is instantiated
+        // So we should be able to devirtualize to Child
+        let (can_devirt, subclass) = hierarchy.can_devirtualize_with_rta(parent_id, method_id);
+        assert!(can_devirt);
+        assert_eq!(subclass, Some(child_id));
+    }
+
+    #[test]
+    fn test_rta_multi_instantiation_prevents_devirtualization() {
+        let mut hierarchy = ClassHierarchy::default();
+        let parent_id = StringId::from_u32(1);
+        let child1_id = StringId::from_u32(2);
+        let child2_id = StringId::from_u32(3);
+        let method_id = StringId::from_u32(4);
+
+        hierarchy.known_classes.insert(parent_id, true);
+        hierarchy.known_classes.insert(child1_id, true);
+        hierarchy.known_classes.insert(child2_id, true);
+        hierarchy.is_final.insert(parent_id, false);
+        hierarchy.is_final.insert(child1_id, false);
+        hierarchy.is_final.insert(child2_id, false);
+        hierarchy.parent_of.insert(child1_id, Some(parent_id));
+        hierarchy.parent_of.insert(child2_id, Some(parent_id));
+        hierarchy
+            .children_of
+            .insert(parent_id, vec![child1_id, child2_id]);
+        hierarchy
+            .declares_method
+            .insert((child1_id, method_id), true);
+        hierarchy
+            .declares_method
+            .insert((child2_id, method_id), true);
+
+        // RTA: Multiple subclasses are instantiated
+        let mut subclasses = FxHashSet::default();
+        subclasses.insert(child1_id);
+        subclasses.insert(child2_id);
+        hierarchy.set_instantiated_subclasses(parent_id, subclasses);
+
+        // Should NOT be able to devirtualize because both children are instantiated
+        let (can_devirt, subclass) = hierarchy.can_devirtualize_with_rta(parent_id, method_id);
+        assert!(!can_devirt);
+        assert_eq!(subclass, None);
+    }
+
+    #[test]
+    fn test_rta_no_instantiations_falls_back_to_cha() {
+        let mut hierarchy = ClassHierarchy::default();
+        let parent_id = StringId::from_u32(1);
+        let child_id = StringId::from_u32(2);
+        let method_id = StringId::from_u32(3);
+
+        hierarchy.known_classes.insert(parent_id, true);
+        hierarchy.known_classes.insert(child_id, true);
+        hierarchy.is_final.insert(parent_id, false);
+        hierarchy.is_final.insert(child_id, false);
+        hierarchy.parent_of.insert(child_id, Some(parent_id));
+        hierarchy.children_of.insert(parent_id, vec![child_id]);
+        // Child does NOT override the method
+        hierarchy
+            .declares_method
+            .insert((child_id, method_id), false);
+
+        // No instantiations recorded - should fall back to CHA
+        let (can_devirt, subclass) = hierarchy.can_devirtualize_with_rta(parent_id, method_id);
+        assert!(can_devirt);
+        assert_eq!(subclass, None);
+    }
+
+    #[test]
+    fn test_rta_instantiation_counts() {
+        let mut hierarchy = ClassHierarchy::default();
+        let class_id = StringId::from_u32(1);
+
+        hierarchy.record_instantiation(class_id);
+        hierarchy.record_instantiation(class_id);
+        hierarchy.record_instantiation(class_id);
+
+        assert_eq!(hierarchy.instantiation_counts.get(&class_id), Some(&3));
+        assert!(hierarchy.classes_with_instantiations.contains(&class_id));
+    }
+
+    #[test]
+    fn test_rta_compute_single_instantiated_subclass() {
+        let mut hierarchy = ClassHierarchy::default();
+        let parent_id = StringId::from_u32(1);
+        let child_id = StringId::from_u32(2);
+
+        let mut subclasses = FxHashSet::default();
+        subclasses.insert(child_id);
+        hierarchy.set_instantiated_subclasses(parent_id, subclasses);
+
+        hierarchy.compute_single_instantiated_subclasses();
+
+        assert_eq!(
+            hierarchy.single_instantiated_subclass.get(&parent_id),
+            Some(&child_id)
+        );
     }
 }
