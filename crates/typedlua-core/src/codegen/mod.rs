@@ -10,6 +10,7 @@ pub mod enums;
 pub mod expressions;
 pub mod modules;
 pub mod patterns;
+pub mod scope_hoisting;
 pub mod statements;
 pub mod tree_shaking;
 
