@@ -98,6 +98,22 @@ struct Cli {
     /// Output format (readable, compact, minified)
     #[arg(long, value_name = "FORMAT", default_value = "readable")]
     format: String,
+
+    /// Enable aggressive optimizations with whole-program analysis
+    #[arg(long)]
+    optimize: bool,
+
+    /// Disable all optimizations (raw transpilation)
+    #[arg(long)]
+    no_optimize: bool,
+
+    /// Enable optimizer profiling (logs pass timings)
+    #[arg(long)]
+    profile_optimizer: bool,
+
+    /// Disable parallel optimization (for benchmarking)
+    #[arg(long)]
+    no_parallel_optimization: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -236,6 +252,27 @@ fn parse_lua_target(target: &str) -> anyhow::Result<typedlua_core::codegen::LuaT
             "Invalid Lua target '{}'. Supported targets: 5.1, 5.2, 5.3, 5.4",
             target
         )),
+    }
+}
+
+/// Parse optimization level from CLI flags
+fn parse_optimization_level(optimize: bool, no_optimize: bool) -> anyhow::Result<typedlua_core::config::OptimizationLevel> {
+    use typedlua_core::config::OptimizationLevel;
+
+    // Check for conflicting flags
+    if optimize && no_optimize {
+        return Err(anyhow::anyhow!(
+            "Cannot use both --optimize and --no-optimize flags"
+        ));
+    }
+
+    // Map flags to optimization levels
+    if no_optimize {
+        Ok(OptimizationLevel::O0)  // Raw transpilation, no optimizations
+    } else if optimize {
+        Ok(OptimizationLevel::O3)  // Aggressive with whole-program analysis
+    } else {
+        Ok(OptimizationLevel::O1)  // Default: basic optimizations
     }
 }
 
@@ -994,17 +1031,19 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
     use rustc_hash::FxHashSet;
     use std::collections::HashMap;
     use std::sync::Arc;
+    use std::time::Instant;
     use typedlua_core::cache::{CacheManager, CachedModule};
     use typedlua_core::codegen::CodeGeneratorBuilder;
     use typedlua_core::config::{CompilerConfig, CompilerOptions};
     use typedlua_core::diagnostics::{CollectingDiagnosticHandler, DiagnosticHandler};
 
     use typedlua_core::module_resolver::{ModuleConfig, ModuleId, ModuleRegistry, ModuleResolver};
-    
-    
+
+
     use typedlua_parser::string_interner::StringInterner;
 
     info!("Compiling {} file(s)...", cli.files.len());
+    let compile_start = Instant::now();
 
     // --- DI Container setup ---
     let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -1091,6 +1130,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
     }
 
     // --- Discover dependencies and determine compilation order ---
+    let dep_start = Instant::now();
     let dep_result = match discover_dependencies(&cli.files, &file_system, &resolver) {
         Ok(result) => result,
         Err(e) => {
@@ -1099,6 +1139,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
         }
     };
     let ordered_files = dep_result.ordered_files;
+    info!("⏱️  Dependency discovery: {:?}", dep_start.elapsed());
 
     // --- Parallel parsing of stale files ---
     let stale_file_paths: Vec<&PathBuf> = ordered_files
@@ -1111,6 +1152,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
         })
         .collect();
 
+    let parse_start = Instant::now();
     let parsed_modules: Vec<ParsedModule> = if stale_file_paths.is_empty() {
         Vec::new()
     } else {
@@ -1132,6 +1174,12 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
                 e
             })?
     };
+    if !stale_file_paths.is_empty() {
+        info!("⏱️  Parallel parsing: {:?} ({} files, {:?}/file avg)",
+              parse_start.elapsed(),
+              stale_file_paths.len(),
+              parse_start.elapsed() / stale_file_paths.len() as u32);
+    }
 
     // Create a map for fast lookup of parsed modules
     let parsed_map: std::collections::HashMap<PathBuf, ParsedModule> = parsed_modules
@@ -1148,6 +1196,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
     // --- Compile files ---
     // --- Phase 1: Sequential type checking + cache building ---
     // This phase MUST be sequential to maintain dependency order
+    let typecheck_start = Instant::now();
     let checked_modules: Vec<CheckedModule> = ordered_files
         .iter()
         .filter_map(|file_path| {
@@ -1276,12 +1325,20 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
         })
         .collect();
 
+    let typecheck_elapsed = typecheck_start.elapsed();
+    let typechecked_count = checked_modules.len() - cached_modules.len();
     info!("Type checking complete. {} modules ready for codegen.", checked_modules.len());
+    if typechecked_count > 0 {
+        info!("⏱️  Type checking: {:?} ({} modules, {:?}/module avg)",
+              typecheck_elapsed, typechecked_count,
+              typecheck_elapsed / typechecked_count.max(1) as u32);
+    }
 
     // --- Phase 1.5: Whole-program analysis (for O3+ optimizations) ---
     // Build cross-module analysis before parallel codegen
-    // Note: Currently uses O0 (no optimization), but infrastructure is in place for future use
-    let optimization_level = typedlua_core::config::OptimizationLevel::O0;
+    let optimization_level = parse_optimization_level(cli.optimize, cli.no_optimize)?;
+    info!("Optimization level: {:?}", optimization_level);
+    let wpa_start = Instant::now();
     let whole_program_analysis = if optimization_level >= typedlua_core::config::OptimizationLevel::O3 {
         info!("Building whole-program analysis for O3 optimizations...");
         let ast_refs: Vec<&typedlua_parser::ast::Program> = checked_modules
@@ -1292,16 +1349,22 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
     } else {
         None
     };
+    if whole_program_analysis.is_some() {
+        info!("⏱️  Whole-program analysis: {:?}", wpa_start.elapsed());
+    }
 
     // --- Phase 2: Parallel code generation ---
     // Each module's codegen is independent - can run in parallel
+    let codegen_start = Instant::now();
+    let module_count = checked_modules.len();
     let results: Vec<CompilationResult> = checked_modules
         .into_par_iter()
         .map(|module| {
             let output_format = parse_output_format(&cli.format);
             let mut builder = CodeGeneratorBuilder::new(module.interner.clone())
                 .target(target)
-                .output_format(output_format);
+                .output_format(output_format)
+                .optimization_level(optimization_level);
 
             if module.enable_source_map {
                 builder = builder.source_map(module.file_path.to_string_lossy().to_string());
@@ -1329,7 +1392,13 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
         })
         .collect();
 
+    let codegen_elapsed = codegen_start.elapsed();
     info!("Code generation complete for {} modules.", results.len());
+    if module_count > 0 {
+        info!("⏱️  Parallel codegen: {:?} ({} modules, {:?}/module avg)",
+              codegen_elapsed, module_count,
+              codegen_elapsed / module_count as u32);
+    }
 
     // --- Phase 3: Save cache entries (sequential — CacheManager needs &mut self) ---
     if use_cache {
@@ -1356,6 +1425,7 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
     }
 
     // Process results sequentially (for deterministic output and error reporting)
+    let output_start = Instant::now();
     let mut had_errors = false;
 
     // Collect bundled output if --out-file is specified
@@ -1438,12 +1508,18 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
         std::process::exit(1);
     }
 
+    if !cli.no_emit {
+        info!("⏱️  Output writing: {:?}", output_start.elapsed());
+    }
+
     // Copy plain .lua files to output directory if requested
     if cli.copy_lua_to_output && !cli.no_emit {
         copy_lua_files_to_output(&cli)?;
     }
 
-    info!("Compilation completed successfully!");
+    let total_elapsed = compile_start.elapsed();
+    info!("✅ Compilation completed successfully!");
+    info!("⏱️  TOTAL TIME: {:?}", total_elapsed);
 
     Ok(())
 }

@@ -3,7 +3,7 @@
 
 use crate::config::OptimizationLevel;
 use crate::optimizer::{PreAnalysisPass, StmtVisitor, WholeProgramPass};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 use std::sync::Arc;
 use typedlua_parser::ast::expression::{ArrowBody, Expression, ExpressionKind};
 use typedlua_parser::ast::pattern::Pattern;
@@ -40,7 +40,7 @@ impl Default for FunctionInliningPass {
         Self {
             threshold: 5,
             next_temp_id: 0,
-            functions: HashMap::new(),
+            functions: HashMap::default(),
             interner: None,
         }
     }
@@ -51,7 +51,7 @@ impl FunctionInliningPass {
         Self {
             threshold: 5,
             next_temp_id: 0,
-            functions: HashMap::new(),
+            functions: HashMap::default(),
             interner: Some(interner),
         }
     }
@@ -798,7 +798,7 @@ impl FunctionInliningPass {
         parameters: &[Parameter],
         args: &[Argument],
     ) -> HashMap<StringId, Expression> {
-        let mut subst = HashMap::new();
+        let mut subst = HashMap::default();
         for (param, arg) in parameters.iter().zip(args.iter()) {
             if let Pattern::Identifier(ident) = &param.pattern {
                 subst.insert(ident.node, arg.value.clone());

@@ -28,8 +28,8 @@ pub struct DiContainer {
 impl DiContainer {
     pub fn new() -> Self {
         DiContainer {
-            factories: HashMap::new(),
-            singletons: HashMap::new(),
+            factories: HashMap::default(),
+            singletons: HashMap::default(),
         }
     }
 
@@ -299,7 +299,7 @@ impl TypeCheckHelper for DiContainer {
     }
 }
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 pub trait TypeCheckHelper {
     fn type_check_source(&self, source: &str) -> Result<(), String>;

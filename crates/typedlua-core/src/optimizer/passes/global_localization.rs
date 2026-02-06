@@ -133,7 +133,7 @@ impl GlobalLocalizationPass {
         self.collect_declared_locals(block, &mut declared_locals);
 
         let mut global_usage: HashMap<typedlua_parser::string_interner::StringId, usize> =
-            HashMap::new();
+            HashMap::default();
 
         for stmt in &block.statements {
             self.collect_global_usage_optimized(stmt, &mut global_usage, &declared_locals);

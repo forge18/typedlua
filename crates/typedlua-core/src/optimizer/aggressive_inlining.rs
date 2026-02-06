@@ -43,7 +43,7 @@ impl Default for AggressiveInliningPass {
             max_total_closure_size: 20,
             max_code_bloat_ratio: 3.0,
             next_temp_id: 0,
-            functions: HashMap::new(),
+            functions: HashMap::default(),
             interner: None,
             hot_paths: HashSet::new(),
         }
@@ -986,7 +986,7 @@ impl AggressiveInliningPass {
         parameters: &[Parameter],
         args: &[Argument],
     ) -> HashMap<StringId, Expression> {
-        let mut subst = HashMap::new();
+        let mut subst = HashMap::default();
         for (param, arg) in parameters.iter().zip(args.iter()) {
             if let Pattern::Identifier(ident) = &param.pattern {
                 subst.insert(ident.node, arg.value.clone());

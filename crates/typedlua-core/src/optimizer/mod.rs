@@ -2,6 +2,7 @@ use crate::config::OptimizationLevel;
 use crate::diagnostics::DiagnosticHandler;
 
 use std::sync::Arc;
+use tracing::{debug, info};
 use typedlua_parser::ast::expression::Expression;
 use typedlua_parser::ast::statement::{Block, ForStatement, Statement};
 use typedlua_parser::ast::Program;
@@ -770,6 +771,8 @@ impl Optimizer {
     /// Optimize the program AST
     /// Runs all registered optimization passes until no more changes are made
     pub fn optimize(&mut self, program: &mut Program) -> Result<(), String> {
+        use std::time::Instant;
+
         // Resolve Auto to actual optimization level based on build profile
         let effective_level = self.level.effective();
 
@@ -777,6 +780,8 @@ impl Optimizer {
             // No optimizations at O0
             return Ok(());
         }
+
+        let start_total = Instant::now();
 
         // Run passes in a loop until no changes are made (fixed-point iteration)
         let mut iteration = 0;
@@ -794,35 +799,73 @@ impl Optimizer {
             // Run composite expression pass
             if let Some(ref mut pass) = self.expr_pass {
                 if effective_level >= OptimizationLevel::O1 {
-                    changed |= pass.run(program)?;
+                    let start = Instant::now();
+                    let pass_changed = pass.run(program)?;
+                    let elapsed = start.elapsed();
+                    debug!(
+                        "  [Iter {}] ExpressionCompositePass: {:?} (changed: {})",
+                        iteration, elapsed, pass_changed
+                    );
+                    changed |= pass_changed;
                 }
             }
 
             // Run elimination composite pass
             if let Some(ref mut pass) = self.elim_pass {
                 if effective_level >= OptimizationLevel::O2 {
-                    changed |= pass.run(program)?;
+                    let start = Instant::now();
+                    let pass_changed = pass.run(program)?;
+                    let elapsed = start.elapsed();
+                    debug!(
+                        "  [Iter {}] EliminationCompositePass: {:?} (changed: {})",
+                        iteration, elapsed, pass_changed
+                    );
+                    changed |= pass_changed;
                 }
             }
 
             // Run function composite pass
             if let Some(ref mut pass) = self.func_pass {
                 if effective_level >= OptimizationLevel::O2 {
-                    changed |= pass.run(program)?;
+                    let start = Instant::now();
+                    let pass_changed = pass.run(program)?;
+                    let elapsed = start.elapsed();
+                    debug!(
+                        "  [Iter {}] FunctionCompositePass: {:?} (changed: {})",
+                        iteration, elapsed, pass_changed
+                    );
+                    changed |= pass_changed;
                 }
             }
 
             // Run data structure composite pass
             if let Some(ref mut pass) = self.data_pass {
                 if effective_level >= OptimizationLevel::O2 {
-                    changed |= pass.run(program)?;
+                    let start = Instant::now();
+                    let pass_changed = pass.run(program)?;
+                    let elapsed = start.elapsed();
+                    debug!(
+                        "  [Iter {}] DataStructureCompositePass: {:?} (changed: {})",
+                        iteration, elapsed, pass_changed
+                    );
+                    changed |= pass_changed;
                 }
             }
 
             // Run standalone passes
             for pass in &mut self.standalone_passes {
                 if pass.min_level() <= effective_level {
-                    changed |= pass.run(program)?;
+                    let start = Instant::now();
+                    let pass_changed = pass.run(program)?;
+                    let elapsed = start.elapsed();
+                    debug!(
+                        "  [Iter {}] {}: {:?} (changed: {})",
+                        iteration,
+                        pass.name(),
+                        elapsed,
+                        pass_changed
+                    );
+                    changed |= pass_changed;
                 }
             }
 
@@ -831,6 +874,12 @@ impl Optimizer {
                 break;
             }
         }
+
+        let total_elapsed = start_total.elapsed();
+        info!(
+            "Optimization complete: {} iterations, {:?} total",
+            iteration, total_elapsed
+        );
 
         Ok(())
     }

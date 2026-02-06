@@ -1,5 +1,5 @@
+use rustc_hash::FxHashMap as HashMap;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use typedlua_parser::span::Span;
 
 /// A source map builder following the Source Map v3 specification

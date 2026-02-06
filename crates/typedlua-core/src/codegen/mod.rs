@@ -20,7 +20,7 @@ pub use sourcemap::{SourceMap, SourceMapBuilder};
 
 // Re-export types needed for builder API
 pub use super::config::OptimizationLevel;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 use std::sync::Arc;
 use typedlua_parser::ast::pattern::Pattern;
 use typedlua_parser::ast::statement::*;
@@ -151,15 +151,15 @@ impl CodeGenerator {
             mode: CodeGenMode::Require,
             exports: Vec::new(),
             has_default_export: false,
-            import_map: std::collections::HashMap::new(),
+            import_map: Default::default(),
             current_source_index: 0,
             interner,
             optimization_level: crate::config::OptimizationLevel::O0,
-            interface_default_methods: std::collections::HashMap::new(),
+            interface_default_methods: Default::default(),
             current_namespace: None,
             namespace_exports: Vec::new(),
             next_type_id: 1,
-            registered_types: std::collections::HashMap::new(),
+            registered_types: Default::default(),
             strategy: Self::create_strategy(target),
             enforce_access_modifiers: false,
             whole_program_analysis: None,
@@ -421,7 +421,7 @@ impl CodeGenerator {
             ) {
                 if let Some((start_line, start_col)) = module_start_position {
                     // Create source index mapping: module's source index 0 -> bundle's source_index
-                    let mut source_index_map = HashMap::new();
+                    let mut source_index_map = HashMap::default();
                     source_index_map.insert(0, source_index);
 
                     // Merge the module's mappings with proper offsets
