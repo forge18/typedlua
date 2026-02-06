@@ -186,23 +186,34 @@ impl DeadStoreEliminationPass {
 
         let captured = self.collect_captured_variables(block);
 
-        let mut live_vars: HashSet<StringId> = HashSet::new();
         let mut new_statements: Vec<Statement> = Vec::new();
         let mut changed = false;
+        let mut current_live_vars: HashSet<StringId> = HashSet::new();
 
         for stmt in block.statements.iter().rev() {
-            let (is_dead, newly_live) = self.analyze_statement(stmt, &live_vars, &captured);
+            let names = self.names_from_pattern(stmt);
+            let has_side_effects = self.statement_has_side_effects(stmt);
+            let stmt_reads = self.collect_statement_reads(stmt);
 
-            if is_dead {
-                changed = true;
-            } else {
+            let mut is_dead = names.is_empty();
+            for name in &names {
+                if captured.contains(name) || has_side_effects || current_live_vars.contains(name) {
+                    is_dead = false;
+                    break;
+                }
+            }
+
+            if !is_dead {
                 let mut stmt_clone = stmt.clone();
                 changed |= self.eliminate_dead_stores_in_statement(&mut stmt_clone);
                 new_statements.push(stmt_clone);
-            }
-
-            for var in newly_live {
-                live_vars.insert(var);
+                for name in &names {
+                    if stmt_reads.contains(name) {
+                        current_live_vars.insert(*name);
+                    }
+                }
+            } else {
+                changed = true;
             }
         }
 
@@ -214,156 +225,84 @@ impl DeadStoreEliminationPass {
         changed
     }
 
-    fn analyze_statement(
-        &self,
-        stmt: &Statement,
-        live_vars: &HashSet<StringId>,
-        captured: &HashSet<StringId>,
-    ) -> (bool, HashSet<StringId>) {
+    fn statement_has_side_effects(&self, stmt: &Statement) -> bool {
         match stmt {
-            Statement::Variable(decl) => {
-                let names = self.names_from_pattern(&decl.pattern);
-                let has_side_effects = self.expression_has_side_effects(&decl.initializer);
-
-                let mut newly_live = HashSet::new();
-                let mut is_dead = true;
-
-                for name in &names {
-                    if captured.contains(name) || live_vars.contains(name) || has_side_effects {
-                        is_dead = false;
-                        newly_live.insert(*name);
-                    }
-                }
-
-                (is_dead && !names.is_empty(), newly_live)
-            }
+            Statement::Variable(decl) => self.expression_has_side_effects(&decl.initializer),
             Statement::Expression(expr) => {
-                if let ExpressionKind::Assignment(lhs, _, rhs) = &expr.kind {
-                    let names = self.names_from_lhs(lhs);
-                    let has_side_effects = self.expression_has_side_effects(rhs);
-
-                    let mut is_dead = true;
-                    for name in &names {
-                        if live_vars.contains(name) || has_side_effects {
-                            is_dead = false;
-                        }
-                    }
-
-                    let reads = self.collect_expression_reads(lhs);
-                    (is_dead, reads)
+                if let ExpressionKind::Assignment(_, _, _) = &expr.kind {
+                    true
                 } else {
-                    // Non-assignment expressions are never eliminated (may have side effects)
-                    let reads = self.collect_expression_reads(expr);
-                    (false, reads)
+                    self.expression_has_side_effects(expr)
                 }
-            }
-            Statement::Return(ret) => {
-                let mut reads = HashSet::new();
-                for expr in &ret.values {
-                    reads.extend(self.collect_expression_reads(expr));
-                }
-                (false, reads)
             }
             Statement::If(if_stmt) => {
-                let mut then_live = live_vars.clone();
-                let mut else_live = live_vars.clone();
-                let mut else_if_lives: Vec<HashSet<StringId>> = Vec::new();
-
-                self.collect_block_reads(&if_stmt.then_block, &mut then_live);
-                for else_if in &if_stmt.else_ifs {
-                    let mut branch_live = live_vars.clone();
-                    self.collect_block_reads(&else_if.block, &mut branch_live);
-                    else_if_lives.push(branch_live.clone());
-                    self.collect_expression_reads_into(&else_if.condition, &mut branch_live);
-                    else_live.extend(branch_live);
-                }
-
-                self.collect_expression_reads_into(&if_stmt.condition, &mut then_live);
-                self.collect_expression_reads_into(&if_stmt.condition, &mut else_live);
-
-                if let Some(else_block) = &if_stmt.else_block {
-                    self.collect_block_reads(else_block, &mut else_live);
-                }
-
-                let condition_reads = self.collect_expression_reads(&if_stmt.condition);
-                let mut all_live = condition_reads;
-                all_live.extend(then_live);
-                for branch_live in &else_if_lives {
-                    all_live.extend(branch_live.clone());
-                }
-                all_live.extend(else_live);
-
-                (false, all_live)
+                self.expression_has_side_effects(&if_stmt.condition)
+                    || self.block_has_side_effects(&if_stmt.then_block)
+                    || if_stmt
+                        .else_ifs
+                        .iter()
+                        .any(|ei| self.block_has_side_effects(&ei.block))
+                    || if_stmt
+                        .else_block
+                        .as_ref()
+                        .is_some_and(|eb| self.block_has_side_effects(eb))
             }
             Statement::While(while_stmt) => {
-                let mut live = live_vars.clone();
-                self.collect_expression_reads_into(&while_stmt.condition, &mut live);
-                self.collect_block_reads(&while_stmt.body, &mut live);
-                (false, live)
+                self.expression_has_side_effects(&while_stmt.condition)
+                    || self.block_has_side_effects(&while_stmt.body)
             }
             Statement::For(for_stmt) => match &**for_stmt {
                 ForStatement::Numeric(for_num) => {
-                    let mut live = live_vars.clone();
-                    live.insert(for_num.variable.node);
-                    self.collect_block_reads(&for_num.body, &mut live);
-                    (false, live)
+                    self.expression_has_side_effects(&for_num.start)
+                        || self.expression_has_side_effects(&for_num.end)
+                        || for_num
+                            .step
+                            .as_ref()
+                            .is_some_and(|s| self.expression_has_side_effects(s))
+                        || self.block_has_side_effects(&for_num.body)
                 }
                 ForStatement::Generic(for_gen) => {
-                    let mut live = live_vars.clone();
-                    for var in &for_gen.variables {
-                        live.insert(var.node);
-                    }
-                    self.collect_block_reads(&for_gen.body, &mut live);
-                    (false, live)
+                    for_expr_has_side_effects(&for_gen.iterators)
+                        || self.block_has_side_effects(&for_gen.body)
                 }
             },
             Statement::Repeat(repeat_stmt) => {
-                let mut live = live_vars.clone();
-                self.collect_block_reads(&repeat_stmt.body, &mut live);
-                self.collect_expression_reads_into(&repeat_stmt.until, &mut live);
-                (false, live)
+                self.expression_has_side_effects(&repeat_stmt.until)
+                    || self.block_has_side_effects(&repeat_stmt.body)
             }
-            Statement::Block(block) => {
-                let mut live = live_vars.clone();
-                self.collect_block_reads(block, &mut live);
-                (false, live)
-            }
+            Statement::Return(ret) => ret
+                .values
+                .iter()
+                .any(|e| self.expression_has_side_effects(e)),
             Statement::Try(try_stmt) => {
-                let mut live = live_vars.clone();
-                self.collect_block_reads(&try_stmt.try_block, &mut live);
-                for catch in &try_stmt.catch_clauses {
-                    match &catch.pattern {
-                        typedlua_parser::ast::statement::CatchPattern::Typed {
-                            variable, ..
-                        } => {
-                            live.insert(variable.node);
-                        }
-                        typedlua_parser::ast::statement::CatchPattern::MultiTyped {
-                            variable,
-                            ..
-                        } => {
-                            live.insert(variable.node);
-                        }
-                        typedlua_parser::ast::statement::CatchPattern::Untyped {
-                            variable, ..
-                        } => {
-                            live.insert(variable.node);
-                        }
-                    }
-                    self.collect_block_reads(&catch.body, &mut live);
-                }
-                if let Some(finally_block) = &try_stmt.finally_block {
-                    self.collect_block_reads(finally_block, &mut live);
-                }
-                (false, live)
+                self.block_has_side_effects(&try_stmt.try_block)
+                    || try_stmt
+                        .catch_clauses
+                        .iter()
+                        .any(|c| self.block_has_side_effects(&c.body))
+                    || try_stmt
+                        .finally_block
+                        .as_ref()
+                        .is_some_and(|fb| self.block_has_side_effects(fb))
             }
-            _ => (false, HashSet::new()),
+            Statement::Function(func) => self.block_has_side_effects(&func.body),
+            Statement::Block(block) => self.block_has_side_effects(block),
+            _ => false,
         }
     }
 
-    fn names_from_pattern(&self, pattern: &Pattern) -> Vec<StringId> {
+    fn block_has_side_effects(&self, block: &Block) -> bool {
+        block
+            .statements
+            .iter()
+            .any(|s| self.statement_has_side_effects(s))
+    }
+
+    fn names_from_pattern(&self, stmt: &Statement) -> Vec<StringId> {
         let mut names = Vec::new();
-        self.collect_names_from_pattern(pattern, &mut names);
+        if let Statement::Variable(decl) = stmt {
+            self.collect_names_from_pattern(&decl.pattern, &mut names);
+        }
         names
     }
 
@@ -396,33 +335,10 @@ impl DeadStoreEliminationPass {
             }
             Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
             Pattern::Or(or_pattern) => {
-                // All alternatives bind the same variables (guaranteed by type checker)
-                // So we can collect from just the first alternative
                 if let Some(first) = or_pattern.alternatives.first() {
                     self.collect_names_from_pattern(first, names);
                 }
             }
-        }
-    }
-
-    fn names_from_lhs(&self, expr: &Expression) -> Vec<StringId> {
-        let mut names = Vec::new();
-        self.collect_names_from_lhs(expr, &mut names);
-        names
-    }
-
-    fn collect_names_from_lhs(&self, expr: &Expression, names: &mut Vec<StringId>) {
-        match &expr.kind {
-            ExpressionKind::Identifier(name) => {
-                names.push(*name);
-            }
-            ExpressionKind::Index(obj, _) => {
-                self.collect_names_from_lhs(obj, names);
-            }
-            ExpressionKind::Member(obj, _) => {
-                self.collect_names_from_lhs(obj, names);
-            }
-            _ => {}
         }
     }
 
@@ -446,10 +362,81 @@ impl DeadStoreEliminationPass {
         }
     }
 
-    fn collect_expression_reads(&self, expr: &Expression) -> HashSet<StringId> {
+    fn collect_statement_reads(&self, stmt: &Statement) -> HashSet<StringId> {
         let mut reads = HashSet::new();
-        self.collect_expression_reads_into(expr, &mut reads);
+        self.collect_statement_reads_into(stmt, &mut reads);
         reads
+    }
+
+    fn collect_statement_reads_into(&self, stmt: &Statement, reads: &mut HashSet<StringId>) {
+        match stmt {
+            Statement::Variable(decl) => {
+                self.collect_expression_reads_into(&decl.initializer, reads);
+            }
+            Statement::Expression(expr) => {
+                self.collect_expression_reads_into(expr, reads);
+            }
+            Statement::Return(ret) => {
+                for expr in &ret.values {
+                    self.collect_expression_reads_into(expr, reads);
+                }
+            }
+            Statement::If(if_stmt) => {
+                self.collect_expression_reads_into(&if_stmt.condition, reads);
+                self.collect_block_reads_into(&if_stmt.then_block, reads);
+                for else_if in &if_stmt.else_ifs {
+                    self.collect_expression_reads_into(&else_if.condition, reads);
+                    self.collect_block_reads_into(&else_if.block, reads);
+                }
+                if let Some(else_block) = &if_stmt.else_block {
+                    self.collect_block_reads_into(else_block, reads);
+                }
+            }
+            Statement::While(while_stmt) => {
+                self.collect_expression_reads_into(&while_stmt.condition, reads);
+                self.collect_block_reads_into(&while_stmt.body, reads);
+            }
+            Statement::For(for_stmt) => match &**for_stmt {
+                ForStatement::Numeric(for_num) => {
+                    self.collect_expression_reads_into(&for_num.start, reads);
+                    self.collect_expression_reads_into(&for_num.end, reads);
+                    if let Some(step) = &for_num.step {
+                        self.collect_expression_reads_into(step, reads);
+                    }
+                    self.collect_block_reads_into(&for_num.body, reads);
+                }
+                ForStatement::Generic(for_gen) => {
+                    for_expr_has_side_effects(&for_gen.iterators);
+                    self.collect_block_reads_into(&for_gen.body, reads);
+                }
+            },
+            Statement::Repeat(repeat_stmt) => {
+                self.collect_block_reads_into(&repeat_stmt.body, reads);
+                self.collect_expression_reads_into(&repeat_stmt.until, reads);
+            }
+            Statement::Function(func) => {
+                self.collect_block_reads_into(&func.body, reads);
+            }
+            Statement::Block(block) => {
+                self.collect_block_reads_into(block, reads);
+            }
+            Statement::Try(try_stmt) => {
+                self.collect_block_reads_into(&try_stmt.try_block, reads);
+                for catch in &try_stmt.catch_clauses {
+                    self.collect_block_reads_into(&catch.body, reads);
+                }
+                if let Some(finally_block) = &try_stmt.finally_block {
+                    self.collect_block_reads_into(finally_block, reads);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn collect_block_reads_into(&self, block: &Block, reads: &mut HashSet<StringId>) {
+        for stmt in &block.statements {
+            self.collect_statement_reads_into(stmt, reads);
+        }
     }
 
     fn collect_expression_reads_into(&self, expr: &Expression, reads: &mut HashSet<StringId>) {
@@ -525,14 +512,14 @@ impl DeadStoreEliminationPass {
                 }
             }
             ExpressionKind::Function(func) => {
-                self.collect_block_reads(&func.body, reads);
+                self.collect_block_reads_into(&func.body, reads);
             }
             ExpressionKind::Arrow(arrow) => match &arrow.body {
                 typedlua_parser::ast::expression::ArrowBody::Expression(expr) => {
                     self.collect_expression_reads_into(expr, reads);
                 }
                 typedlua_parser::ast::expression::ArrowBody::Block(block) => {
-                    self.collect_block_reads(block, reads);
+                    self.collect_block_reads_into(block, reads);
                 }
             },
             ExpressionKind::Conditional(cond, then_expr, else_expr) => {
@@ -552,7 +539,7 @@ impl DeadStoreEliminationPass {
                             self.collect_expression_reads_into(expr, reads);
                         }
                         typedlua_parser::ast::expression::MatchArmBody::Block(block) => {
-                            self.collect_block_reads(block, reads);
+                            self.collect_block_reads_into(block, reads);
                         }
                     }
                 }
@@ -609,79 +596,6 @@ impl DeadStoreEliminationPass {
         }
     }
 
-    fn collect_block_reads(&self, block: &Block, reads: &mut HashSet<StringId>) {
-        for stmt in &block.statements {
-            self.collect_statement_reads(stmt, reads);
-        }
-    }
-
-    fn collect_statement_reads(&self, stmt: &Statement, reads: &mut HashSet<StringId>) {
-        match stmt {
-            Statement::Variable(decl) => {
-                self.collect_expression_reads_into(&decl.initializer, reads);
-            }
-            Statement::Expression(expr) => {
-                self.collect_expression_reads_into(expr, reads);
-            }
-            Statement::Return(ret) => {
-                for expr in &ret.values {
-                    self.collect_expression_reads_into(expr, reads);
-                }
-            }
-            Statement::If(if_stmt) => {
-                self.collect_expression_reads_into(&if_stmt.condition, reads);
-                self.collect_block_reads(&if_stmt.then_block, reads);
-                for else_if in &if_stmt.else_ifs {
-                    self.collect_expression_reads_into(&else_if.condition, reads);
-                    self.collect_block_reads(&else_if.block, reads);
-                }
-                if let Some(else_block) = &if_stmt.else_block {
-                    self.collect_block_reads(else_block, reads);
-                }
-            }
-            Statement::While(while_stmt) => {
-                self.collect_expression_reads_into(&while_stmt.condition, reads);
-                self.collect_block_reads(&while_stmt.body, reads);
-            }
-            Statement::For(for_stmt) => match &**for_stmt {
-                ForStatement::Numeric(for_num) => {
-                    self.collect_expression_reads_into(&for_num.start, reads);
-                    self.collect_expression_reads_into(&for_num.end, reads);
-                    if let Some(step) = &for_num.step {
-                        self.collect_expression_reads_into(step, reads);
-                    }
-                    self.collect_block_reads(&for_num.body, reads);
-                }
-                ForStatement::Generic(for_gen) => {
-                    for expr in &for_gen.iterators {
-                        self.collect_expression_reads_into(expr, reads);
-                    }
-                    self.collect_block_reads(&for_gen.body, reads);
-                }
-            },
-            Statement::Repeat(repeat_stmt) => {
-                self.collect_block_reads(&repeat_stmt.body, reads);
-                self.collect_expression_reads_into(&repeat_stmt.until, reads);
-            }
-            Statement::Function(func) => {
-                self.collect_block_reads(&func.body, reads);
-            }
-            Statement::Block(block) => {
-                self.collect_block_reads(block, reads);
-            }
-            Statement::Try(try_stmt) => {
-                self.collect_block_reads(&try_stmt.try_block, reads);
-                for catch in &try_stmt.catch_clauses {
-                    self.collect_block_reads(&catch.body, reads);
-                }
-                if let Some(finally_block) = &try_stmt.finally_block {
-                    self.collect_block_reads(finally_block, reads);
-                }
-            }
-            _ => {}
-        }
-    }
-
     fn collect_captured_variables(&self, block: &Block) -> HashSet<StringId> {
         let mut captured = HashSet::new();
         self.collect_captures_in_block(block, &mut captured);
@@ -698,7 +612,9 @@ impl DeadStoreEliminationPass {
         match stmt {
             Statement::Variable(decl) => {
                 if self.expression_captures_variables(&decl.initializer) {
-                    for name in self.names_from_pattern(&decl.pattern) {
+                    let mut names = Vec::new();
+                    self.collect_names_from_pattern(&decl.pattern, &mut names);
+                    for name in names {
                         captured.insert(name);
                     }
                 }
@@ -880,4 +796,13 @@ impl Default for DeadStoreEliminationPass {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn for_expr_has_side_effects(exprs: &[typedlua_parser::ast::expression::Expression]) -> bool {
+    exprs.iter().any(|e| match &e.kind {
+        ExpressionKind::Call(_, _, _) => true,
+        ExpressionKind::MethodCall(_, _, _, _) => true,
+        ExpressionKind::Assignment(_, _, _) => true,
+        _ => false,
+    })
 }
