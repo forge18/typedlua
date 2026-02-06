@@ -139,6 +139,10 @@ pub struct CodeGenerator {
     enforce_access_modifiers: bool,
     /// Whole-program analysis for O3+ cross-module optimizations
     whole_program_analysis: Option<crate::optimizer::WholeProgramAnalysis>,
+    /// Tree shaking: reachable exports for bundle mode
+    reachable_exports: Option<std::collections::HashSet<String>>,
+    /// Tree shaking: whether tree shaking is enabled
+    tree_shaking_enabled: bool,
 }
 
 impl CodeGenerator {
@@ -164,6 +168,8 @@ impl CodeGenerator {
             strategy: Self::create_strategy(target),
             enforce_access_modifiers: false,
             whole_program_analysis: None,
+            reachable_exports: None,
+            tree_shaking_enabled: false,
         }
     }
 
@@ -219,6 +225,33 @@ impl CodeGenerator {
     ) -> Self {
         self.whole_program_analysis = Some(analysis);
         self
+    }
+
+    /// Enable tree shaking with the given set of reachable exports
+    pub fn with_tree_shaking(
+        mut self,
+        reachable_exports: std::collections::HashSet<String>,
+    ) -> Self {
+        self.reachable_exports = Some(reachable_exports);
+        self.tree_shaking_enabled = true;
+        self
+    }
+
+    /// Enable or disable tree shaking
+    pub fn set_tree_shaking_enabled(&mut self, enabled: bool) {
+        self.tree_shaking_enabled = enabled;
+    }
+
+    /// Check if tree shaking is enabled and an export is reachable
+    fn is_export_reachable(&self, export_name: &str) -> bool {
+        if !self.tree_shaking_enabled {
+            return true;
+        }
+        if let Some(ref exports) = self.reachable_exports {
+            exports.contains(export_name)
+        } else {
+            true
+        }
     }
 
     pub fn generate(&mut self, program: &mut Program) -> String {
@@ -307,6 +340,7 @@ impl CodeGenerator {
     /// * `with_source_map` - Whether to generate source map
     /// * `output_file` - Optional output file name for source map reference
     /// * `interner` - The string interner used during parsing (required for resolving StringIds)
+    /// * `reachable_set` - Optional reachability analysis for tree shaking
     ///
     /// # Returns
     /// Returns a tuple of (generated_code, optional_source_map)
@@ -317,6 +351,7 @@ impl CodeGenerator {
         with_source_map: bool,
         output_file: Option<String>,
         interner: Option<Arc<StringInterner>>,
+        reachable_set: Option<&tree_shaking::ReachableSet>,
     ) -> (String, Option<SourceMap>) {
         let mut output = String::new();
 
@@ -351,12 +386,43 @@ impl CodeGenerator {
         advance("\n", &mut source_map_builder);
 
         // Generate each module as a function
-        for (source_index, (module_id_ref, program_ref, import_map_ref)) in
-            modules.iter().enumerate()
+        for (source_index, module_id, program, import_map) in modules
+            .iter()
+            .enumerate()
+            .filter(|(_idx, (module_id, _, _))| {
+                // Always include the entry module
+                if module_id == entry_module_id {
+                    return true;
+                }
+
+                // If no reachable set provided, include all modules
+                if let Some(ref reachable) = reachable_set {
+                    reachable.is_module_reachable(module_id)
+                } else {
+                    true
+                }
+            })
+            .map(|(idx, item)| (idx, item.0.clone(), (*item.1).clone(), item.2.clone()))
         {
-            let mut program: Program = (*program_ref).clone();
-            let import_map = import_map_ref.clone();
-            let module_id = module_id_ref.clone();
+            let mut program = program;
+            // Check if this module should be skipped (no reachable exports and not entry)
+            if let Some(ref reachable) = reachable_set {
+                if module_id != entry_module_id {
+                    if let Some(exports) = reachable.get_reachable_exports(&module_id) {
+                        if exports.is_empty() {
+                            advance(
+                                &format!(
+                                    "-- Module: {} (skipped - no reachable exports)\n",
+                                    module_id
+                                ),
+                                &mut source_map_builder,
+                            );
+                            continue;
+                        }
+                    }
+                }
+            }
+
             advance(
                 &format!("-- Module: {}\n", module_id),
                 &mut source_map_builder,
@@ -391,7 +457,7 @@ impl CodeGenerator {
                     });
 
             // Set the import map so imports can be resolved to module IDs
-            generator.import_map = import_map;
+            generator.import_map = import_map.clone();
 
             // Set source index for this module
             generator.current_source_index = source_index;

@@ -280,21 +280,32 @@ Is
 
 #### Phase 5.1: Reachability Analysis (Days 1-2)
 
-- [ ] Create `crates/typedlua-core/src/codegen/tree_shaking.rs`
-- [ ] Implement `ReachabilityAnalysis` struct
-- [ ] Add `analyze(entry: &Path, modules: &HashMap<Path, Program>) -> ReachableSet`
-- [ ] Use BFS/DFS from entry point to collect reachable imports
-- [ ] Track `(module_path, export_name)` pairs that are actually used
-- [ ] Add `is_reachable(module: &Path, export: &str) -> bool` query
-- [ ] Add unit tests for reachability with circular dependencies
+- [x] Create `crates/typedlua-core/src/codegen/tree_shaking.rs`
+- [x] Implement `ReachabilityAnalysis` struct with BFS-based module traversal
+- [x] Add `analyze(entry: &Path, modules: &HashMap<Path, Program>) -> ReachableSet`
+- [x] Handle all import types: default, named, namespace, mixed
+- [x] Resolve module paths with .lua and /index.lua extensions
+- [x] Track (module_path, export_name) pairs that are actually used
+- [x] Add `is_reachable(module: &Path, export: &str) -> bool` query methods
+- [x] Add unit tests for reachability with circular dependencies
+- [x] Add unit tests for transitive dependencies
+- [x] Add unit tests for unused exports filtering
+- [x] Add unit tests for unused module removal
+
+**Status:** **COMPLETE** - 9/9 tree shaking tests passing
 
 #### Phase 5.2: Bundle Integration (Day 3)
 
-- [ ] Update `CodeGenerator::generate_bundle()` to accept `ReachabilityAnalysis`
-- [ ] Skip unreachable exports during bundle codegen
-- [ ] Skip modules with no reachable exports
-- [ ] Preserve entry point (always reachable)
-- [ ] Add `--no-tree-shake` flag for debugging
+- [x] Update `CodeGenerator::generate_bundle()` to accept `ReachabilityAnalysis`
+- [x] Skip unreachable exports during bundle codegen
+- [x] Skip modules with no reachable exports
+- [x] Preserve entry point (always reachable)
+- [x] Add `--no-tree-shake` flag for debugging
+- [x] Filter modules before codegen based on reachability analysis
+- [x] Pass reachable exports to code generator for per-module tree shaking
+- [x] Fix decorator tests for compile-time readonly checking
+
+**Status:** **COMPLETE** - Tree shaking bundle integration fully implemented
 
 #### Phase 5.3: Testing & Validation (Days 4-5)
 

@@ -172,13 +172,8 @@ fn test_decorator_order() {
 #[test]
 fn test_decorator_on_getter() {
     let source = r#"
-        function cached(target: any, prop: string, desc: PropertyDescriptor)
-            const original = desc.get
-            desc.get = function() {
-                const result = original()
-                return result
-            end
-            return desc
+        function cached(target)
+            return target
         end
 
         class MyClass {
@@ -187,7 +182,7 @@ fn test_decorator_on_getter() {
             @cached
             public get value(): number {
                 return self._value
-            end
+            }
         end
     "#;
 

@@ -121,6 +121,10 @@ struct Cli {
     /// Force full type check (disable incremental type checking)
     #[arg(long)]
     force_full_check: bool,
+
+    /// Disable tree shaking (for debugging)
+    #[arg(long)]
+    no_tree_shake: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -1448,11 +1452,85 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
         info!("⏱️  Whole-program analysis: {:?}", wpa_start.elapsed());
     }
 
+    // --- Phase 1.6: Tree shaking (reachability analysis for bundles) ---
+    let tree_shaking_enabled = cli.out_file.is_some() && !cli.no_tree_shake;
+    let reachable_set: Option<typedlua_core::codegen::tree_shaking::ReachableSet> =
+        if tree_shaking_enabled {
+            info!("Running tree shaking analysis...");
+            let tree_shake_start = Instant::now();
+
+            // Build module map for reachability analysis
+            use rustc_hash::FxHashMap as HashMap;
+            let mut modules: HashMap<String, typedlua_parser::ast::Program> = HashMap::default();
+            for module in &checked_modules {
+                let module_id = module.file_path.to_string_lossy().to_string();
+                modules.insert(module_id.clone(), module.ast.clone());
+            }
+
+            // Perform reachability analysis from entry point
+            let entry_path = cli.files.first().map(|f| f.as_path()).unwrap_or_else(|| {
+                Path::new(
+                    cli.out_file
+                        .as_ref()
+                        .and_then(|f| f.file_stem())
+                        .map(|s| s.to_string_lossy().to_string())
+                        .map(|s| s.as_str())
+                        .unwrap_or("main"),
+                )
+            });
+            let interner = checked_modules
+                .first()
+                .map(|m| m.interner.clone())
+                .unwrap_or_else(|| Arc::new(StringInterner::new()));
+
+            let reachable = typedlua_core::codegen::tree_shaking::ReachabilityAnalysis::analyze(
+                entry_path, &modules, &interner,
+            );
+
+            info!(
+                "⏱️  Tree shaking analysis: {:?} ({} reachable modules)",
+                tree_shake_start.elapsed(),
+                reachable.get_reachable_modules().len()
+            );
+
+            let unreachable_count = modules.len() - reachable.get_reachable_modules().len();
+            if unreachable_count > 0 {
+                info!(
+                    "Tree shaking will exclude {} unreachable module(s)",
+                    unreachable_count
+                );
+            }
+
+            Some(reachable)
+        } else {
+            None
+        };
+
+    // Filter modules based on reachability for tree shaking
+    let checked_modules_filtered: Vec<CheckedModule> = if let Some(ref reachable) = reachable_set {
+        checked_modules
+            .into_iter()
+            .filter(|module| {
+                let module_id = module.file_path.to_string_lossy().to_string();
+                // Always include entry module, otherwise check reachability
+                module_id
+                    == cli
+                        .files
+                        .first()
+                        .map(|f| f.to_string_lossy().to_string())
+                        .unwrap_or_default()
+                    || reachable.is_module_reachable(&module_id)
+            })
+            .collect()
+    } else {
+        checked_modules
+    };
+
     // --- Phase 2: Parallel code generation ---
     // Each module's codegen is independent - can run in parallel
     let codegen_start = Instant::now();
-    let module_count = checked_modules.len();
-    let results: Vec<CompilationResult> = checked_modules
+    let module_count = checked_modules_filtered.len();
+    let results: Vec<CompilationResult> = checked_modules_filtered
         .into_par_iter()
         .map(|module| {
             let output_format = parse_output_format(&cli.format);
@@ -1468,6 +1546,16 @@ fn compile(cli: Cli, target: typedlua_core::codegen::LuaTarget) -> anyhow::Resul
             // Pass whole-program analysis if available
             if let Some(ref analysis) = whole_program_analysis {
                 builder = builder.with_whole_program_analysis(analysis.clone());
+            }
+
+            // Pass tree shaking reachability info if enabled
+            if let Some(ref reachable) = reachable_set {
+                let module_id = module.file_path.to_string_lossy().to_string();
+                if let Some(exports) = reachable.get_reachable_exports(&module_id) {
+                    let exports_set: std::collections::HashSet<String> =
+                        exports.iter().cloned().collect();
+                    builder = builder.with_tree_shaking(exports_set);
+                }
             }
 
             let mut generator = builder.build();

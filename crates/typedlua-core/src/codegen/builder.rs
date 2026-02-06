@@ -59,6 +59,7 @@ pub struct CodeGeneratorBuilder {
     optimization_level: OptimizationLevel,
     output_format: OutputFormat,
     whole_program_analysis: Option<WholeProgramAnalysis>,
+    reachable_exports: Option<std::collections::HashSet<String>>,
 }
 
 impl CodeGeneratorBuilder {
@@ -93,6 +94,7 @@ impl CodeGeneratorBuilder {
             optimization_level: OptimizationLevel::O0,
             output_format: OutputFormat::Readable,
             whole_program_analysis: None,
+            reachable_exports: None,
         }
     }
 
@@ -270,6 +272,37 @@ impl CodeGeneratorBuilder {
         self
     }
 
+    /// Sets the reachable exports for tree shaking in bundle mode.
+    ///
+    /// When tree shaking is enabled, exports not in this set will be skipped
+    /// during code generation, resulting in smaller bundles.
+    ///
+    /// # Arguments
+    ///
+    /// * `reachable_exports` - A set of export names that should be included
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use std::sync::Arc;
+    /// use std::collections::HashSet;
+    /// use typedlua_parser::string_interner::StringInterner;
+    /// use typedlua_core::codegen::CodeGeneratorBuilder;
+    ///
+    /// let interner = Arc::new(StringInterner::new());
+    /// let reachable: HashSet<String> = ["add", "subtract"].into_iter().map(|s| s.to_string()).collect();
+    /// let generator = CodeGeneratorBuilder::new(interner)
+    ///     .with_tree_shaking(reachable)
+    ///     .build();
+    /// ```
+    pub fn with_tree_shaking(
+        mut self,
+        reachable_exports: std::collections::HashSet<String>,
+    ) -> Self {
+        self.reachable_exports = Some(reachable_exports);
+        self
+    }
+
     /// Builds and returns a configured [`CodeGenerator`] instance.
     ///
     /// This consumes the builder and creates the generator with all
@@ -306,6 +339,10 @@ impl CodeGeneratorBuilder {
 
         if let Some(analysis) = self.whole_program_analysis {
             generator = generator.with_whole_program_analysis(analysis);
+        }
+
+        if let Some(ref exports) = self.reachable_exports {
+            generator = generator.with_tree_shaking(exports.clone());
         }
 
         generator

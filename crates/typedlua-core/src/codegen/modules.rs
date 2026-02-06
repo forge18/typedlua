@@ -113,10 +113,18 @@ impl CodeGenerator {
     pub fn generate_export(&mut self, export: &typedlua_parser::ast::statement::ExportDeclaration) {
         match &export.kind {
             typedlua_parser::ast::statement::ExportKind::Declaration(stmt) => {
-                self.generate_statement(stmt);
-
                 if let Some(name) = self.get_declaration_name(stmt) {
-                    self.exports.push(self.resolve(name).to_string());
+                    let export_name = self.resolve(name).to_string();
+
+                    // Tree shaking: skip unreachable exports
+                    if self.tree_shaking_enabled && !self.is_export_reachable(&export_name) {
+                        return;
+                    }
+
+                    self.generate_statement(stmt);
+                    self.exports.push(export_name);
+                } else {
+                    self.generate_statement(stmt);
                 }
             }
             typedlua_parser::ast::statement::ExportKind::Named { specifiers, source } => {
@@ -124,11 +132,27 @@ impl CodeGenerator {
                     self.generate_re_export(specifiers, source_path);
                 } else {
                     for spec in specifiers {
-                        self.exports.push(self.resolve(spec.local.node).to_string());
+                        let export_name = self.resolve(spec.local.node).to_string();
+
+                        // Tree shaking: skip unreachable exports
+                        if self.tree_shaking_enabled && !self.is_export_reachable(&export_name) {
+                            continue;
+                        }
+
+                        self.exports.push(export_name);
                     }
                 }
             }
             typedlua_parser::ast::statement::ExportKind::Default(expr) => {
+                // Tree shaking: in bundle mode, skip default export if tree shaking is enabled
+                // and the module has no other reachable exports
+                if self.tree_shaking_enabled {
+                    let has_other_exports = !self.exports.is_empty();
+                    if !has_other_exports && !matches!(self.mode, CodeGenMode::Bundle { .. }) {
+                        return;
+                    }
+                }
+
                 self.write_indent();
                 self.write("local _default = ");
                 self.generate_expression(expr);
