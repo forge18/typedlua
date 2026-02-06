@@ -28,9 +28,9 @@
 - [x] Define `AstFeatures` bitflags enum (HAS_LOOPS, HAS_CLASSES, HAS_ENUMS, etc.)
 - [x] Create feature detection visitor in `optimizer/mod.rs`
 - [x] Add `required_features()` method to all Pass traits (ExprVisitor, StmtVisitor, PreAnalysisPass, WholeProgramPass)
-- [?] Hook up `should_run_pass()` in optimization loop - **INCOMPLETE**
-  - ❌ `should_run_pass()` method exists but is never called!
-  - Need to add feature check before each pass execution
+- [x] Hook up feature checking in optimization loop
+  - ✅ Inline feature check in each pass invocation
+  - ✅ Composite passes combine visitor features
 - [x] Add debug logging to show which passes are skipped
 - [x] Run `cargo test` to verify no regressions (143 tests passed)
 - [x] Update individual passes with specific required features:
@@ -40,7 +40,7 @@
 - [ ] Test with modules missing each feature type (e.g., loop-free code, class-free code, etc.)
 - [ ] Run benchmarks to measure performance impact
 
-**Status:** **NEEDS FIX** - Core infrastructure implemented but not connected. Need to update `Optimizer::optimize()` to actually call `should_run_pass()` before running each pass.
+**Status:** **COMPLETE** - Feature detection and skip logic fully implemented and connected.
 
 **Expected:** Skip unnecessary passes (e.g., no loops → skip loop optimization)
 
