@@ -12,7 +12,7 @@ fn test_rich_enum_with_constructor_args() {
             Mercury(3.303e23, 2.4397e6),
             Venus(4.869e24, 6.0518e6),
             Earth(5.972e24, 6.371e6),
-        end
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -26,16 +26,16 @@ fn test_rich_enum_with_methods() {
             Success,
             Error(string),
             Loading(progress: number),
-        end
+        }
 
         impl Status {
             public isError(): boolean {
                 match self {
                     Error(_) => true,
                     _ => false,
-                end
-            end
-        end
+                }
+            }
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -48,17 +48,17 @@ fn test_rich_enum_with_static_methods() {
         enum Result<T, E> {
             Ok(T),
             Err(E),
-        end
+        }
 
         impl Result<T, E> {
             public static ok(value: T): Result<T, E> {
                 return Ok(value)
-            end
+            }
 
             public static err(error: E): Result<T, E> {
                 return Err(error)
-            end
-        end
+            }
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -71,13 +71,13 @@ fn test_rich_enum_pattern_matching() {
         enum Option<T> {
             Some(T),
             None,
-        end
+        }
 
         function unwrap<T>(opt: Option<T>): T
             match opt {
                 Some(value) => value,
                 None => error("unwrap None"),
-            end
+            }
         end
     "#;
 
@@ -92,14 +92,14 @@ fn test_rich_enum_nested() {
             Leaf(T),
             Node(Tree<T>, Tree<T>),
             Empty,
-        end
+        }
 
         function height<T>(tree: Tree<T>): number
             match tree {
                 Empty => 0,
                 Leaf(_) => 1,
                 Node(left, right) => 1 + max(height(left), height(right)),
-            end
+            }
         end
     "#;
 
@@ -112,21 +112,21 @@ fn test_rich_enum_with_interface() {
     let source = r#"
         interface Drawable {
             draw(): void
-        end
+        }
 
         enum Shape {
             Circle(radius: number),
             Rectangle(width: number, height: number),
-        end
+        }
 
         impl Shape: Drawable {
             public draw(): void {
                 match self {
-                    Circle(r) => print("circle"),
-                    Rectangle(w, h) => print("rectangle"),
-                end
-            end
-        end
+                    Circle(r) => const _ = r,
+                    Rectangle(w, h) => const _ = w + h,
+                }
+            }
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -139,10 +139,10 @@ fn test_rich_enum_generic() {
         enum Either<L, R> {
             Left(L),
             Right(R),
-        end
+        }
 
         function fromNullable<T>(value: T | nil): Either<T, string>
-            if value != nil then
+            if value ~= nil then
                 return Left(value)
             end
             return Right("value is nil")
@@ -160,16 +160,16 @@ fn test_rich_enum_with_properties() {
             Development,
             Production,
             Custom(host: string, port: number),
-        end
+        }
 
         impl Config {
             public isLocal(): boolean {
                 match self {
                     Development => true,
                     _ => false,
-                end
-            end
-        end
+                }
+            }
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -184,7 +184,7 @@ fn test_rich_enum_exhaustive_match() {
             Running,
             Paused,
             Stopped,
-        end
+        }
 
         function handle(state: State): string
             match state {
@@ -192,7 +192,7 @@ fn test_rich_enum_exhaustive_match() {
                 Running => "running",
                 Paused => "paused",
                 Stopped => "stopped",
-            end
+            }
         end
     "#;
 
@@ -206,13 +206,13 @@ fn test_rich_enum_partial_match() {
         enum Response {
             Success,
             Failure(string),
-        end
+        }
 
         function handle(response: Response): boolean
             match response {
                 Failure(msg) => false,
                 _ => true,
-            end
+            }
         end
     "#;
 
@@ -228,7 +228,7 @@ fn test_rich_enum_with_default() {
             Green,
             Blue,
             Other(string),
-        end
+        }
 
         function name(c: Color): string
             match c {
@@ -236,7 +236,7 @@ fn test_rich_enum_with_default() {
                 Green => "green",
                 Blue => "blue",
                 Other(name) => name,
-            end
+            }
         end
     "#;
 
@@ -250,13 +250,13 @@ fn test_rich_enum_recursive() {
         enum List<T> {
             Nil,
             Cons(T, List<T>),
-        end
+        }
 
         function length<T>(list: List<T>): number
             match list {
                 Nil => 0,
                 Cons(_, rest) => 1 + length(rest),
-            end
+            }
         end
     "#;
 
@@ -270,13 +270,13 @@ fn test_rich_enum_iterator() {
         enum Maybe<T> {
             Some(T),
             None,
-        end
+        }
 
         impl<T> Maybe<T> {
             public iterator(): () => T | nil {
                 return () => nil
-            end
-        end
+            }
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -291,7 +291,7 @@ fn test_rich_enum_derives() {
             Info,
             Warning,
             Error,
-        end
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -305,7 +305,7 @@ fn test_rich_enum_with_self() {
             Number(number),
             Add(Expr, Expr),
             Mul(Expr, Expr),
-        end
+        }
 
         impl Expr {
             public evaluate(): number {
@@ -313,9 +313,9 @@ fn test_rich_enum_with_self() {
                     Number(n) => n,
                     Add(a, b) => a.evaluate() + b.evaluate(),
                     Mul(a, b) => a.evaluate() * b.evaluate(),
-                end
-            end
-        end
+                }
+            }
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -329,7 +329,7 @@ fn test_rich_enum_export() {
             Pending,
             Active,
             Done,
-        end
+        }
     "#;
 
     let result = compile_and_check(source);

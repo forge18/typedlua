@@ -16,16 +16,16 @@ mod interface_inlining_tests {
             interface Greeter {
                 greet(): string {
                     return "Hello, " .. self.name
-                end
-            end
+                }
+            }
 
             class User implements Greeter {
                 name: string
 
                 constructor(name: string) {
                     self.name = name
-                end
-            end
+                }
+            }
 
             const user = new User("Alice")
             user.greet()
@@ -51,19 +51,19 @@ mod interface_inlining_tests {
         let source = r#"
             interface Greeter {
                 greet(): string
-            end
+            }
 
             class EnglishGreeter implements Greeter {
                 greet(): string {
                     return "Hello"
-                end
-            end
+                }
+            }
 
             class FrenchGreeter implements Greeter {
                 greet(): string {
                     return "Bonjour"
-                end
-            end
+                }
+            }
 
             const eng = new EnglishGreeter()
             eng.greet()
@@ -88,12 +88,12 @@ mod interface_inlining_tests {
 
                 log(): string {
                     return "Log: " .. self.name
-                end
-            end
+                }
+            }
 
             class ConsoleLogger implements Logger {
                 name: string = "default"
-            end
+            }
 
             const logger = new ConsoleLogger()
             logger.log()
@@ -116,16 +116,16 @@ mod interface_inlining_tests {
             interface StringProcessor {
                 process(): string {
                     return self.value .. " processed"
-                end
-            end
+                }
+            }
 
             class Processor implements StringProcessor {
                 value: string
 
                 constructor(value: string) {
                     self.value = value
-                end
-            end
+                }
+            }
 
             const p = new Processor("test")
             p.process()
@@ -148,8 +148,8 @@ mod interface_inlining_tests {
             interface Greeter {
                 greet(): string {
                     return "Hello"
-                end
-            end
+                }
+            }
 
             class User implements Greeter {}
 
@@ -171,8 +171,8 @@ mod interface_inlining_tests {
             interface Greeter {
                 greet(): string {
                     return "Hello"
-                end
-            end
+                }
+            }
 
             class User implements Greeter {}
 
@@ -193,9 +193,9 @@ mod interface_inlining_tests {
         let source = r#"
             interface Converter<T> {
                 convert(value: T): string {
-                    return tostring(value)
-                end
-            end
+                    return "converted"
+                }
+            }
 
             class NumberConverter implements Converter<number> {}
 

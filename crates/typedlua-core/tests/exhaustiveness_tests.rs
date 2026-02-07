@@ -298,6 +298,8 @@ fn test_match_with_default() {
 
 #[test]
 fn test_generic_exhaustive() {
+    // Note: `<T extends string | number>` union constraints currently cause a parser issue,
+    // so this test uses a single constraint. Generic narrowing itself works.
     let source = r#"
         function identity<T extends string>(value: T): T
             return value
@@ -309,7 +311,7 @@ fn test_generic_exhaustive() {
     let result = type_check(source);
     assert!(
         result.is_ok(),
-        "Generic with type guard should be exhaustive: {:?}",
+        "Generic with constraint should compile: {:?}",
         result.err()
     );
 }

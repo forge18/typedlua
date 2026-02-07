@@ -19,12 +19,12 @@ fn test_simple_add_operator() {
             constructor(x: number, y: number) {
                 self.x = x
                 self.y = y
-            end
+            }
 
             operator +(other: Vector): Vector {
                 return new Vector(self.x + other.x, self.y + other.y)
-            end
-        end
+            }
+        }
 
         const v1 = new Vector(1, 2)
         const v2 = new Vector(3, 4)
@@ -53,12 +53,12 @@ fn test_operator_multiply() {
             constructor(x: number, y: number) {
                 self.x = x
                 self.y = y
-            end
+            }
 
             operator *(scalar: number): Vector {
                 return new Vector(self.x * scalar, self.y * scalar)
-            end
-        end
+            }
+        }
 
         const v = new Vector(2, 3)
         const result = v * 2
@@ -84,16 +84,16 @@ fn test_comparison_operators() {
             constructor(x: number, y: number) {
                 self.x = x
                 self.y = y
-            end
+            }
 
             operator <(other: Point): boolean {
                 return self.x < other.x
-            end
+            }
 
             operator ==(other: Point): boolean {
                 return self.x == other.x and self.y == other.y
-            end
-        end
+            }
+        }
 
         const p1 = new Point(1, 2)
         const p2 = new Point(3, 4)
@@ -125,23 +125,23 @@ fn test_multiple_operators() {
             constructor(real: number, imag: number) {
                 self.real = real
                 self.imag = imag
-            end
+            }
 
             operator +(other: Complex): Complex {
                 return new Complex(self.real + other.real, self.imag + other.imag)
-            end
+            }
 
             operator -(other: Complex): Complex {
                 return new Complex(self.real - other.real, self.imag - other.imag)
-            end
+            }
 
             operator *(other: Complex): Complex {
                 return new Complex(
                     self.real * other.real - self.imag * other.imag,
                     self.real * other.imag + self.imag * other.real
                 )
-            end
-        end
+            }
+        }
 
         const a = new Complex(1, 2)
         const b = new Complex(3, 4)
@@ -176,12 +176,12 @@ fn test_no_inline_at_o1() {
             constructor(x: number, y: number) {
                 self.x = x
                 self.y = y
-            end
+            }
 
             operator +(other: Vector): Vector {
                 return new Vector(self.x + other.x, self.y + other.y)
-            end
-        end
+            }
+        }
 
         const v1 = new Vector(1, 2)
         const v2 = new Vector(3, 4)
@@ -209,12 +209,12 @@ fn test_unary_minus_operator() {
             constructor(x: number, y: number) {
                 self.x = x
                 self.y = y
-            end
+            }
 
             operator -(): Vector {
                 return new Vector(-self.x, -self.y)
-            end
-        end
+            }
+        }
 
         const v = new Vector(1, 2)
         const neg = -v
@@ -238,16 +238,16 @@ fn test_chained_operators() {
 
             constructor(value: number) {
                 self.value = value
-            end
+            }
 
             operator +(other: Number): Number {
                 return new Number(self.value + other.value)
-            end
+            }
 
             operator *(other: Number): Number {
                 return new Number(self.value * other.value)
-            end
-        end
+            }
+        }
 
         const a = new Number(1)
         const b = new Number(2)
@@ -279,7 +279,7 @@ fn test_complex_operator() {
 
             constructor(data: Array<number>) {
                 self.data = data
-            end
+            }
 
             operator +(other: Matrix): Matrix {
                 local result = {}
@@ -287,8 +287,8 @@ fn test_complex_operator() {
                     result[i] = self.data[i] + other.data[i]
                 end
                 return new Matrix(result)
-            end
-        end
+            }
+        }
     "#;
 
     let result = compile_with_optimization(source, OptimizationLevel::O3);
@@ -311,14 +311,14 @@ fn test_operator_call_in_loop() {
 
             constructor() {
                 self.value = 0
-            end
+            }
 
             operator +(n: number): Counter {
                 local result = new Counter()
                 result.value = self.value + n
                 return result
-            end
-        end
+            }
+        }
 
         function test()
             local c = new Counter()

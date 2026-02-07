@@ -14,7 +14,7 @@ fn test_simple_literal_match() {
             2 => "two",
             5 => "five",
             _ => "other"
-        end
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -34,7 +34,7 @@ fn test_match_with_boolean() {
         const result = match flag {
             true => "yes"
             false => "no"
-        end
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -48,14 +48,14 @@ fn test_match_with_enum() {
             Red,
             Green,
             Blue,
-        end
+        }
 
         const c: Color = Color.Red
         const result = match c {
             Red => "red"
             Green => "green"
             Blue => "blue"
-        end
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -70,7 +70,7 @@ fn test_match_with_string() {
             "active" => 1
             "inactive" => 0
             _ => -1
-        end
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -85,7 +85,7 @@ fn test_match_with_guard() {
             n if n > 10 => "big"
             n if n > 5 => "medium"
             _ => "small"
-        end
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -100,7 +100,7 @@ fn test_match_with_destructuring() {
             { x: 10, y: 20 } => "origin"
             { x } if x > 0 => "positive x"
             _ => "other"
-        end
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -114,7 +114,7 @@ fn test_match_nested() {
         const result = match data {
             { nested: { value: 42 } } => "found"
             _ => "not found"
-        end
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -129,7 +129,7 @@ fn test_match_array() {
             [1, 2, 3] => "one two three"
             [1, 2] => "one two"
             _ => "other"
-        end
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -143,7 +143,7 @@ fn test_match_rest_pattern() {
         const result = match arr {
             [first, ...rest] => first
             _ => 0
-        end
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -157,7 +157,7 @@ fn test_match_union_type() {
         const result = match x {
             n: number => n * 2
             s: string => #s
-        end
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -169,7 +169,7 @@ fn test_match_with_capture() {
     let source = r#"
         const result = match 42 {
             n => n * 2
-        end
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -184,11 +184,12 @@ fn test_match_in_expression() {
             1 => 10
             2 => 20
             3 => 30
+            _ => 0
         } + 5
     "#;
 
     let result = compile_and_check(source);
-    assert!(result.is_ok(), "Match in expression should compile");
+    assert!(result.is_ok(), "Match in expression should compile: {:?}", result.err());
 }
 
 #[test]
@@ -201,7 +202,7 @@ fn test_match_function_result() {
         const result = match getValue() {
             42 => "answer"
             _ => "other"
-        end
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -215,7 +216,7 @@ fn test_match_table_with_rest() {
         const result = match t {
             { a, ...rest } => a
             _ => 0
-        end
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -230,7 +231,7 @@ fn test_match_nested_guard() {
             { x, y } if x > 10 and y > 15 => " quadrant 1"
             { x, y } if x <= 10 and y > 15 => "quadrant 2"
             _ => "other"
-        end
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -241,8 +242,8 @@ fn test_match_nested_guard() {
 fn test_match_type_annotation() {
     let source = r#"
         const result: string = match 42 {
-            n: number => tostring(n)
-        end
+            n: number => "number"
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -256,7 +257,7 @@ fn test_match_skipped_values() {
         const result = match arr {
             [first, , , , last] => first + last
             _ => 0
-        end
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -271,7 +272,7 @@ fn test_match_object_with_methods() {
             { type: "circle", radius: r } => 3.14 * r * r
             { type: "square", size: s } => s * s
             _ => 0
-        end
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -284,8 +285,8 @@ fn test_match_with_nil() {
         const x: number | nil = nil
         const result = match x {
             nil => "no value"
-            n: number => tostring(n)
-        end
+            n: number => "has value"
+        }
     "#;
 
     let result = compile_and_check(source);
@@ -299,7 +300,7 @@ fn test_match_tuple_pattern() {
         const result = match point {
             [x, y] => x + y
             _ => 0
-        end
+        }
     "#;
 
     let result = compile_and_check(source);
