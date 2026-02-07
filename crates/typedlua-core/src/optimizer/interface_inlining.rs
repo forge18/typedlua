@@ -17,35 +17,50 @@
 //! 4. Inlining the method body, binding `self` to the receiver expression
 //! 5. Preserving original dispatch if multiple implementations exist
 
+use bumpalo::Bump;
 use crate::config::OptimizationLevel;
+use crate::MutableProgram;
 
 use crate::optimizer::{StmtVisitor, WholeProgramPass};
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 use typedlua_parser::ast::expression::{AssignmentOp, Expression, ExpressionKind};
 use typedlua_parser::ast::pattern::Pattern;
-use typedlua_parser::ast::statement::{Block, ClassMember, InterfaceMember, Statement};
+use typedlua_parser::ast::statement::{Block, ClassMember, ForStatement, InterfaceMember, Statement};
 use typedlua_parser::ast::types::TypeKind;
-use typedlua_parser::ast::Program;
 use typedlua_parser::ast::Spanned;
 use typedlua_parser::span::Span;
 use typedlua_parser::string_interner::{StringId, StringInterner};
 
 const MAX_INLINABLE_STATEMENTS: usize = 10;
 
-#[derive(Debug, Default)]
-struct InterfaceImplementationMap {
+#[derive(Debug)]
+struct InterfaceImplementationMap<'arena> {
     interface_to_classes: FxHashMap<StringId, Vec<StringId>>,
     class_to_interfaces: FxHashMap<StringId, Vec<StringId>>,
     class_is_final: FxHashMap<StringId, bool>,
-    method_body: FxHashMap<(StringId, StringId), Block>,
+    method_body: FxHashMap<(StringId, StringId), Block<'arena>>,
     method_signature: FxHashMap<(StringId, StringId), Spanned<StringId>>,
     known_classes: FxHashMap<StringId, bool>,
     known_interfaces: FxHashMap<StringId, bool>,
 }
 
-impl InterfaceImplementationMap {
-    pub fn build(program: &Program) -> Self {
+impl<'arena> Default for InterfaceImplementationMap<'arena> {
+    fn default() -> Self {
+        Self {
+            interface_to_classes: FxHashMap::default(),
+            class_to_interfaces: FxHashMap::default(),
+            class_is_final: FxHashMap::default(),
+            method_body: FxHashMap::default(),
+            method_signature: FxHashMap::default(),
+            known_classes: FxHashMap::default(),
+            known_interfaces: FxHashMap::default(),
+        }
+    }
+}
+
+impl<'arena> InterfaceImplementationMap<'arena> {
+    pub fn build(program: &MutableProgram<'arena>) -> Self {
         let mut map = InterfaceImplementationMap::default();
 
         for stmt in &program.statements {
@@ -55,7 +70,7 @@ impl InterfaceImplementationMap {
                     map.known_classes.insert(class_id, true);
                     map.class_is_final.insert(class_id, class.is_final);
 
-                    for member in &class.members {
+                    for member in class.members.iter() {
                         if let ClassMember::Method(method) = member {
                             let method_id = method.name.node;
                             if let Some(body) = &method.body {
@@ -64,7 +79,7 @@ impl InterfaceImplementationMap {
                         }
                     }
 
-                    for implemented in &class.implements {
+                    for implemented in class.implements.iter() {
                         if let TypeKind::Reference(type_ref) = &implemented.kind {
                             let interface_id = type_ref.name.node;
                             map.known_interfaces.insert(interface_id, true);
@@ -83,7 +98,7 @@ impl InterfaceImplementationMap {
                     let interface_id = interface.name.node;
                     map.known_interfaces.insert(interface_id, true);
 
-                    for member in &interface.members {
+                    for member in interface.members.iter() {
                         if let InterfaceMember::Method(method_sig) = member {
                             let method_id = method_sig.name.node;
                             map.method_signature
@@ -115,16 +130,16 @@ impl InterfaceImplementationMap {
         }
     }
 
-    pub fn get_method_body(&self, class_id: StringId, method_id: StringId) -> Option<&Block> {
+    pub fn get_method_body(&self, class_id: StringId, method_id: StringId) -> Option<&Block<'arena>> {
         self.method_body.get(&(class_id, method_id))
     }
 
-    pub fn count_statement_depth(&self, block: &Block) -> usize {
+    pub fn count_statement_depth(&self, block: &Block<'arena>) -> usize {
         block.statements.len()
     }
 
-    pub fn mutates_self(&self, block: &Block, class_id: StringId) -> bool {
-        for stmt in &block.statements {
+    pub fn mutates_self(&self, block: &Block<'arena>, class_id: StringId) -> bool {
+        for stmt in block.statements.iter() {
             if self.statement_mutates_self(stmt, class_id) {
                 return true;
             }
@@ -132,7 +147,7 @@ impl InterfaceImplementationMap {
         false
     }
 
-    fn statement_mutates_self(&self, stmt: &Statement, class_id: StringId) -> bool {
+    fn statement_mutates_self(&self, stmt: &Statement<'arena>, class_id: StringId) -> bool {
         match stmt {
             Statement::Expression(expr) => self.expression_mutates_self(expr, class_id),
             Statement::If(if_stmt) => {
@@ -153,10 +168,10 @@ impl InterfaceImplementationMap {
             }
             Statement::For(for_stmt) => {
                 let body = match &**for_stmt {
-                    typedlua_parser::ast::statement::ForStatement::Numeric(for_num) => {
+                    ForStatement::Numeric(for_num) => {
                         &for_num.body
                     }
-                    typedlua_parser::ast::statement::ForStatement::Generic(for_gen) => {
+                    ForStatement::Generic(for_gen) => {
                         &for_gen.body
                     }
                 };
@@ -171,14 +186,14 @@ impl InterfaceImplementationMap {
         }
     }
 
-    fn block_mutates_self(&self, block: &Block, class_id: StringId) -> bool {
+    fn block_mutates_self(&self, block: &Block<'arena>, class_id: StringId) -> bool {
         block
             .statements
             .iter()
             .any(|s| self.statement_mutates_self(s, class_id))
     }
 
-    fn expression_mutates_self(&self, expr: &Expression, class_id: StringId) -> bool {
+    fn expression_mutates_self(&self, expr: &Expression<'arena>, class_id: StringId) -> bool {
         match &expr.kind {
             ExpressionKind::Assignment(left, _op, right) => {
                 if self.expression_is_self_member(left, class_id) {
@@ -280,7 +295,7 @@ impl InterfaceImplementationMap {
         }
     }
 
-    fn expression_is_self_member(&self, expr: &Expression, class_id: StringId) -> bool {
+    fn expression_is_self_member(&self, expr: &Expression<'arena>, class_id: StringId) -> bool {
         match &expr.kind {
             ExpressionKind::Member(obj, _prop) => self.expression_is_self(obj, class_id),
             ExpressionKind::Index(obj, _index) => self.expression_is_self(obj, class_id),
@@ -288,7 +303,7 @@ impl InterfaceImplementationMap {
         }
     }
 
-    fn expression_is_self(&self, expr: &Expression, _class_id: StringId) -> bool {
+    fn expression_is_self(&self, expr: &Expression<'arena>, _class_id: StringId) -> bool {
         matches!(expr.kind, ExpressionKind::SelfKeyword)
     }
 }
@@ -300,91 +315,131 @@ impl InterfaceMethodInliningPass {
         Self
     }
 
-    fn process_statement(
+    fn process_statement<'arena>(
         &mut self,
-        stmt: &mut Statement,
-        impl_map: &InterfaceImplementationMap,
+        stmt: &mut Statement<'arena>,
+        impl_map: &InterfaceImplementationMap<'arena>,
+        arena: &'arena Bump,
     ) -> bool {
         match stmt {
             Statement::Function(func) => {
+                let mut stmts: Vec<_> = func.body.statements.to_vec();
                 let mut changed = false;
-                for s in &mut func.body.statements {
-                    changed |= self.process_statement(s, impl_map);
+                for s in &mut stmts {
+                    changed |= self.process_statement(s, impl_map, arena);
+                }
+                if changed {
+                    func.body.statements = arena.alloc_slice_clone(&stmts);
                 }
                 changed
             }
             Statement::If(if_stmt) => {
-                let mut changed = self.process_expression(&mut if_stmt.condition, impl_map);
-                changed |= self.process_block(&mut if_stmt.then_block, impl_map);
-                for else_if in &mut if_stmt.else_ifs {
-                    changed |= self.process_expression(&mut else_if.condition, impl_map);
-                    changed |= self.process_block(&mut else_if.block, impl_map);
+                let mut changed = self.process_expression(&mut if_stmt.condition, impl_map, arena);
+                changed |= self.process_block(&mut if_stmt.then_block, impl_map, arena);
+                let mut new_else_ifs: Vec<_> = if_stmt.else_ifs.to_vec();
+                let mut eic = false;
+                for else_if in &mut new_else_ifs {
+                    eic |= self.process_expression(&mut else_if.condition, impl_map, arena);
+                    eic |= self.process_block(&mut else_if.block, impl_map, arena);
+                }
+                if eic {
+                    if_stmt.else_ifs = arena.alloc_slice_clone(&new_else_ifs);
+                    changed = true;
                 }
                 if let Some(else_block) = &mut if_stmt.else_block {
-                    changed |= self.process_block(else_block, impl_map);
+                    changed |= self.process_block(else_block, impl_map, arena);
                 }
                 changed
             }
             Statement::While(while_stmt) => {
-                let mut changed = self.process_expression(&mut while_stmt.condition, impl_map);
-                changed |= self.process_block(&mut while_stmt.body, impl_map);
+                let mut changed = self.process_expression(&mut while_stmt.condition, impl_map, arena);
+                changed |= self.process_block(&mut while_stmt.body, impl_map, arena);
                 changed
             }
             Statement::For(for_stmt) => {
-                use typedlua_parser::ast::statement::ForStatement;
-                let body = match &mut **for_stmt {
-                    ForStatement::Numeric(for_num) => &mut for_num.body,
-                    ForStatement::Generic(for_gen) => &mut for_gen.body,
-                };
-                self.process_block(body, impl_map)
+                match &**for_stmt {
+                    ForStatement::Numeric(for_num_ref) => {
+                        let mut new_num = (**for_num_ref).clone();
+                        let changed = self.process_block(&mut new_num.body, impl_map, arena);
+                        if changed {
+                            *stmt = Statement::For(
+                                arena.alloc(ForStatement::Numeric(arena.alloc(new_num))),
+                            );
+                        }
+                        changed
+                    }
+                    ForStatement::Generic(for_gen_ref) => {
+                        let mut new_gen = for_gen_ref.clone();
+                        let changed = self.process_block(&mut new_gen.body, impl_map, arena);
+                        if changed {
+                            *stmt =
+                                Statement::For(arena.alloc(ForStatement::Generic(new_gen)));
+                        }
+                        changed
+                    }
+                }
             }
             Statement::Repeat(repeat_stmt) => {
-                let mut changed = self.process_expression(&mut repeat_stmt.until, impl_map);
-                changed |= self.process_block(&mut repeat_stmt.body, impl_map);
+                let mut changed = self.process_expression(&mut repeat_stmt.until, impl_map, arena);
+                changed |= self.process_block(&mut repeat_stmt.body, impl_map, arena);
                 changed
             }
             Statement::Return(ret_stmt) => {
+                let mut vals: Vec<_> = ret_stmt.values.to_vec();
                 let mut changed = false;
-                for value in &mut ret_stmt.values {
-                    changed |= self.process_expression(value, impl_map);
+                for value in &mut vals {
+                    changed |= self.process_expression(value, impl_map, arena);
+                }
+                if changed {
+                    ret_stmt.values = arena.alloc_slice_clone(&vals);
                 }
                 changed
             }
-            Statement::Expression(expr) => self.process_expression(expr, impl_map),
-            Statement::Block(block) => self.process_block(block, impl_map),
+            Statement::Expression(expr) => self.process_expression(expr, impl_map, arena),
+            Statement::Block(block) => self.process_block(block, impl_map, arena),
             Statement::Try(try_stmt) => {
-                let mut changed = self.process_block(&mut try_stmt.try_block, impl_map);
-                for clause in &mut try_stmt.catch_clauses {
-                    changed |= self.process_block(&mut clause.body, impl_map);
+                let mut changed = self.process_block(&mut try_stmt.try_block, impl_map, arena);
+                let mut new_clauses: Vec<_> = try_stmt.catch_clauses.to_vec();
+                let mut clauses_changed = false;
+                for clause in &mut new_clauses {
+                    clauses_changed |= self.process_block(&mut clause.body, impl_map, arena);
+                }
+                if clauses_changed {
+                    try_stmt.catch_clauses = arena.alloc_slice_clone(&new_clauses);
+                    changed = true;
                 }
                 if let Some(finally) = &mut try_stmt.finally_block {
-                    changed |= self.process_block(finally, impl_map);
+                    changed |= self.process_block(finally, impl_map, arena);
                 }
                 changed
             }
             Statement::Class(class) => {
+                let mut members: Vec<_> = class.members.to_vec();
                 let mut changed = false;
-                for member in &mut class.members {
+                for member in &mut members {
                     match member {
                         ClassMember::Method(method) => {
                             if let Some(body) = &mut method.body {
-                                changed |= self.process_block(body, impl_map);
+                                changed |= self.process_block(body, impl_map, arena);
                             }
                         }
                         ClassMember::Constructor(ctor) => {
-                            changed |= self.process_block(&mut ctor.body, impl_map);
+                            changed |= self.process_block(&mut ctor.body, impl_map, arena);
                         }
                         ClassMember::Getter(getter) => {
-                            changed |= self.process_block(&mut getter.body, impl_map);
+                            changed |= self.process_block(&mut getter.body, impl_map, arena);
                         }
                         ClassMember::Setter(setter) => {
-                            changed |= self.process_block(&mut setter.body, impl_map);
+                            changed |= self.process_block(&mut setter.body, impl_map, arena);
                         }
                         ClassMember::Operator(op) => {
-                            changed |= self.process_block(&mut op.body, impl_map);
+                            changed |= self.process_block(&mut op.body, impl_map, arena);
                         }
                         ClassMember::Property(_) => {}
                     }
+                }
+                if changed {
+                    class.members = arena.alloc_slice_clone(&members);
                 }
                 changed
             }
@@ -392,27 +447,54 @@ impl InterfaceMethodInliningPass {
         }
     }
 
-    fn process_block(&mut self, block: &mut Block, impl_map: &InterfaceImplementationMap) -> bool {
+    fn process_block<'arena>(
+        &mut self,
+        block: &mut Block<'arena>,
+        impl_map: &InterfaceImplementationMap<'arena>,
+        arena: &'arena Bump,
+    ) -> bool {
+        let mut stmts: Vec<_> = block.statements.to_vec();
         let mut changed = false;
-        for stmt in &mut block.statements {
-            changed |= self.process_statement(stmt, impl_map);
+        for stmt in &mut stmts {
+            changed |= self.process_statement(stmt, impl_map, arena);
+        }
+        if changed {
+            block.statements = arena.alloc_slice_clone(&stmts);
         }
         changed
     }
 
-    fn process_expression(
+    fn process_expression<'arena>(
         &mut self,
-        expr: &mut Expression,
-        impl_map: &InterfaceImplementationMap,
+        expr: &mut Expression<'arena>,
+        impl_map: &InterfaceImplementationMap<'arena>,
+        arena: &'arena Bump,
     ) -> bool {
-        match &mut expr.kind {
+        match &expr.kind {
             ExpressionKind::MethodCall(obj, method_name, args, _) => {
-                let mut changed = self.process_expression(obj, impl_map);
-                for arg in args.iter_mut() {
-                    changed |= self.process_expression(&mut arg.value, impl_map);
+                let method_name_cloned = method_name.clone();
+                let mut new_obj = (**obj).clone();
+                let mut changed = self.process_expression(&mut new_obj, impl_map, arena);
+                let mut new_args: Vec<_> = args.to_vec();
+                let mut args_changed = false;
+                for arg in &mut new_args {
+                    args_changed |= self.process_expression(&mut arg.value, impl_map, arena);
+                }
+                if changed || args_changed {
+                    // Rebuild the expression with arena-allocated children
+                    let type_args = match &expr.kind {
+                        ExpressionKind::MethodCall(_, _, _, ta) => *ta,
+                        _ => None,
+                    };
+                    expr.kind = ExpressionKind::MethodCall(
+                        arena.alloc(new_obj.clone()),
+                        method_name_cloned.clone(),
+                        arena.alloc_slice_clone(&new_args),
+                        type_args,
+                    );
                 }
 
-                if let Some(ref obj_type) = obj.annotated_type {
+                if let Some(ref obj_type) = new_obj.annotated_type {
                     if let TypeKind::Reference(type_ref) = &obj_type.kind {
                         let type_id = type_ref.name.node;
 
@@ -420,7 +502,7 @@ impl InterfaceMethodInliningPass {
                             if let Some(implementing_class) =
                                 impl_map.get_single_implementation(type_id)
                             {
-                                let method_id = method_name.node;
+                                let method_id = method_name_cloned.node;
 
                                 if let Some(method_body) =
                                     impl_map.get_method_body(implementing_class, method_id)
@@ -430,11 +512,12 @@ impl InterfaceMethodInliningPass {
                                         && !impl_map.mutates_self(method_body, implementing_class)
                                     {
                                         if let Some(inlined) = self.inline_interface_method(
-                                            obj,
+                                            &new_obj,
                                             implementing_class,
                                             method_body,
-                                            args,
+                                            &new_args,
                                             expr.span,
+                                            arena,
                                         ) {
                                             expr.kind = inlined;
                                             changed = true;
@@ -448,138 +531,348 @@ impl InterfaceMethodInliningPass {
 
                 changed
             }
-            ExpressionKind::Call(func, args, _) => {
-                let mut changed = self.process_expression(func, impl_map);
-                for arg in args.iter_mut() {
-                    changed |= self.process_expression(&mut arg.value, impl_map);
+            ExpressionKind::Call(func, args, type_args) => {
+                let type_args = *type_args;
+                let mut new_func = (**func).clone();
+                let mut changed = self.process_expression(&mut new_func, impl_map, arena);
+                let mut new_args: Vec<_> = args.to_vec();
+                let mut args_changed = false;
+                for arg in &mut new_args {
+                    args_changed |= self.process_expression(&mut arg.value, impl_map, arena);
+                }
+                if changed || args_changed {
+                    expr.kind = ExpressionKind::Call(
+                        arena.alloc(new_func),
+                        arena.alloc_slice_clone(&new_args),
+                        type_args,
+                    );
+                    changed = true;
                 }
                 changed
             }
-            ExpressionKind::Binary(_op, left, right) => {
-                let mut changed = self.process_expression(left, impl_map);
-                changed |= self.process_expression(right, impl_map);
+            ExpressionKind::Binary(op, left, right) => {
+                let op = *op;
+                let mut new_left = (**left).clone();
+                let mut new_right = (**right).clone();
+                let left_changed = self.process_expression(&mut new_left, impl_map, arena);
+                let right_changed = self.process_expression(&mut new_right, impl_map, arena);
+                if left_changed || right_changed {
+                    expr.kind = ExpressionKind::Binary(
+                        op,
+                        arena.alloc(new_left),
+                        arena.alloc(new_right),
+                    );
+                }
+                left_changed || right_changed
+            }
+            ExpressionKind::Unary(op, operand) => {
+                let op = *op;
+                let mut new_operand = (**operand).clone();
+                let changed = self.process_expression(&mut new_operand, impl_map, arena);
+                if changed {
+                    expr.kind = ExpressionKind::Unary(op, arena.alloc(new_operand));
+                }
                 changed
             }
-            ExpressionKind::Unary(_op, operand) => self.process_expression(operand, impl_map),
-            ExpressionKind::Assignment(left, _op, right) => {
-                let mut changed = self.process_expression(left, impl_map);
-                changed |= self.process_expression(right, impl_map);
-                changed
+            ExpressionKind::Assignment(left, op, right) => {
+                let op = *op;
+                let mut new_left = (**left).clone();
+                let mut new_right = (**right).clone();
+                let left_changed = self.process_expression(&mut new_left, impl_map, arena);
+                let right_changed = self.process_expression(&mut new_right, impl_map, arena);
+                if left_changed || right_changed {
+                    expr.kind = ExpressionKind::Assignment(
+                        arena.alloc(new_left),
+                        op,
+                        arena.alloc(new_right),
+                    );
+                }
+                left_changed || right_changed
             }
             ExpressionKind::Conditional(cond, then_expr, else_expr) => {
-                let mut changed = self.process_expression(cond, impl_map);
-                changed |= self.process_expression(then_expr, impl_map);
-                changed |= self.process_expression(else_expr, impl_map);
-                changed
+                let mut new_cond = (**cond).clone();
+                let mut new_then = (**then_expr).clone();
+                let mut new_else = (**else_expr).clone();
+                let cc = self.process_expression(&mut new_cond, impl_map, arena);
+                let tc = self.process_expression(&mut new_then, impl_map, arena);
+                let ec = self.process_expression(&mut new_else, impl_map, arena);
+                if cc || tc || ec {
+                    expr.kind = ExpressionKind::Conditional(
+                        arena.alloc(new_cond),
+                        arena.alloc(new_then),
+                        arena.alloc(new_else),
+                    );
+                }
+                cc || tc || ec
             }
             ExpressionKind::Pipe(left, right) => {
-                let mut changed = self.process_expression(left, impl_map);
-                changed |= self.process_expression(right, impl_map);
-                changed
+                let mut new_left = (**left).clone();
+                let mut new_right = (**right).clone();
+                let lc = self.process_expression(&mut new_left, impl_map, arena);
+                let rc = self.process_expression(&mut new_right, impl_map, arena);
+                if lc || rc {
+                    expr.kind = ExpressionKind::Pipe(
+                        arena.alloc(new_left),
+                        arena.alloc(new_right),
+                    );
+                }
+                lc || rc
             }
             ExpressionKind::Match(match_expr) => {
-                let mut changed = self.process_expression(&mut match_expr.value, impl_map);
-                for arm in &mut match_expr.arms {
+                let mut new_match = match_expr.clone();
+                let mut new_value = (*new_match.value).clone();
+                let mut changed = self.process_expression(&mut new_value, impl_map, arena);
+                if changed {
+                    new_match.value = arena.alloc(new_value);
+                }
+                let mut new_arms: Vec<_> = new_match.arms.to_vec();
+                let mut arms_changed = false;
+                for arm in &mut new_arms {
                     match &mut arm.body {
-                        typedlua_parser::ast::expression::MatchArmBody::Expression(e) => {
-                            changed |= self.process_expression(e, impl_map);
+                        typedlua_parser::ast::expression::MatchArmBody::Expression(e_ref) => {
+                            let mut new_e = (**e_ref).clone();
+                            if self.process_expression(&mut new_e, impl_map, arena) {
+                                *e_ref = arena.alloc(new_e);
+                                arms_changed = true;
+                            }
                         }
                         typedlua_parser::ast::expression::MatchArmBody::Block(block) => {
-                            changed |= self.process_block(block, impl_map);
+                            arms_changed |= self.process_block(block, impl_map, arena);
                         }
                     }
+                }
+                if arms_changed {
+                    new_match.arms = arena.alloc_slice_clone(&new_arms);
+                    changed = true;
+                }
+                if changed {
+                    expr.kind = ExpressionKind::Match(new_match);
                 }
                 changed
             }
             ExpressionKind::Arrow(arrow) => {
+                let mut new_arrow = arrow.clone();
                 let mut changed = false;
-                for param in &mut arrow.parameters {
+                let mut new_params: Vec<_> = new_arrow.parameters.to_vec();
+                let mut params_changed = false;
+                for param in &mut new_params {
                     if let Some(default) = &mut param.default {
-                        changed |= self.process_expression(default, impl_map);
+                        params_changed |= self.process_expression(default, impl_map, arena);
                     }
                 }
-                match &mut arrow.body {
-                    typedlua_parser::ast::expression::ArrowBody::Expression(e) => {
-                        changed |= self.process_expression(e, impl_map);
+                if params_changed {
+                    new_arrow.parameters = arena.alloc_slice_clone(&new_params);
+                    changed = true;
+                }
+                match &mut new_arrow.body {
+                    typedlua_parser::ast::expression::ArrowBody::Expression(e_ref) => {
+                        let mut new_e = (**e_ref).clone();
+                        if self.process_expression(&mut new_e, impl_map, arena) {
+                            *e_ref = arena.alloc(new_e);
+                            changed = true;
+                        }
                     }
                     typedlua_parser::ast::expression::ArrowBody::Block(block) => {
-                        changed |= self.process_block(block, impl_map);
+                        changed |= self.process_block(block, impl_map, arena);
                     }
                 }
-                changed
-            }
-            ExpressionKind::New(callee, args, _) => {
-                let mut changed = self.process_expression(callee, impl_map);
-                for arg in args {
-                    changed |= self.process_expression(&mut arg.value, impl_map);
+                if changed {
+                    expr.kind = ExpressionKind::Arrow(new_arrow);
                 }
                 changed
             }
+            ExpressionKind::New(callee, args, type_args) => {
+                let type_args = *type_args;
+                let mut new_callee = (**callee).clone();
+                let cc = self.process_expression(&mut new_callee, impl_map, arena);
+                let mut new_args: Vec<_> = args.to_vec();
+                let mut ac = false;
+                for arg in &mut new_args {
+                    ac |= self.process_expression(&mut arg.value, impl_map, arena);
+                }
+                if cc || ac {
+                    expr.kind = ExpressionKind::New(
+                        arena.alloc(new_callee),
+                        arena.alloc_slice_clone(&new_args),
+                        type_args,
+                    );
+                }
+                cc || ac
+            }
             ExpressionKind::Try(try_expr) => {
-                let mut changed = self.process_expression(&mut try_expr.expression, impl_map);
-                changed |= self.process_expression(&mut try_expr.catch_expression, impl_map);
+                let mut new_try = try_expr.clone();
+                let mut new_expression = (*new_try.expression).clone();
+                let mut new_catch = (*new_try.catch_expression).clone();
+                let ec = self.process_expression(&mut new_expression, impl_map, arena);
+                let cc = self.process_expression(&mut new_catch, impl_map, arena);
+                if ec {
+                    new_try.expression = arena.alloc(new_expression);
+                }
+                if cc {
+                    new_try.catch_expression = arena.alloc(new_catch);
+                }
+                let changed = ec || cc;
+                if changed {
+                    expr.kind = ExpressionKind::Try(new_try);
+                }
                 changed
             }
             ExpressionKind::ErrorChain(left, right) => {
-                let mut changed = self.process_expression(left, impl_map);
-                changed |= self.process_expression(right, impl_map);
+                let mut new_left = (**left).clone();
+                let mut new_right = (**right).clone();
+                let lc = self.process_expression(&mut new_left, impl_map, arena);
+                let rc = self.process_expression(&mut new_right, impl_map, arena);
+                if lc || rc {
+                    expr.kind = ExpressionKind::ErrorChain(
+                        arena.alloc(new_left),
+                        arena.alloc(new_right),
+                    );
+                }
+                lc || rc
+            }
+            ExpressionKind::OptionalMember(obj, member) => {
+                let member = member.clone();
+                let mut new_obj = (**obj).clone();
+                let changed = self.process_expression(&mut new_obj, impl_map, arena);
+                if changed {
+                    expr.kind = ExpressionKind::OptionalMember(arena.alloc(new_obj), member);
+                }
                 changed
             }
-            ExpressionKind::OptionalMember(obj, _) => self.process_expression(obj, impl_map),
             ExpressionKind::OptionalIndex(obj, index) => {
-                let mut changed = self.process_expression(obj, impl_map);
-                changed |= self.process_expression(index, impl_map);
-                changed
+                let mut new_obj = (**obj).clone();
+                let mut new_index = (**index).clone();
+                let oc = self.process_expression(&mut new_obj, impl_map, arena);
+                let ic = self.process_expression(&mut new_index, impl_map, arena);
+                if oc || ic {
+                    expr.kind = ExpressionKind::OptionalIndex(
+                        arena.alloc(new_obj),
+                        arena.alloc(new_index),
+                    );
+                }
+                oc || ic
             }
-            ExpressionKind::OptionalCall(obj, args, _) => {
-                let mut changed = self.process_expression(obj, impl_map);
-                for arg in args {
-                    changed |= self.process_expression(&mut arg.value, impl_map);
+            ExpressionKind::OptionalCall(obj, args, type_args) => {
+                let type_args = *type_args;
+                let mut new_obj = (**obj).clone();
+                let oc = self.process_expression(&mut new_obj, impl_map, arena);
+                let mut new_args: Vec<_> = args.to_vec();
+                let mut ac = false;
+                for arg in &mut new_args {
+                    ac |= self.process_expression(&mut arg.value, impl_map, arena);
+                }
+                if oc || ac {
+                    expr.kind = ExpressionKind::OptionalCall(
+                        arena.alloc(new_obj),
+                        arena.alloc_slice_clone(&new_args),
+                        type_args,
+                    );
+                }
+                oc || ac
+            }
+            ExpressionKind::OptionalMethodCall(obj, method_name, args, type_args) => {
+                let method_name = method_name.clone();
+                let type_args = *type_args;
+                let mut new_obj = (**obj).clone();
+                let oc = self.process_expression(&mut new_obj, impl_map, arena);
+                let mut new_args: Vec<_> = args.to_vec();
+                let mut ac = false;
+                for arg in &mut new_args {
+                    ac |= self.process_expression(&mut arg.value, impl_map, arena);
+                }
+                if oc || ac {
+                    expr.kind = ExpressionKind::OptionalMethodCall(
+                        arena.alloc(new_obj),
+                        method_name,
+                        arena.alloc_slice_clone(&new_args),
+                        type_args,
+                    );
+                }
+                oc || ac
+            }
+            ExpressionKind::TypeAssertion(inner, ty) => {
+                let ty = ty.clone();
+                let mut new_inner = (**inner).clone();
+                let changed = self.process_expression(&mut new_inner, impl_map, arena);
+                if changed {
+                    expr.kind = ExpressionKind::TypeAssertion(arena.alloc(new_inner), ty);
                 }
                 changed
             }
-            ExpressionKind::OptionalMethodCall(obj, _method_name, args, _) => {
-                let mut changed = self.process_expression(obj, impl_map);
-                for arg in args {
-                    changed |= self.process_expression(&mut arg.value, impl_map);
+            ExpressionKind::Member(obj, member) => {
+                let member = member.clone();
+                let mut new_obj = (**obj).clone();
+                let changed = self.process_expression(&mut new_obj, impl_map, arena);
+                if changed {
+                    expr.kind = ExpressionKind::Member(arena.alloc(new_obj), member);
                 }
                 changed
             }
-            ExpressionKind::TypeAssertion(expr, _) => self.process_expression(expr, impl_map),
-            ExpressionKind::Member(obj, _) => self.process_expression(obj, impl_map),
             ExpressionKind::Index(obj, index) => {
-                let mut changed = self.process_expression(obj, impl_map);
-                changed |= self.process_expression(index, impl_map);
-                changed
+                let mut new_obj = (**obj).clone();
+                let mut new_index = (**index).clone();
+                let oc = self.process_expression(&mut new_obj, impl_map, arena);
+                let ic = self.process_expression(&mut new_index, impl_map, arena);
+                if oc || ic {
+                    expr.kind = ExpressionKind::Index(
+                        arena.alloc(new_obj),
+                        arena.alloc(new_index),
+                    );
+                }
+                oc || ic
             }
             ExpressionKind::Array(elements) => {
-                let mut changed = false;
-                for elem in elements {
+                let mut new_elements: Vec<_> = elements.to_vec();
+                let mut ec = false;
+                for elem in &mut new_elements {
                     match elem {
-                        typedlua_parser::ast::expression::ArrayElement::Expression(expr) => {
-                            changed |= self.process_expression(expr, impl_map);
+                        typedlua_parser::ast::expression::ArrayElement::Expression(e) => {
+                            ec |= self.process_expression(e, impl_map, arena);
                         }
-                        typedlua_parser::ast::expression::ArrayElement::Spread(expr) => {
-                            changed |= self.process_expression(expr, impl_map);
+                        typedlua_parser::ast::expression::ArrayElement::Spread(e) => {
+                            ec |= self.process_expression(e, impl_map, arena);
                         }
                     }
                 }
-                changed
+                if ec {
+                    expr.kind = ExpressionKind::Array(arena.alloc_slice_clone(&new_elements));
+                }
+                ec
             }
             ExpressionKind::Object(props) => {
-                let mut changed = false;
-                for prop in props {
+                let mut new_props: Vec<_> = props.to_vec();
+                let mut pc = false;
+                for prop in &mut new_props {
                     if let typedlua_parser::ast::expression::ObjectProperty::Property {
+                        key,
                         value,
-                        ..
+                        span,
                     } = prop
                     {
-                        changed |= self.process_expression(value, impl_map);
+                        let mut new_val = (**value).clone();
+                        if self.process_expression(&mut new_val, impl_map, arena) {
+                            *prop = typedlua_parser::ast::expression::ObjectProperty::Property {
+                                key: key.clone(),
+                                value: arena.alloc(new_val),
+                                span: *span,
+                            };
+                            pc = true;
+                        }
                     }
+                }
+                if pc {
+                    expr.kind = ExpressionKind::Object(arena.alloc_slice_clone(&new_props));
+                }
+                pc
+            }
+            ExpressionKind::Parenthesized(inner) => {
+                let mut new_inner = (**inner).clone();
+                let changed = self.process_expression(&mut new_inner, impl_map, arena);
+                if changed {
+                    expr.kind = ExpressionKind::Parenthesized(arena.alloc(new_inner));
                 }
                 changed
             }
-            ExpressionKind::Parenthesized(inner) => self.process_expression(inner, impl_map),
             ExpressionKind::Identifier(_)
             | ExpressionKind::Literal(_)
             | ExpressionKind::SelfKeyword
@@ -589,21 +882,22 @@ impl InterfaceMethodInliningPass {
         }
     }
 
-    fn inline_interface_method(
+    fn inline_interface_method<'arena>(
         &self,
-        receiver: &Expression,
+        receiver: &Expression<'arena>,
         _class_id: StringId,
-        method_body: &Block,
-        _args: &[typedlua_parser::ast::expression::Argument],
+        method_body: &Block<'arena>,
+        _args: &[typedlua_parser::ast::expression::Argument<'arena>],
         span: Span,
-    ) -> Option<ExpressionKind> {
+        arena: &'arena Bump,
+    ) -> Option<ExpressionKind<'arena>> {
         if method_body.statements.is_empty() {
             return Some(ExpressionKind::Literal(
                 typedlua_parser::ast::expression::Literal::Nil,
             ));
         }
 
-        let return_value = self.extract_return_value(method_body, receiver, span);
+        let return_value = self.extract_return_value(method_body, receiver, span, arena);
 
         if let Some(ret_val) = return_value {
             Some(ret_val.kind.clone())
@@ -612,19 +906,20 @@ impl InterfaceMethodInliningPass {
         }
     }
 
-    fn extract_return_value(
+    fn extract_return_value<'arena>(
         &self,
-        block: &Block,
-        receiver: &Expression,
+        block: &Block<'arena>,
+        receiver: &Expression<'arena>,
         span: Span,
-    ) -> Option<Expression> {
-        let mut last_expr: Option<Expression> = None;
+        arena: &'arena Bump,
+    ) -> Option<Expression<'arena>> {
+        let mut last_expr: Option<Expression<'arena>> = None;
 
-        for stmt in &block.statements {
+        for stmt in block.statements.iter() {
             match stmt {
                 Statement::Return(ret) => {
                     if let Some(first_value) = ret.values.first() {
-                        let transformed = self.transform_expression(first_value, receiver, span);
+                        let transformed = self.transform_expression(first_value, receiver, span, arena);
                         return Some(transformed);
                     }
                     return Some(Expression::new(
@@ -633,18 +928,18 @@ impl InterfaceMethodInliningPass {
                     ));
                 }
                 Statement::Expression(expr) => {
-                    let transformed = self.transform_expression(expr, receiver, span);
+                    let transformed = self.transform_expression(expr, receiver, span, arena);
                     last_expr = Some(transformed);
                 }
                 Statement::Variable(decl) => {
                     let transformed_initializer =
-                        self.transform_expression(&decl.initializer, receiver, span);
+                        self.transform_expression(&decl.initializer, receiver, span, arena);
                     if let Some(ident) = self.get_pattern_name(&decl.pattern) {
                         last_expr = Some(Expression::new(
                             ExpressionKind::Assignment(
-                                Box::new(Expression::new(ExpressionKind::Identifier(ident), span)),
+                                arena.alloc(Expression::new(ExpressionKind::Identifier(ident), span)),
                                 AssignmentOp::Assign,
-                                Box::new(transformed_initializer),
+                                arena.alloc(transformed_initializer),
                             ),
                             span,
                         ));
@@ -657,19 +952,20 @@ impl InterfaceMethodInliningPass {
         last_expr
     }
 
-    fn get_pattern_name(&self, pattern: &Pattern) -> Option<StringId> {
+    fn get_pattern_name(&self, pattern: &Pattern<'_>) -> Option<StringId> {
         match pattern {
             Pattern::Identifier(ident) => Some(ident.node),
             _ => None,
         }
     }
 
-    fn transform_expression(
+    fn transform_expression<'arena>(
         &self,
-        expr: &Expression,
-        receiver: &Expression,
+        expr: &Expression<'arena>,
+        receiver: &Expression<'arena>,
         span: Span,
-    ) -> Expression {
+        arena: &'arena Bump,
+    ) -> Expression<'arena> {
         match &expr.kind {
             ExpressionKind::SelfKeyword => receiver.clone(),
             ExpressionKind::Identifier(_) => expr.clone(),
@@ -679,57 +975,61 @@ impl InterfaceMethodInliningPass {
             ExpressionKind::Binary(op, left, right) => Expression::new(
                 ExpressionKind::Binary(
                     *op,
-                    Box::new(self.transform_expression(left, receiver, span)),
-                    Box::new(self.transform_expression(right, receiver, span)),
+                    arena.alloc(self.transform_expression(left, receiver, span, arena)),
+                    arena.alloc(self.transform_expression(right, receiver, span, arena)),
                 ),
                 span,
             ),
             ExpressionKind::Unary(op, operand) => Expression::new(
                 ExpressionKind::Unary(
                     *op,
-                    Box::new(self.transform_expression(operand, receiver, span)),
+                    arena.alloc(self.transform_expression(operand, receiver, span, arena)),
                 ),
                 span,
             ),
-            ExpressionKind::Call(func, args, type_args) => Expression::new(
-                ExpressionKind::Call(
-                    Box::new(self.transform_expression(func, receiver, span)),
-                    args.iter()
-                        .map(|arg| typedlua_parser::ast::expression::Argument {
-                            value: self.transform_expression(&arg.value, receiver, span),
-                            is_spread: arg.is_spread,
-                            span: arg.span,
-                        })
-                        .collect(),
-                    type_args.clone(),
-                ),
-                span,
-            ),
+            ExpressionKind::Call(func, args, type_args) => {
+                let new_args: Vec<_> = args
+                    .iter()
+                    .map(|arg| typedlua_parser::ast::expression::Argument {
+                        value: self.transform_expression(&arg.value, receiver, span, arena),
+                        is_spread: arg.is_spread,
+                        span: arg.span,
+                    })
+                    .collect();
+                Expression::new(
+                    ExpressionKind::Call(
+                        arena.alloc(self.transform_expression(func, receiver, span, arena)),
+                        arena.alloc_slice_clone(&new_args),
+                        *type_args,
+                    ),
+                    span,
+                )
+            }
             ExpressionKind::Member(obj, prop) => Expression::new(
                 ExpressionKind::Member(
-                    Box::new(self.transform_expression(obj, receiver, span)),
+                    arena.alloc(self.transform_expression(obj, receiver, span, arena)),
                     prop.clone(),
                 ),
                 span,
             ),
             ExpressionKind::Index(obj, index) => Expression::new(
                 ExpressionKind::Index(
-                    Box::new(self.transform_expression(obj, receiver, span)),
-                    Box::new(self.transform_expression(index, receiver, span)),
+                    arena.alloc(self.transform_expression(obj, receiver, span, arena)),
+                    arena.alloc(self.transform_expression(index, receiver, span, arena)),
                 ),
                 span,
             ),
             ExpressionKind::Conditional(cond, then_expr, else_expr) => Expression::new(
                 ExpressionKind::Conditional(
-                    Box::new(self.transform_expression(cond, receiver, span)),
-                    Box::new(self.transform_expression(then_expr, receiver, span)),
-                    Box::new(self.transform_expression(else_expr, receiver, span)),
+                    arena.alloc(self.transform_expression(cond, receiver, span, arena)),
+                    arena.alloc(self.transform_expression(then_expr, receiver, span, arena)),
+                    arena.alloc(self.transform_expression(else_expr, receiver, span, arena)),
                 ),
                 span,
             ),
-            ExpressionKind::TypeAssertion(expr, ty) => Expression::new(
+            ExpressionKind::TypeAssertion(inner, ty) => Expression::new(
                 ExpressionKind::TypeAssertion(
-                    Box::new(self.transform_expression(expr, receiver, span)),
+                    arena.alloc(self.transform_expression(inner, receiver, span, arena)),
                     ty.clone(),
                 ),
                 span,
@@ -739,15 +1039,15 @@ impl InterfaceMethodInliningPass {
     }
 }
 
-impl StmtVisitor for InterfaceMethodInliningPass {
-    fn visit_stmt(&mut self, _stmt: &mut Statement) -> bool {
+impl<'arena> StmtVisitor<'arena> for InterfaceMethodInliningPass {
+    fn visit_stmt(&mut self, _stmt: &mut Statement<'arena>, _arena: &'arena Bump) -> bool {
         // For visitor pattern, we need access to impl_map
         // This is a simplified version - the actual run() method does the work
         false
     }
 }
 
-impl WholeProgramPass for InterfaceMethodInliningPass {
+impl<'arena> WholeProgramPass<'arena> for InterfaceMethodInliningPass {
     fn name(&self) -> &'static str {
         "interface-method-inlining"
     }
@@ -756,12 +1056,16 @@ impl WholeProgramPass for InterfaceMethodInliningPass {
         OptimizationLevel::O3
     }
 
-    fn run(&mut self, program: &mut Program) -> Result<bool, String> {
+    fn run(
+        &mut self,
+        program: &mut MutableProgram<'arena>,
+        arena: &'arena Bump,
+    ) -> Result<bool, String> {
         let impl_map = InterfaceImplementationMap::build(program);
 
         let mut changed = false;
         for stmt in &mut program.statements {
-            changed |= self.process_statement(stmt, &impl_map);
+            changed |= self.process_statement(stmt, &impl_map, arena);
         }
 
         Ok(changed)
@@ -781,6 +1085,7 @@ impl Default for InterfaceMethodInliningPass {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bumpalo::Bump;
     use typedlua_parser::ast::expression::{AssignmentOp, ExpressionKind, Literal};
     use typedlua_parser::ast::pattern::Pattern;
     use typedlua_parser::ast::statement::{
@@ -790,7 +1095,10 @@ mod tests {
 
     #[test]
     fn test_interface_implementation_map_build_empty() {
-        let program = Program::new(vec![], Span::dummy());
+        let program = MutableProgram {
+            statements: vec![],
+            span: Span::dummy(),
+        };
         let map = InterfaceImplementationMap::build(&program);
 
         assert!(map.known_classes.is_empty());
@@ -800,8 +1108,9 @@ mod tests {
 
     #[test]
     fn test_statement_depth_counting() {
+        let arena = Bump::new();
         let block = Block {
-            statements: vec![
+            statements: arena.alloc_slice_clone(&[
                 Statement::Variable(VariableDeclaration {
                     kind: VariableKind::Local,
                     pattern: Pattern::Identifier(typedlua_parser::ast::Spanned::new(
@@ -829,13 +1138,13 @@ mod tests {
                     span: Span::dummy(),
                 }),
                 Statement::Return(ReturnStatement {
-                    values: vec![Expression::new(
+                    values: arena.alloc_slice_clone(&[Expression::new(
                         ExpressionKind::Identifier(StringId::from_u32(1)),
                         Span::dummy(),
-                    )],
+                    )]),
                     span: Span::dummy(),
                 }),
-            ],
+            ]),
             span: Span::dummy(),
         };
 
@@ -847,17 +1156,18 @@ mod tests {
 
     #[test]
     fn test_self_mutation_detection() {
+        let arena = Bump::new();
         let class_id = StringId::from_u32(1);
 
         let mut map = InterfaceImplementationMap::default();
         map.known_classes.insert(class_id, true);
 
         let block = Block {
-            statements: vec![Statement::Expression(Expression {
+            statements: arena.alloc_slice_clone(&[Statement::Expression(Expression {
                 kind: ExpressionKind::Assignment(
-                    Box::new(Expression {
+                    arena.alloc(Expression {
                         kind: ExpressionKind::Member(
-                            Box::new(Expression::new(ExpressionKind::SelfKeyword, Span::dummy())),
+                            arena.alloc(Expression::new(ExpressionKind::SelfKeyword, Span::dummy())),
                             typedlua_parser::ast::Spanned::new(
                                 StringId::from_u32(2),
                                 Span::dummy(),
@@ -868,7 +1178,7 @@ mod tests {
                         receiver_class: None,
                     }),
                     AssignmentOp::Assign,
-                    Box::new(Expression::new(
+                    arena.alloc(Expression::new(
                         ExpressionKind::Literal(Literal::Number(42.0)),
                         Span::dummy(),
                     )),
@@ -876,7 +1186,7 @@ mod tests {
                 span: Span::dummy(),
                 annotated_type: None,
                 receiver_class: None,
-            })],
+            })]),
             span: Span::dummy(),
         };
 
@@ -885,19 +1195,20 @@ mod tests {
 
     #[test]
     fn test_non_self_mutation_returns_false() {
+        let arena = Bump::new();
         let class_id = StringId::from_u32(1);
 
         let mut map = InterfaceImplementationMap::default();
         map.known_classes.insert(class_id, true);
 
         let block = Block {
-            statements: vec![Statement::Return(ReturnStatement {
-                values: vec![Expression::new(
+            statements: arena.alloc_slice_clone(&[Statement::Return(ReturnStatement {
+                values: arena.alloc_slice_clone(&[Expression::new(
                     ExpressionKind::Identifier(StringId::from_u32(1)),
                     Span::dummy(),
-                )],
+                )]),
                 span: Span::dummy(),
-            })],
+            })]),
             span: Span::dummy(),
         };
 
