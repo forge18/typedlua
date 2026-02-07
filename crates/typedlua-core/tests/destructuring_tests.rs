@@ -140,8 +140,8 @@ fn test_destructuring_with_default_values() {
 #[test]
 fn test_destructuring_in_for_loop() {
     let source = r#"
-        const pairs = [[1, 2], [3, 4]]
-        for [a, b] in pairs {
+        const items = [[1, 2], [3, 4]]
+        for [a, b] in items do
             const sum = a + b
         end
     "#;
