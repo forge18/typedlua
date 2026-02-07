@@ -4,11 +4,12 @@
 //! - Type checking: 1K, 10K, 100K lines of code
 //! - Full compilation (parse + typecheck + codegen)
 
+use bumpalo::Bump;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use typedlua_core::codegen::CodeGenerator;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
-use typedlua_core::TypeChecker;
+use typedlua_core::{MutableProgram, TypeChecker};
 use typedlua_parser::lexer::Lexer;
 use typedlua_parser::parser::Parser;
 use typedlua_parser::string_interner::StringInterner;
@@ -87,6 +88,7 @@ fn benchmark_typecheck(source: &str) -> Result<Duration, String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
     let interner = Arc::new(interner);
+    let arena = Bump::new();
 
     // Lex and parse first (not timed)
     let mut lexer = Lexer::new(source, handler.clone(), &interner);
@@ -94,17 +96,18 @@ fn benchmark_typecheck(source: &str) -> Result<Duration, String> {
         .tokenize()
         .map_err(|e| format!("Lexing failed: {:?}", e))?;
 
-    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-    let mut program = parser
+    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids, &arena);
+    let program = parser
         .parse()
         .map_err(|e| format!("Parsing failed: {:?}", e))?;
 
     // Time only type checking
     let start = Instant::now();
-    let mut type_checker = TypeChecker::new_with_stdlib(handler.clone(), &interner, &common_ids)
-        .expect("Failed to load stdlib");
+    let mut type_checker =
+        TypeChecker::new_with_stdlib(handler.clone(), &interner, &common_ids, &arena)
+            .expect("Failed to load stdlib");
     type_checker
-        .check_program(&mut program)
+        .check_program(&program)
         .map_err(|e| e.message)?;
     let duration = start.elapsed();
 
@@ -116,6 +119,7 @@ fn benchmark_full_compile(source: &str) -> Result<Duration, String> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
     let interner = Arc::new(interner);
+    let arena = Bump::new();
 
     let start = Instant::now();
 
@@ -126,21 +130,23 @@ fn benchmark_full_compile(source: &str) -> Result<Duration, String> {
         .map_err(|e| format!("Lexing failed: {:?}", e))?;
 
     // Parse
-    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-    let mut program = parser
+    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids, &arena);
+    let program = parser
         .parse()
         .map_err(|e| format!("Parsing failed: {:?}", e))?;
 
     // Type check
-    let mut type_checker = TypeChecker::new_with_stdlib(handler.clone(), &interner, &common_ids)
-        .expect("Failed to load stdlib");
+    let mut type_checker =
+        TypeChecker::new_with_stdlib(handler.clone(), &interner, &common_ids, &arena)
+            .expect("Failed to load stdlib");
     type_checker
-        .check_program(&mut program)
+        .check_program(&program)
         .map_err(|e| e.message)?;
 
     // Codegen
+    let mutable = MutableProgram::from_program(&program);
     let mut codegen = CodeGenerator::new(interner.clone());
-    let _output = codegen.generate(&mut program);
+    let _output = codegen.generate(&mutable);
 
     let duration = start.elapsed();
 
@@ -353,6 +359,7 @@ fn benchmark_optimization_level(
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
     let interner = Arc::new(interner);
+    let arena = Bump::new();
 
     // Lex and parse first (not timed)
     let mut lexer = Lexer::new(source, handler.clone(), &interner);
@@ -360,22 +367,24 @@ fn benchmark_optimization_level(
         .tokenize()
         .map_err(|e| format!("Lexing failed: {:?}", e))?;
 
-    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-    let mut program = parser
+    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids, &arena);
+    let program = parser
         .parse()
         .map_err(|e| format!("Parsing failed: {:?}", e))?;
 
     // Type check (not timed)
-    let mut type_checker = TypeChecker::new_with_stdlib(handler.clone(), &interner, &common_ids)
-        .expect("Failed to load stdlib");
+    let mut type_checker =
+        TypeChecker::new_with_stdlib(handler.clone(), &interner, &common_ids, &arena)
+            .expect("Failed to load stdlib");
     type_checker
-        .check_program(&mut program)
+        .check_program(&program)
         .map_err(|e| e.message)?;
 
     // Time only codegen with optimization
     let start = Instant::now();
+    let mutable = MutableProgram::from_program(&program);
     let mut codegen = CodeGenerator::new(interner.clone()).with_optimization_level(level);
-    let output = codegen.generate(&mut program);
+    let output = codegen.generate(&mutable);
     let duration = start.elapsed();
 
     Ok((duration, output.len()))
@@ -994,8 +1003,6 @@ fn test_rich_enum_instance_precomputation() {
 
 use typedlua_core::cache::{CacheManager, CachedModule};
 use typedlua_core::config::CompilerOptions;
-use typedlua_core::module_resolver::ModuleExports;
-use typedlua_core::SerializableSymbolTable;
 
 /// Benchmark incremental compilation: re-typecheck after single-file change
 #[test]
@@ -1047,6 +1054,7 @@ fn test_incremental_retypecheck_single_file_change() {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
     let interner = Arc::new(interner);
+    let arena = Bump::new();
 
     let full_compile_start = Instant::now();
 
@@ -1055,27 +1063,25 @@ fn test_incremental_retypecheck_single_file_change() {
         let source = std::fs::read_to_string(file_path).unwrap();
         let mut lexer = Lexer::new(&source, handler.clone(), &interner);
         let tokens = lexer.tokenize().expect("Lexing failed");
-        let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-        let mut program = parser.parse().expect("Parsing failed");
+        let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids, &arena);
+        let program = parser.parse().expect("Parsing failed");
 
         let mut type_checker =
-            TypeChecker::new_with_stdlib(handler.clone(), &interner, &common_ids)
+            TypeChecker::new_with_stdlib(handler.clone(), &interner, &common_ids, &arena)
                 .expect("Failed to load stdlib")
                 .with_options(config.clone());
         type_checker
-            .check_program(&mut program)
+            .check_program(&program)
             .expect("Type checking failed");
 
         // Save to cache
-        let exports = ModuleExports::new();
-        let symbol_table = SerializableSymbolTable { symbols: vec![] };
-        let interner_strings: Vec<String> = vec![];
+        let source_hash = format!("hash_{}", file_path.display());
         let cached = CachedModule::new(
             file_path.clone(),
-            program.clone(),
-            exports,
-            symbol_table,
-            interner_strings,
+            source_hash,
+            vec![],
+            vec![],
+            false,
         );
         let _ = cache_manager.save_module(file_path, &cached, vec![]);
     }
@@ -1105,17 +1111,18 @@ fn test_incremental_retypecheck_single_file_change() {
         if stale_files.contains(&canonical) {
             recompiled += 1;
             let source = std::fs::read_to_string(file_path).unwrap();
+            let recompile_arena = Bump::new();
             let mut lexer = Lexer::new(&source, handler.clone(), &interner);
             let tokens = lexer.tokenize().expect("Lexing failed");
-            let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-            let mut program = parser.parse().expect("Parsing failed");
+            let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids, &recompile_arena);
+            let program = parser.parse().expect("Parsing failed");
 
             let mut type_checker =
-                TypeChecker::new_with_stdlib(handler.clone(), &interner, &common_ids)
+                TypeChecker::new_with_stdlib(handler.clone(), &interner, &common_ids, &recompile_arena)
                     .expect("Failed to load stdlib")
                     .with_options(config.clone());
             type_checker
-                .check_program(&mut program)
+                .check_program(&program)
                 .expect("Type checking failed");
         }
     }
@@ -1188,31 +1195,30 @@ fn test_cache_hit_rate_unchanged_modules() {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
     let interner = Arc::new(interner);
+    let arena = Bump::new();
 
     for file_path in &file_paths {
         let source = std::fs::read_to_string(file_path).unwrap();
         let mut lexer = Lexer::new(&source, handler.clone(), &interner);
         let tokens = lexer.tokenize().expect("Lexing failed");
-        let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-        let mut program = parser.parse().expect("Parsing failed");
+        let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids, &arena);
+        let program = parser.parse().expect("Parsing failed");
 
         let mut type_checker =
-            TypeChecker::new_with_stdlib(handler.clone(), &interner, &common_ids)
+            TypeChecker::new_with_stdlib(handler.clone(), &interner, &common_ids, &arena)
                 .expect("Failed to load stdlib")
                 .with_options(config.clone());
         type_checker
-            .check_program(&mut program)
+            .check_program(&program)
             .expect("Type checking failed");
 
-        let exports = ModuleExports::new();
-        let symbol_table = SerializableSymbolTable { symbols: vec![] };
-        let interner_strings: Vec<String> = vec![];
+        let source_hash = format!("hash_{}", file_path.display());
         let cached = CachedModule::new(
             file_path.clone(),
-            program.clone(),
-            exports,
-            symbol_table,
-            interner_strings,
+            source_hash,
+            vec![],
+            vec![],
+            false,
         );
         let _ = cache_manager.save_module(file_path, &cached, vec![]);
     }

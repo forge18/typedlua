@@ -84,14 +84,14 @@ impl<'a> EscapeAnalysis<'a> {
     }
 
     fn collect_module_locals(&mut self, program: &Program) {
-        for statement in &program.statements {
+        for statement in program.statements.iter() {
             if let Some((_, name)) = self.get_declaration_name(statement) {
                 self.module_locals.insert(name.clone());
                 // Track which ones are variables
                 let is_variable = match statement {
                     Statement::Variable(_) => true,
                     Statement::Export(e) => {
-                        matches!(e.kind, ExportKind::Declaration(ref inner) if matches!(inner.as_ref(), Statement::Variable(_)))
+                        matches!(&e.kind, ExportKind::Declaration(inner) if matches!(inner, Statement::Variable(_)))
                     }
                     _ => false,
                 };
@@ -103,7 +103,7 @@ impl<'a> EscapeAnalysis<'a> {
     }
 
     fn collect_exports(&mut self, program: &Program) {
-        for statement in &program.statements {
+        for statement in program.statements.iter() {
             if let Statement::Export(decl) = statement {
                 match &decl.kind {
                     ExportKind::Declaration(inner) => {
@@ -112,7 +112,7 @@ impl<'a> EscapeAnalysis<'a> {
                         }
                     }
                     ExportKind::Named { specifiers, .. } => {
-                        for spec in specifiers {
+                        for spec in specifiers.iter() {
                             let local_id = spec.local.node;
                             let local_name = self.resolve_string(local_id);
                             self.exported_names.insert(local_name);
@@ -129,7 +129,7 @@ impl<'a> EscapeAnalysis<'a> {
     fn collect_return_values_from_private_functions(&mut self, program: &Program) {
         // Only track returns from PRIVATE functions
         // Returns from exported functions don't prevent hoisting (they're part of the public API)
-        for statement in &program.statements {
+        for statement in program.statements.iter() {
             match statement {
                 Statement::Function(func) => {
                     // Track returns from private functions
@@ -137,7 +137,7 @@ impl<'a> EscapeAnalysis<'a> {
                 }
                 Statement::Return(ret) => {
                     // Module-level return
-                    for value in &ret.values {
+                    for value in ret.values.iter() {
                         if let ExpressionKind::Identifier(ident) = &value.kind {
                             let name = self.resolve_string(*ident);
                             // Track ALL returns (variables, classes, enums, functions)
@@ -154,7 +154,7 @@ impl<'a> EscapeAnalysis<'a> {
         for statement in statements {
             match statement {
                 Statement::Return(ret) => {
-                    for value in &ret.values {
+                    for value in ret.values.iter() {
                         if let ExpressionKind::Identifier(ident) = &value.kind {
                             let name = self.resolve_string(*ident);
                             // Track ALL returns (variables, classes, enums, functions)
@@ -164,7 +164,7 @@ impl<'a> EscapeAnalysis<'a> {
                 }
                 Statement::If(if_stmt) => {
                     self.walk_statements_for_returns_skip_functions(&if_stmt.then_block.statements);
-                    for elseif in &if_stmt.else_ifs {
+                    for elseif in if_stmt.else_ifs.iter() {
                         self.walk_statements_for_returns_skip_functions(&elseif.block.statements);
                     }
                     if let Some(else_block) = &if_stmt.else_block {
@@ -174,12 +174,12 @@ impl<'a> EscapeAnalysis<'a> {
                 Statement::While(while_stmt) => {
                     self.walk_statements_for_returns_skip_functions(&while_stmt.body.statements);
                 }
-                Statement::For(for_stmt) => match **for_stmt {
-                    typedlua_parser::ast::statement::ForStatement::Numeric(ref num) => {
-                        self.walk_statements_for_returns_skip_functions(&num.body.statements);
+                Statement::For(for_stmt) => match for_stmt {
+                    typedlua_parser::ast::statement::ForStatement::Numeric(num) => {
+                        self.walk_statements_for_returns_skip_functions(num.body.statements);
                     }
-                    typedlua_parser::ast::statement::ForStatement::Generic(ref generic) => {
-                        self.walk_statements_for_returns_skip_functions(&generic.body.statements);
+                    typedlua_parser::ast::statement::ForStatement::Generic(generic) => {
+                        self.walk_statements_for_returns_skip_functions(generic.body.statements);
                     }
                 },
                 Statement::Repeat(repeat_stmt) => {
@@ -196,7 +196,7 @@ impl<'a> EscapeAnalysis<'a> {
     fn find_hoistable_declarations(&self, program: &Program) -> HoistableDeclarations {
         let mut hoistable = HoistableDeclarations::new();
 
-        for statement in &program.statements {
+        for statement in program.statements.iter() {
             self.check_declaration_hoistability(statement, &mut hoistable);
         }
 
@@ -264,7 +264,7 @@ impl<'a> EscapeAnalysis<'a> {
         for statement in statements {
             match statement {
                 Statement::Return(ret) => {
-                    for value in &ret.values {
+                    for value in ret.values.iter() {
                         if let ExpressionKind::Identifier(ident) = &value.kind {
                             let name = self.resolve_string(*ident);
                             if self.module_locals.contains(&name) {
@@ -277,7 +277,7 @@ impl<'a> EscapeAnalysis<'a> {
                     if self.function_returns_any_local(&if_stmt.then_block.statements) {
                         return true;
                     }
-                    for elseif in &if_stmt.else_ifs {
+                    for elseif in if_stmt.else_ifs.iter() {
                         if self.function_returns_any_local(&elseif.block.statements) {
                             return true;
                         }
@@ -294,12 +294,12 @@ impl<'a> EscapeAnalysis<'a> {
                     }
                 }
                 Statement::For(for_stmt) => {
-                    let body = match **for_stmt {
-                        typedlua_parser::ast::statement::ForStatement::Numeric(ref num) => {
-                            &num.body.statements
+                    let body = match for_stmt {
+                        typedlua_parser::ast::statement::ForStatement::Numeric(num) => {
+                            num.body.statements
                         }
-                        typedlua_parser::ast::statement::ForStatement::Generic(ref generic) => {
-                            &generic.body.statements
+                        typedlua_parser::ast::statement::ForStatement::Generic(generic) => {
+                            generic.body.statements
                         }
                     };
                     if self.function_returns_any_local(body) {
@@ -368,7 +368,7 @@ impl<'a> EscapeAnalysis<'a> {
                 name != self_name && self.module_locals.contains(&name)
             }
             ExpressionKind::Object(props) => {
-                for prop in props {
+                for prop in props.iter() {
                     match prop {
                         ObjectProperty::Property { value, .. } => {
                             if self.walk_expression_checking_any_local(value, self_name) {
@@ -392,7 +392,7 @@ impl<'a> EscapeAnalysis<'a> {
                 false
             }
             ExpressionKind::Array(elements) => {
-                for elem in elements {
+                for elem in elements.iter() {
                     match elem {
                         ArrayElement::Expression(expr) => {
                             if self.walk_expression_checking_any_local(expr, self_name) {
@@ -409,10 +409,10 @@ impl<'a> EscapeAnalysis<'a> {
                 false
             }
             ExpressionKind::Function(func) => {
-                self.walk_statements_checking_any_local(&func.body.statements, self_name)
+                self.walk_statements_checking_any_local(func.body.statements, self_name)
             }
             ExpressionKind::MethodCall(_, _, args, _) => {
-                for arg in args {
+                for arg in args.iter() {
                     if self.walk_expression_checking_any_local(&arg.value, self_name) {
                         return true;
                     }
@@ -420,7 +420,7 @@ impl<'a> EscapeAnalysis<'a> {
                 false
             }
             ExpressionKind::Call(_, args, _) => {
-                for arg in args {
+                for arg in args.iter() {
                     if self.walk_expression_checking_any_local(&arg.value, self_name) {
                         return true;
                     }
@@ -449,7 +449,7 @@ impl<'a> EscapeAnalysis<'a> {
                 if self.walk_expression_checking_any_local(new_expr, self_name) {
                     return true;
                 }
-                for arg in args {
+                for arg in args.iter() {
                     if self.walk_expression_checking_any_local(&arg.value, self_name) {
                         return true;
                     }
@@ -464,7 +464,7 @@ impl<'a> EscapeAnalysis<'a> {
         for statement in statements {
             match statement {
                 Statement::Return(ret) => {
-                    for value in &ret.values {
+                    for value in ret.values.iter() {
                         if self.walk_expression_checking_any_local(value, self_name) {
                             return true;
                         }
@@ -475,7 +475,7 @@ impl<'a> EscapeAnalysis<'a> {
                     {
                         return true;
                     }
-                    for elseif in &if_stmt.else_ifs {
+                    for elseif in if_stmt.else_ifs.iter() {
                         if self.walk_statements_checking_any_local(&elseif.block.statements, self_name) {
                             return true;
                         }
@@ -965,25 +965,28 @@ impl<'a> ReferenceRewriter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bumpalo::Bump;
     use crate::diagnostics::CollectingDiagnosticHandler;
     use std::sync::Arc;
     use typedlua_parser::lexer::Lexer;
     use typedlua_parser::parser::Parser;
 
-    fn create_program(
+    fn create_program<'arena>(
         source: &str,
         interner: &StringInterner,
         common: &typedlua_parser::string_interner::CommonIdentifiers,
-    ) -> Program {
+        arena: &'arena Bump,
+    ) -> Program<'arena> {
         let handler = Arc::new(CollectingDiagnosticHandler::new());
         let mut lexer = Lexer::new(source, handler.clone(), interner);
         let tokens = lexer.tokenize().expect("Lexing failed");
-        let mut parser = Parser::new(tokens, handler, interner, common);
+        let mut parser = Parser::new(tokens, handler, interner, common, arena);
         parser.parse().expect("Parsing failed")
     }
 
     #[test]
     fn test_private_function_can_hoist() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
         let source = r#"
             function helper(a, b)
@@ -994,7 +997,7 @@ mod tests {
                 return helper(1, 2)
             end
         "#;
-        let program = create_program(source, &interner, &common);
+        let program = create_program(source, &interner, &common, &arena);
         let hoistable = EscapeAnalysis::analyze(&program, &interner);
 
         assert!(hoistable.functions.contains("helper"));
@@ -1003,13 +1006,14 @@ mod tests {
 
     #[test]
     fn test_exported_function_cannot_hoist() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
         let source = r#"
             export function add(a, b)
                 return a + b
             end
         "#;
-        let program = create_program(source, &interner, &common);
+        let program = create_program(source, &interner, &common, &arena);
         let hoistable = EscapeAnalysis::analyze(&program, &interner);
 
         assert!(!hoistable.functions.contains("add"));
@@ -1017,6 +1021,7 @@ mod tests {
 
     #[test]
     fn test_function_returning_local_cannot_hoist() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
         let source = r#"
             function getHelper()
@@ -1027,7 +1032,7 @@ mod tests {
                 return 42
             end
         "#;
-        let program = create_program(source, &interner, &common);
+        let program = create_program(source, &interner, &common, &arena);
         let hoistable = EscapeAnalysis::analyze(&program, &interner);
 
         assert!(!hoistable.functions.contains("getHelper"));
@@ -1036,6 +1041,7 @@ mod tests {
 
     #[test]
     fn test_private_variable_can_hoist() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
         let source = r#"
             const CONSTANT = 42
@@ -1044,7 +1050,7 @@ mod tests {
                 return CONSTANT
             end
         "#;
-        let program = create_program(source, &interner, &common);
+        let program = create_program(source, &interner, &common, &arena);
         let hoistable = EscapeAnalysis::analyze(&program, &interner);
 
         assert!(hoistable.variables.contains("CONSTANT"));
@@ -1052,11 +1058,12 @@ mod tests {
 
     #[test]
     fn test_exported_variable_cannot_hoist() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
         let source = r#"
             export const PI = 3.14
         "#;
-        let program = create_program(source, &interner, &common);
+        let program = create_program(source, &interner, &common, &arena);
         let hoistable = EscapeAnalysis::analyze(&program, &interner);
 
         assert!(!hoistable.variables.contains("PI"));
@@ -1064,6 +1071,7 @@ mod tests {
 
     #[test]
     fn test_variable_returned_cannot_hoist() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
         let source = r#"
             function getValue()
@@ -1072,7 +1080,7 @@ mod tests {
 
             const VALUE = 42
         "#;
-        let program = create_program(source, &interner, &common);
+        let program = create_program(source, &interner, &common, &arena);
         let hoistable = EscapeAnalysis::analyze(&program, &interner);
 
         assert!(!hoistable.variables.contains("VALUE"));
@@ -1080,6 +1088,7 @@ mod tests {
 
     #[test]
     fn test_private_class_can_hoist() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
         let source = r#"
             class HelperClass {
@@ -1090,7 +1099,7 @@ mod tests {
                 return HelperClass.new(42)
             end
         "#;
-        let program = create_program(source, &interner, &common);
+        let program = create_program(source, &interner, &common, &arena);
         let hoistable = EscapeAnalysis::analyze(&program, &interner);
 
         assert!(hoistable.classes.contains("HelperClass"));
@@ -1098,11 +1107,12 @@ mod tests {
 
     #[test]
     fn test_exported_class_cannot_hoist() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
         let source = r#"
             export class MyClass {}
         "#;
-        let program = create_program(source, &interner, &common);
+        let program = create_program(source, &interner, &common, &arena);
         let hoistable = EscapeAnalysis::analyze(&program, &interner);
 
         assert!(!hoistable.classes.contains("MyClass"));
@@ -1110,6 +1120,7 @@ mod tests {
 
     #[test]
     fn test_class_returned_cannot_hoist() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
         let source = r#"
             function getClass()
@@ -1118,7 +1129,7 @@ mod tests {
 
             class MyClass {}
         "#;
-        let program = create_program(source, &interner, &common);
+        let program = create_program(source, &interner, &common, &arena);
         let hoistable = EscapeAnalysis::analyze(&program, &interner);
 
         assert!(!hoistable.classes.contains("MyClass"));
@@ -1126,6 +1137,7 @@ mod tests {
 
     #[test]
     fn test_private_enum_can_hoist() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
         let source = r#"
             enum Status {
@@ -1137,7 +1149,7 @@ mod tests {
                 return Status.Active
             end
         "#;
-        let program = create_program(source, &interner, &common);
+        let program = create_program(source, &interner, &common, &arena);
         let hoistable = EscapeAnalysis::analyze(&program, &interner);
 
         assert!(hoistable.enums.contains("Status"));
@@ -1145,6 +1157,7 @@ mod tests {
 
     #[test]
     fn test_exported_enum_cannot_hoist() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
         let source = r#"
             export enum Color {
@@ -1153,7 +1166,7 @@ mod tests {
                 Blue = 3
             }
         "#;
-        let program = create_program(source, &interner, &common);
+        let program = create_program(source, &interner, &common, &arena);
         let hoistable = EscapeAnalysis::analyze(&program, &interner);
 
         assert!(!hoistable.enums.contains("Color"));
@@ -1161,6 +1174,7 @@ mod tests {
 
     #[test]
     fn test_enum_returned_cannot_hoist() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
         let source = r#"
             function getEnum()
@@ -1172,7 +1186,7 @@ mod tests {
                 B = 2
             }
         "#;
-        let program = create_program(source, &interner, &common);
+        let program = create_program(source, &interner, &common, &arena);
         let hoistable = EscapeAnalysis::analyze(&program, &interner);
 
         assert!(!hoistable.enums.contains("MyEnum"));
@@ -1180,6 +1194,7 @@ mod tests {
 
     #[test]
     fn test_mixed_declarations() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
         let source = r#"
             const internal = 42
@@ -1192,7 +1207,7 @@ mod tests {
             export class ExposedClass {}
             export enum ExposedEnum { B = 1 }
         "#;
-        let program = create_program(source, &interner, &common);
+        let program = create_program(source, &interner, &common, &arena);
         let hoistable = EscapeAnalysis::analyze(&program, &interner);
 
         assert!(hoistable.variables.contains("internal"));
@@ -1208,13 +1223,14 @@ mod tests {
 
     #[test]
     fn test_named_export() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
         let source = r#"
             const value = 42
             const other = 100
             export { value }
         "#;
-        let program = create_program(source, &interner, &common);
+        let program = create_program(source, &interner, &common, &arena);
         let hoistable = EscapeAnalysis::analyze(&program, &interner);
 
         assert!(!hoistable.variables.contains("value"));
@@ -1223,13 +1239,14 @@ mod tests {
 
     #[test]
     fn test_variable_init_with_local_ref() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
         let source = r#"
             const helper = 42
             const obj = { value = helper }
             export function getObj() return obj end
         "#;
-        let program = create_program(source, &interner, &common);
+        let program = create_program(source, &interner, &common, &arena);
         let hoistable = EscapeAnalysis::analyze(&program, &interner);
 
         assert!(!hoistable.variables.contains("obj"));
@@ -1238,12 +1255,13 @@ mod tests {
 
     #[test]
     fn test_variable_init_with_table() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
         let source = r#"
             const obj = { value = 42, nested = { inner = 100 } }
             export function getObj() return obj end
         "#;
-        let program = create_program(source, &interner, &common);
+        let program = create_program(source, &interner, &common, &arena);
         let hoistable = EscapeAnalysis::analyze(&program, &interner);
 
         assert!(!hoistable.variables.contains("obj"));
@@ -1251,12 +1269,13 @@ mod tests {
 
     #[test]
     fn test_variable_init_with_function() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
         let source = r#"
             const callback = function() return 1 end
             export function run() return callback() end
         "#;
-        let program = create_program(source, &interner, &common);
+        let program = create_program(source, &interner, &common, &arena);
         let hoistable = EscapeAnalysis::analyze(&program, &interner);
 
         assert!(!hoistable.variables.contains("callback"));

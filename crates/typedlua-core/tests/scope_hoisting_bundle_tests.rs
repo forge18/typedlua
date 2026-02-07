@@ -7,6 +7,7 @@
 //! 4. Name collisions are handled properly
 //! 5. Circular dependencies still work with hoisting
 
+use bumpalo::Bump;
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -19,27 +20,29 @@ use typedlua_parser::lexer::Lexer;
 use typedlua_parser::parser::Parser;
 use typedlua_parser::string_interner::StringInterner;
 
-fn create_program(
+fn create_program<'arena>(
     source: &str,
     interner: &StringInterner,
     common: &typedlua_parser::string_interner::CommonIdentifiers,
-) -> Program {
+    arena: &'arena Bump,
+) -> Program<'arena> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let mut lexer = Lexer::new(source, handler.clone(), interner);
     let tokens = lexer.tokenize().expect("Lexing failed");
-    let mut parser = Parser::new(tokens, handler, interner, common);
+    let mut parser = Parser::new(tokens, handler, interner, common, arena);
     parser.parse().expect("Parsing failed")
 }
 
-fn create_modules_with_interner(
+fn create_modules_with_interner<'arena>(
     sources: &[(&str, &str)],
-) -> (Vec<(String, Program, FxHashMap<String, String>)>, Arc<StringInterner>) {
+    arena: &'arena Bump,
+) -> (Vec<(String, Program<'arena>, FxHashMap<String, String>)>, Arc<StringInterner>) {
     let (interner, common) = StringInterner::new_with_common_identifiers();
     let interner = Arc::new(interner);
     let mut modules = Vec::new();
 
     for &(name, source) in sources {
-        let program = create_program(source, &interner, &common);
+        let program = create_program(source, &interner, &common, arena);
         let import_map = FxHashMap::default();
         modules.push((name.to_string(), program, import_map));
     }
@@ -52,7 +55,8 @@ fn generate_bundle(
     entry: &str,
     scope_hoisting_enabled: bool,
 ) -> String {
-    let (modules, interner) = create_modules_with_interner(sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules_with_interner(sources, &arena);
 
     // Convert FxHashMap to std::HashMap for the API
     let module_refs: Vec<(String, &Program, HashMap<String, String>)> = modules
@@ -93,7 +97,8 @@ fn test_simple_function_hoisting() {
         "#,
     )];
 
-    let (modules, interner) = create_modules_with_interner(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules_with_interner(&sources, &arena);
 
     // Verify the function is detected as hoistable
     let hoistable = EscapeAnalysis::analyze(&modules[0].1, &interner);
@@ -128,7 +133,8 @@ fn test_simple_variable_hoisting() {
         "#,
     )];
 
-    let (modules, interner) = create_modules_with_interner(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules_with_interner(&sources, &arena);
 
     // Verify the constant is detected as hoistable
     let hoistable = EscapeAnalysis::analyze(&modules[0].1, &interner);
@@ -168,7 +174,8 @@ fn test_multiple_modules_hoisting() {
         ),
     ];
 
-    let (modules, interner) = create_modules_with_interner(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules_with_interner(&sources, &arena);
 
     // main.lua's localHelper should be hoistable (not exported)
     let main_hoistable = EscapeAnalysis::analyze(&modules[0].1, &interner);
@@ -219,7 +226,8 @@ fn test_hoisting_context_multiple_modules() {
         ),
     ];
 
-    let (modules, interner) = create_modules_with_interner(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules_with_interner(&sources, &arena);
 
     let modules_for_analysis: Vec<(String, &Program)> = modules
         .iter()
@@ -272,7 +280,8 @@ fn test_mixed_hoisted_nonhoisted() {
         ),
     ];
 
-    let (modules, interner) = create_modules_with_interner(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules_with_interner(&sources, &arena);
 
     // main.lua has hoistable privateHelper
     let main_hoistable = EscapeAnalysis::analyze(&modules[0].1, &interner);
@@ -305,7 +314,8 @@ fn test_exported_functions_not_hoisted() {
         "#,
     )];
 
-    let (modules, interner) = create_modules_with_interner(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules_with_interner(&sources, &arena);
     let hoistable = EscapeAnalysis::analyze(&modules[0].1, &interner);
 
     // privateImpl should be hoistable
@@ -346,7 +356,8 @@ fn test_name_collision_same_function_name() {
         ),
     ];
 
-    let (modules, interner) = create_modules_with_interner(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules_with_interner(&sources, &arena);
 
     let modules_for_analysis: Vec<(String, &Program)> = modules
         .iter()
@@ -465,7 +476,8 @@ fn test_circular_dependency_modules() {
         ),
     ];
 
-    let (modules, interner) = create_modules_with_interner(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules_with_interner(&sources, &arena);
 
     let modules_for_analysis: Vec<(String, &Program)> = modules
         .iter()
@@ -520,7 +532,8 @@ fn test_hoisting_context_disabled() {
         "#,
     )];
 
-    let (modules, interner) = create_modules_with_interner(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules_with_interner(&sources, &arena);
 
     let modules_for_analysis: Vec<(String, &Program)> = modules
         .iter()
@@ -558,7 +571,8 @@ fn test_entry_point_names_preserved() {
         "#,
     )];
 
-    let (modules, interner) = create_modules_with_interner(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules_with_interner(&sources, &arena);
 
     let modules_for_analysis: Vec<(String, &Program)> = modules
         .iter()
@@ -592,7 +606,8 @@ fn test_variable_with_function_init_not_hoisted() {
         "#,
     )];
 
-    let (modules, interner) = create_modules_with_interner(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules_with_interner(&sources, &arena);
     let hoistable = EscapeAnalysis::analyze(&modules[0].1, &interner);
 
     // callback should NOT be hoistable (initialized with function expression)
@@ -617,7 +632,8 @@ fn test_variable_returned_from_exported_can_hoist() {
         "#,
     )];
 
-    let (modules, interner) = create_modules_with_interner(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules_with_interner(&sources, &arena);
     let hoistable = EscapeAnalysis::analyze(&modules[0].1, &interner);
 
     // value CAN be hoisted because:
@@ -646,7 +662,8 @@ fn test_variable_returned_from_private_not_hoisted() {
         "#,
     )];
 
-    let (modules, interner) = create_modules_with_interner(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules_with_interner(&sources, &arena);
     let hoistable = EscapeAnalysis::analyze(&modules[0].1, &interner);
 
     // value should NOT be hoistable (returned from private function)
@@ -674,7 +691,8 @@ fn test_private_enum_hoisting() {
         "#,
     )];
 
-    let (modules, interner) = create_modules_with_interner(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules_with_interner(&sources, &arena);
     let hoistable = EscapeAnalysis::analyze(&modules[0].1, &interner);
 
     // Color enum should be hoistable (not exported)
@@ -696,7 +714,8 @@ fn test_exported_enum_not_hoisted() {
         "#,
     )];
 
-    let (modules, interner) = create_modules_with_interner(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules_with_interner(&sources, &arena);
     let hoistable = EscapeAnalysis::analyze(&modules[0].1, &interner);
 
     // Status enum should NOT be hoistable (exported)
@@ -720,7 +739,8 @@ fn test_private_class_hoisting() {
         "#,
     )];
 
-    let (modules, interner) = create_modules_with_interner(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules_with_interner(&sources, &arena);
     let hoistable = EscapeAnalysis::analyze(&modules[0].1, &interner);
 
     // Helper class should be hoistable (not exported)

@@ -1597,7 +1597,7 @@ dependencies = [
  "tracing-subscriber",
  "typedlua-core",
  "typedlua-parser",
- "typedlua-typechecker 0.1.0",
+ "typedlua-typechecker",
  "walkdir",
 ]
 
@@ -1626,7 +1626,7 @@ dependencies = [
  "tracing",
  "typedlua-parser",
  "typedlua-runtime",
- "typedlua-typechecker 0.1.0",
+ "typedlua-typechecker",
 ]
 
 [[package]]
@@ -1642,14 +1642,14 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "typedlua-parser",
- "typedlua-typechecker 0.1.0 (git+https://github.com/forge18/typedlua-typechecker.git)",
+ "typedlua-typechecker",
 ]
 
 [[package]]
 name = "typedlua-parser"
 version = "0.1.0"
-source = "git+https://github.com/forge18/typedlua-parser.git#222d2f2f75f387a4a9068d56750f7e992719d866"
 dependencies = [
+ "bumpalo",
  "lasso",
  "rustc-hash 2.1.1",
  "serde",
@@ -1674,6 +1674,7 @@ dependencies = [
 name = "typedlua-typechecker"
 version = "0.1.0"
 dependencies = [
+ "bumpalo",
  "criterion",
  "indexmap",
  "lru",
@@ -1685,19 +1686,6 @@ dependencies = [
  "thiserror",
  "tracing",
  "tracing-subscriber",
- "typedlua-parser",
-]
-
-[[package]]
-name = "typedlua-typechecker"
-version = "0.1.0"
-source = "git+https://github.com/forge18/typedlua-typechecker.git#4476138de0675708866c679f5e7d9f80af9055a7"
-dependencies = [
- "indexmap",
- "rustc-hash 2.1.1",
- "serde",
- "serde_yaml",
- "thiserror",
  "typedlua-parser",
 ]
 

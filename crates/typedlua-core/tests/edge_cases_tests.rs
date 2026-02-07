@@ -1,3 +1,4 @@
+use bumpalo::Bump;
 use std::sync::Arc;
 use typedlua_core::diagnostics::CollectingDiagnosticHandler;
 use typedlua_parser::lexer::Lexer;
@@ -14,9 +15,10 @@ fn lex_only(input: &str) -> bool {
 fn lex_and_parse(input: &str) -> bool {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
+    let arena = Bump::new();
     let mut lexer = Lexer::new(input, handler.clone(), &interner);
     if let Ok(tokens) = lexer.tokenize() {
-        let mut parser = Parser::new(tokens, handler, &interner, &common_ids);
+        let mut parser = Parser::new(tokens, handler, &interner, &common_ids, &arena);
         parser.parse().is_ok()
     } else {
         false

@@ -65,6 +65,12 @@ dhat = "0.3"
 # Development tools (not used in production code)
 cargo-fuzz = "0.12"
 
+[patch."https://github.com/forge18/typedlua-parser.git"]
+typedlua-parser = { path = "crates/typedlua-parser" }
+
+[patch."https://github.com/forge18/typedlua-typechecker.git"]
+typedlua-typechecker = { path = "crates/typedlua-typechecker" }
+
 [profile.release]
 # Enable Link-Time Optimization for smaller, faster binaries
 # This enables cross-crate inlining and better dead code elimination

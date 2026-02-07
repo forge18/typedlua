@@ -5,6 +5,7 @@ use super::diagnostics::{
 };
 use super::fs::{FileSystem, MockFileSystem, RealFileSystem};
 use super::optimizer::Optimizer;
+use bumpalo::Bump;
 use std::any::{Any, TypeId};
 use std::sync::Arc;
 use typedlua_parser::diagnostics::CollectingDiagnosticHandler as ParserCollectingHandler;
@@ -182,6 +183,7 @@ impl DiContainer {
         source: &str,
         level: OptimizationLevel,
     ) -> Result<String, String> {
+        let arena = Bump::new();
         let parser_handler =
             Arc::new(ParserCollectingHandler::new()) as Arc<dyn typedlua_parser::DiagnosticHandler>;
         let typecheck_handler = self
@@ -195,18 +197,21 @@ impl DiContainer {
             .tokenize()
             .map_err(|e| format!("Lexing failed: {:?}", e))?;
 
-        let mut parser = Parser::new(tokens, parser_handler.clone(), &interner, &common_ids);
-        let mut program = parser
+        let mut parser = Parser::new(tokens, parser_handler.clone(), &interner, &common_ids, &arena);
+        let program = parser
             .parse()
             .map_err(|e| format!("Parsing failed: {:?}", e))?;
 
-        let mut type_checker = TypeChecker::new(typecheck_handler.clone(), &interner, &common_ids);
+        let mut type_checker =
+            TypeChecker::new(typecheck_handler.clone(), &interner, &common_ids, &arena);
         type_checker
-            .check_program(&mut program)
+            .check_program(&program)
             .map_err(|e| e.message)?;
 
+        let mut mutable_program = crate::MutableProgram::from_program(&program);
+
         let mut optimizer = Optimizer::new(level, typecheck_handler.clone(), interner.clone());
-        if let Err(err_msg) = optimizer.optimize(&mut program) {
+        if let Err(err_msg) = optimizer.optimize(&mut mutable_program) {
             typecheck_handler.warning(
                 typedlua_parser::span::Span::dummy(),
                 &format!("Optimization warning: {}", err_msg),
@@ -214,7 +219,7 @@ impl DiContainer {
         }
 
         let mut codegen = CodeGenerator::new(interner.clone());
-        let output = codegen.generate(&mut program);
+        let output = codegen.generate(&mutable_program);
 
         Ok(output)
     }
@@ -228,6 +233,7 @@ impl DiContainer {
         source: &str,
         level: OptimizationLevel,
     ) -> Result<String, String> {
+        let arena = Bump::new();
         let parser_handler =
             Arc::new(ParserCollectingHandler::new()) as Arc<dyn typedlua_parser::DiagnosticHandler>;
         let typecheck_handler = self
@@ -241,20 +247,22 @@ impl DiContainer {
             .tokenize()
             .map_err(|e| format!("Lexing failed: {:?}", e))?;
 
-        let mut parser = Parser::new(tokens, parser_handler.clone(), &interner, &common_ids);
-        let mut program = parser
+        let mut parser = Parser::new(tokens, parser_handler.clone(), &interner, &common_ids, &arena);
+        let program = parser
             .parse()
             .map_err(|e| format!("Parsing failed: {:?}", e))?;
 
         let mut type_checker =
-            TypeChecker::new_with_stdlib(typecheck_handler.clone(), &interner, &common_ids)
+            TypeChecker::new_with_stdlib(typecheck_handler.clone(), &interner, &common_ids, &arena)
                 .map_err(|e| format!("Failed to load stdlib: {:?}", e))?;
         type_checker
-            .check_program(&mut program)
+            .check_program(&program)
             .map_err(|e| e.message)?;
 
+        let mut mutable_program = crate::MutableProgram::from_program(&program);
+
         let mut optimizer = Optimizer::new(level, typecheck_handler.clone(), interner.clone());
-        if let Err(err_msg) = optimizer.optimize(&mut program) {
+        if let Err(err_msg) = optimizer.optimize(&mut mutable_program) {
             typecheck_handler.warning(
                 typedlua_parser::span::Span::dummy(),
                 &format!("Optimization warning: {}", err_msg),
@@ -262,7 +270,7 @@ impl DiContainer {
         }
 
         let mut codegen = CodeGenerator::new(interner.clone());
-        let output = codegen.generate(&mut program);
+        let output = codegen.generate(&mutable_program);
 
         Ok(output)
     }
@@ -276,6 +284,7 @@ impl Default for DiContainer {
 
 impl TypeCheckHelper for DiContainer {
     fn type_check_source(&self, source: &str) -> Result<(), String> {
+        let arena = Bump::new();
         let handler = Arc::new(CollectingDiagnosticHandler::new());
         let (interner, common_ids) = StringInterner::new_with_common_identifiers();
         let interner = Arc::new(interner);
@@ -285,14 +294,14 @@ impl TypeCheckHelper for DiContainer {
             .tokenize()
             .map_err(|e| format!("Lexing failed: {:?}", e))?;
 
-        let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-        let mut program = parser
+        let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids, &arena);
+        let program = parser
             .parse()
             .map_err(|e| format!("Parsing failed: {:?}", e))?;
 
-        let mut type_checker = TypeChecker::new(handler, &interner, &common_ids);
+        let mut type_checker = TypeChecker::new(handler, &interner, &common_ids, &arena);
         type_checker
-            .check_program(&mut program)
+            .check_program(&program)
             .map_err(|e| e.message)?;
 
         Ok(())

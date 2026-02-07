@@ -82,7 +82,11 @@ impl CodeGenerator {
     }
 
     pub fn detect_decorators(&mut self, program: &typedlua_parser::ast::Program) {
-        for statement in &program.statements {
+        self.detect_decorators_from_statements(program.statements);
+    }
+
+    pub fn detect_decorators_from_statements(&mut self, statements: &[typedlua_parser::ast::statement::Statement]) {
+        for statement in statements {
             if self.statement_uses_built_in_decorators(statement) {
                 self.uses_built_in_decorators = true;
                 return;
@@ -93,18 +97,18 @@ impl CodeGenerator {
     pub fn statement_uses_built_in_decorators(&self, stmt: &Statement) -> bool {
         match stmt {
             Statement::Class(class_decl) => {
-                for decorator in &class_decl.decorators {
+                for decorator in class_decl.decorators.iter() {
                     if self.is_decorator_built_in(&decorator.expression) {
                         return true;
                     }
                 }
 
-                for member in &class_decl.members {
-                    let decorators = match member {
-                        ClassMember::Method(method) => &method.decorators,
-                        ClassMember::Property(prop) => &prop.decorators,
-                        ClassMember::Getter(getter) => &getter.decorators,
-                        ClassMember::Setter(setter) => &setter.decorators,
+                for member in class_decl.members.iter() {
+                    let decorators: &[Decorator] = match member {
+                        ClassMember::Method(method) => method.decorators,
+                        ClassMember::Property(prop) => prop.decorators,
+                        ClassMember::Getter(getter) => getter.decorators,
+                        ClassMember::Setter(setter) => setter.decorators,
                         _ => continue,
                     };
 
@@ -132,7 +136,7 @@ impl CodeGenerator {
                 self.is_built_in_decorator(&name_str)
             }
             DecoratorExpression::Call { callee, .. } => {
-                if let DecoratorExpression::Identifier(name) = &**callee {
+                if let DecoratorExpression::Identifier(name) = callee {
                     let name_str = self.resolve(name.node);
                     self.is_built_in_decorator(&name_str)
                 } else {
@@ -142,7 +146,7 @@ impl CodeGenerator {
             DecoratorExpression::Member {
                 object, property, ..
             } => {
-                if let DecoratorExpression::Identifier(obj_name) = &**object {
+                if let DecoratorExpression::Identifier(obj_name) = object {
                     let obj_str = self.resolve(obj_name.node);
                     let prop_str = self.resolve(property.node);
                     obj_str == "TypedLua" && self.is_built_in_decorator(&prop_str)

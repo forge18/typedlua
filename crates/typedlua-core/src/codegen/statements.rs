@@ -11,7 +11,7 @@ impl CodeGenerator {
             Statement::Function(decl) => self.generate_function_declaration(decl),
             Statement::If(if_stmt) => self.generate_if_statement(if_stmt),
             Statement::While(while_stmt) => self.generate_while_statement(while_stmt),
-            Statement::For(for_stmt) => self.generate_for_statement(for_stmt.as_ref()),
+            Statement::For(for_stmt) => self.generate_for_statement(for_stmt),
             Statement::Repeat(repeat_stmt) => self.generate_repeat_statement(repeat_stmt),
             Statement::Return(return_stmt) => self.generate_return_statement(return_stmt),
             Statement::Break(_) => {
@@ -106,7 +106,7 @@ impl CodeGenerator {
     pub fn generate_array_destructuring(&mut self, pattern: &ArrayPattern, source: &str) {
         let mut index = 1; // Lua arrays are 1-indexed
 
-        for elem in &pattern.elements {
+        for elem in pattern.elements.iter() {
             match elem {
                 ArrayPatternElement::Pattern(pat) => {
                     match pat {
@@ -170,7 +170,7 @@ impl CodeGenerator {
 
     /// Generate object destructuring assignments
     pub fn generate_object_destructuring(&mut self, pattern: &ObjectPattern, source: &str) {
-        for prop in &pattern.properties {
+        for prop in pattern.properties.iter() {
             let key_str = self.resolve(prop.key.node);
 
             if let Some(value_pattern) = &prop.value {
@@ -288,7 +288,7 @@ impl CodeGenerator {
         self.generate_block(&if_stmt.then_block);
         self.dedent();
 
-        for else_if in &if_stmt.else_ifs {
+        for else_if in if_stmt.else_ifs.iter() {
             self.write_indent();
             self.write("elseif ");
             self.generate_expression(&else_if.condition);
@@ -399,7 +399,7 @@ impl CodeGenerator {
     }
 
     pub fn generate_block(&mut self, block: &Block) {
-        for statement in &block.statements {
+        for statement in block.statements.iter() {
             self.generate_statement(statement);
         }
     }
@@ -463,8 +463,9 @@ impl CodeGenerator {
         self.write_indent();
         self.write("local __error = __result");
 
+        let catch_count = stmt.catch_clauses.len();
         for (i, catch_clause) in stmt.catch_clauses.iter().enumerate() {
-            self.generate_catch_clause_pcall(catch_clause, i == stmt.catch_clauses.len() - 1);
+            self.generate_catch_clause_pcall(catch_clause, i == catch_count - 1);
         }
         self.dedent();
 
@@ -510,7 +511,7 @@ impl CodeGenerator {
             self.write_indent();
             self.writeln("__error = __err");
 
-            for catch_clause in &stmt.catch_clauses {
+            for catch_clause in stmt.catch_clauses.iter() {
                 self.generate_catch_clause_xpcall(catch_clause);
             }
 
@@ -526,7 +527,7 @@ impl CodeGenerator {
             self.writeln("local e = __error");
         }
 
-        for catch_clause in &stmt.catch_clauses {
+        for catch_clause in stmt.catch_clauses.iter() {
             self.generate_block(&catch_clause.body);
         }
 

@@ -108,7 +108,7 @@ impl CodeGenerator {
         self.write(enum_name);
         self.write("__new(name, ordinal");
 
-        for field in &enum_decl.fields {
+        for field in enum_decl.fields.iter() {
             self.write(", ");
             self.write(&self.resolve(field.name.node));
         }
@@ -184,7 +184,7 @@ impl CodeGenerator {
                 self.write("\", ");
                 self.write(&i.to_string());
 
-                for arg in &member.arguments {
+                for arg in member.arguments.iter() {
                     self.write(", ");
                     self.generate_expression(arg);
                 }
@@ -239,7 +239,7 @@ impl CodeGenerator {
                 .replace("{}", enum_name),
         );
 
-        for method in &enum_decl.methods {
+        for method in enum_decl.methods.iter() {
             self.writeln("");
 
             // O3: Add inline hints for simple methods

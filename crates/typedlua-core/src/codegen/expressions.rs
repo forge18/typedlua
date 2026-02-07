@@ -172,7 +172,7 @@ impl CodeGenerator {
                 } else {
                     self.write("(function() local __arr = {} ");
 
-                    for elem in elements {
+                    for elem in elements.iter() {
                         match elem {
                             ArrayElement::Expression(expr) => {
                                 self.write("table.insert(__arr, ");
@@ -207,7 +207,7 @@ impl CodeGenerator {
                 } else {
                     self.write("(function() local __obj = {} ");
 
-                    for prop in props {
+                    for prop in props.iter() {
                         match prop {
                             ObjectProperty::Property { key, value, .. } => {
                                 self.write("__obj.");
@@ -342,7 +342,7 @@ impl CodeGenerator {
                 let mut string_parts: Vec<String> = Vec::new();
                 let mut expression_parts: Vec<&Expression> = Vec::new();
 
-                for part in &template_lit.parts {
+                for part in template_lit.parts.iter() {
                     match part {
                         TemplatePart::String(s) => {
                             string_parts.push(s.clone());
@@ -592,7 +592,7 @@ impl CodeGenerator {
                     self.writeln("");
                 }
                 MatchArmBody::Block(block) => {
-                    for stmt in &block.statements {
+                    for stmt in block.statements.iter() {
                         self.generate_statement(stmt);
                     }
                     self.write_indent();
@@ -700,7 +700,7 @@ impl CodeGenerator {
                 }
             }
             Pattern::Object(object_pattern) => {
-                for prop in &object_pattern.properties {
+                for prop in object_pattern.properties.iter() {
                     if let Some(value_pattern) = &prop.value {
                         let key_str = self.resolve(prop.key.node);
                         let prop_expr = format!("{}.{}", value_var, key_str);

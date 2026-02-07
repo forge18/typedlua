@@ -1,3 +1,4 @@
+use bumpalo::Bump;
 use rustc_hash::FxHashMap as HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -8,24 +9,25 @@ use typedlua_parser::lexer::Lexer;
 use typedlua_parser::parser::Parser;
 use typedlua_parser::string_interner::StringInterner;
 
-fn create_program(
+fn create_program<'arena>(
     source: &str,
     interner: &StringInterner,
     common: &typedlua_parser::string_interner::CommonIdentifiers,
-) -> Program {
+    arena: &'arena Bump,
+) -> Program<'arena> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let mut lexer = Lexer::new(source, handler.clone(), interner);
     let tokens = lexer.tokenize().expect("Lexing failed");
-    let mut parser = Parser::new(tokens, handler, interner, common);
+    let mut parser = Parser::new(tokens, handler, interner, common, arena);
     parser.parse().expect("Parsing failed")
 }
 
-fn create_modules(sources: &[(&str, &str)]) -> (HashMap<String, Program>, StringInterner) {
+fn create_modules<'arena>(sources: &[(&str, &str)], arena: &'arena Bump) -> (HashMap<String, Program<'arena>>, StringInterner) {
     let (interner, common) = StringInterner::new_with_common_identifiers();
     let mut modules = HashMap::default();
 
     for &(name, source) in sources {
-        let program = create_program(source, &interner, &common);
+        let program = create_program(source, &interner, &common, arena);
         modules.insert(name.to_string(), program);
     }
 
@@ -55,7 +57,8 @@ fn test_single_module_bundle_no_shaking() {
         "#,
     )];
 
-    let (modules, interner) = create_modules(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules(&sources, &arena);
     let reachable = analyze_reachability("main.lua", &modules, &interner);
 
     assert!(reachable.is_module_reachable("main.lua"));
@@ -89,7 +92,8 @@ fn test_unused_function_removed() {
         ),
     ];
 
-    let (modules, interner) = create_modules(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules(&sources, &arena);
     let reachable = analyze_reachability("main.lua", &modules, &interner);
 
     assert!(reachable.is_module_reachable("main.lua"));
@@ -130,7 +134,8 @@ fn test_unused_entire_module_removed() {
         ),
     ];
 
-    let (modules, interner) = create_modules(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules(&sources, &arena);
     let reachable = analyze_reachability("main.lua", &modules, &interner);
 
     assert!(reachable.is_module_reachable("main.lua"));
@@ -172,7 +177,8 @@ fn test_transitive_dependencies_preserved() {
         ),
     ];
 
-    let (modules, interner) = create_modules(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules(&sources, &arena);
     let reachable = analyze_reachability("main.lua", &modules, &interner);
 
     assert!(reachable.is_module_reachable("main.lua"));
@@ -202,7 +208,8 @@ fn test_entry_point_always_included() {
         ),
     ];
 
-    let (modules, interner) = create_modules(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules(&sources, &arena);
     let reachable = analyze_reachability("deeply/nested/main.lua", &modules, &interner);
 
     assert!(reachable.is_module_reachable("deeply/nested/main.lua"));
@@ -231,7 +238,8 @@ fn test_multiple_unused_exports_filtered() {
         ),
     ];
 
-    let (modules, interner) = create_modules(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules(&sources, &arena);
     let reachable = analyze_reachability("main.lua", &modules, &interner);
 
     let lib_exports = reachable.get_reachable_exports("lib.lua").unwrap();
@@ -260,7 +268,8 @@ fn test_namespace_import_all_used() {
         ),
     ];
 
-    let (modules, interner) = create_modules(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules(&sources, &arena);
     let reachable = analyze_reachability("main.lua", &modules, &interner);
 
     assert!(reachable.is_module_reachable("main.lua"));
@@ -287,7 +296,8 @@ fn test_partial_namespace_import() {
         ),
     ];
 
-    let (modules, interner) = create_modules(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules(&sources, &arena);
     let reachable = analyze_reachability("main.lua", &modules, &interner);
 
     assert!(reachable.is_module_reachable("main.lua"));
@@ -312,7 +322,8 @@ fn test_default_export_included() {
         ),
     ];
 
-    let (modules, interner) = create_modules(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules(&sources, &arena);
     let reachable = analyze_reachability("main.lua", &modules, &interner);
 
     assert!(reachable.is_module_reachable("main.lua"));
@@ -360,7 +371,8 @@ fn test_complex_dependency_chain() {
         ),
     ];
 
-    let (modules, interner) = create_modules(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules(&sources, &arena);
     let reachable = analyze_reachability("app.lua", &modules, &interner);
 
     assert!(reachable.is_module_reachable("app.lua"));
@@ -410,7 +422,8 @@ fn test_re_exports_tracking() {
         ),
     ];
 
-    let (modules, interner) = create_modules(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules(&sources, &arena);
     let reachable = analyze_reachability("main.lua", &modules, &interner);
 
     assert!(reachable.is_module_reachable("main.lua"));
@@ -441,7 +454,8 @@ fn test_all_exports_used() {
         ),
     ];
 
-    let (modules, interner) = create_modules(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules(&sources, &arena);
     let reachable = analyze_reachability("main.lua", &modules, &interner);
 
     let lib_exports = reachable.get_reachable_exports("lib.lua").unwrap();
@@ -486,7 +500,8 @@ fn test_mixed_import_types() {
         ),
     ];
 
-    let (modules, interner) = create_modules(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules(&sources, &arena);
     let reachable = analyze_reachability("main.lua", &modules, &interner);
 
     assert!(reachable.is_module_reachable("main.lua"));
@@ -523,7 +538,8 @@ fn test_self_referential_module() {
         ),
     ];
 
-    let (modules, interner) = create_modules(&sources);
+    let arena = Bump::new();
+    let (modules, interner) = create_modules(&sources, &arena);
     let reachable = analyze_reachability("main.lua", &modules, &interner);
 
     assert!(reachable.is_module_reachable("main.lua"));

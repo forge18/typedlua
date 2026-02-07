@@ -16,7 +16,6 @@ pub mod tree_shaking;
 
 pub use emitter::Emitter;
 
-use super::optimizer::Optimizer;
 pub use builder::CodeGeneratorBuilder;
 pub use sourcemap::{SourceMap, SourceMapBuilder};
 
@@ -263,21 +262,7 @@ impl CodeGenerator {
         }
     }
 
-    pub fn generate(&mut self, program: &mut Program) -> String {
-        // Run optimizer before code generation if optimization level > O0
-        if self.optimization_level != crate::config::OptimizationLevel::O0 {
-            let handler = Arc::new(crate::diagnostics::CollectingDiagnosticHandler::new());
-            let mut optimizer =
-                Optimizer::new(self.optimization_level, handler, self.interner.clone());
-
-            // Pass whole-program analysis if available (for O3+ cross-module optimizations)
-            if let Some(ref analysis) = self.whole_program_analysis {
-                optimizer.set_whole_program_analysis(analysis.clone());
-            }
-
-            let _ = optimizer.optimize(program);
-        }
-
+    pub fn generate(&mut self, program: &crate::MutableProgram<'_>) -> String {
         // Emit strategy-specific preamble (e.g., library includes)
         if let Some(preamble) = self.strategy.emit_preamble() {
             self.writeln(&preamble);
@@ -285,7 +270,7 @@ impl CodeGenerator {
         }
 
         // First pass: check if any decorators are used
-        self.detect_decorators(program);
+        self.detect_decorators_from_statements(&program.statements);
 
         // Embed runtime library if decorators are used (provides built-in decorators)
         if self.uses_built_in_decorators {
@@ -353,8 +338,8 @@ impl CodeGenerator {
     ///
     /// # Returns
     /// Returns a tuple of (generated_code, optional_source_map)
-    pub fn generate_bundle(
-        modules: &[(String, &Program, std::collections::HashMap<String, String>)],
+    pub fn generate_bundle<'arena>(
+        modules: &[(String, &Program<'arena>, std::collections::HashMap<String, String>)],
         entry_module_id: &str,
         target: LuaTarget,
         with_source_map: bool,
@@ -389,8 +374,8 @@ impl CodeGenerator {
     /// # Returns
     /// Returns a tuple of (generated_code, optional_source_map)
     #[allow(clippy::too_many_arguments)]
-    pub fn generate_bundle_with_options(
-        modules: &[(String, &Program, std::collections::HashMap<String, String>)],
+    pub fn generate_bundle_with_options<'arena>(
+        modules: &[(String, &Program<'arena>, std::collections::HashMap<String, String>)],
         entry_module_id: &str,
         target: LuaTarget,
         with_source_map: bool,
@@ -453,7 +438,7 @@ impl CodeGenerator {
             for (module_id, program, _) in modules.iter() {
                 if let Some(hoistable) = hoisting_context.get_hoistable_declarations(module_id) {
                     // Generate hoisted functions
-                    for stmt in &program.statements {
+                    for stmt in program.statements.iter() {
                         Self::generate_hoisted_declaration_if_needed(
                             stmt,
                             module_id,
@@ -488,9 +473,8 @@ impl CodeGenerator {
                     true
                 }
             })
-            .map(|(idx, item)| (idx, item.0.clone(), (*item.1).clone(), item.2.clone()))
+            .map(|(idx, item)| (idx, item.0.clone(), item.1, item.2.clone()))
         {
-            let mut program = program;
             // Check if this module should be skipped (no reachable exports and not entry)
             if let Some(reachable) = reachable_set {
                 if module_id != entry_module_id {
@@ -544,7 +528,8 @@ impl CodeGenerator {
                 generator.emitter = generator.emitter.with_source_map(module_id.clone());
             }
 
-            let module_code = generator.generate(&mut program);
+            let mutable_program = crate::MutableProgram::from_program(program);
+            let module_code = generator.generate(&mutable_program);
 
             // Clone the source map builder from the generator for merging
             let module_source_map_builder = generator.emitter.clone_source_map();
@@ -647,7 +632,7 @@ impl CodeGenerator {
 
                         // Generate body
                         temp_gen.indent();
-                        for body_stmt in &func_decl.body.statements {
+                        for body_stmt in func_decl.body.statements.iter() {
                             temp_gen.generate_statement(body_stmt);
                         }
                         temp_gen.dedent();
@@ -884,6 +869,8 @@ mod tests {
         lua51::Lua51Strategy, lua52::Lua52Strategy, lua53::Lua53Strategy,
     };
     use crate::diagnostics::CollectingDiagnosticHandler;
+    use crate::MutableProgram;
+    use bumpalo::Bump;
     use std::sync::Arc;
     use typedlua_parser::ast::expression::BinaryOp;
     use typedlua_parser::lexer::Lexer;
@@ -894,13 +881,15 @@ mod tests {
         let handler = Arc::new(CollectingDiagnosticHandler::new());
         let (interner, common) = StringInterner::new_with_common_identifiers();
         let interner = Arc::new(interner);
+        let arena = Bump::new();
         let mut lexer = Lexer::new(source, handler.clone(), &interner);
         let tokens = lexer.tokenize().expect("Lexing failed");
-        let mut parser = Parser::new(tokens, handler, &interner, &common);
-        let mut program = parser.parse().expect("Parsing failed");
+        let mut parser = Parser::new(tokens, handler, &interner, &common, &arena);
+        let program = parser.parse().expect("Parsing failed");
+        let mutable = MutableProgram::from_program(&program);
 
         let mut generator = CodeGenerator::new(interner.clone());
-        generator.generate(&mut program)
+        generator.generate(&mutable)
     }
 
     #[test]
@@ -948,13 +937,15 @@ mod tests {
         let handler = Arc::new(CollectingDiagnosticHandler::new());
         let (interner, common) = StringInterner::new_with_common_identifiers();
         let interner = Arc::new(interner);
+        let arena = Bump::new();
         let mut lexer = Lexer::new(source, handler.clone(), &interner);
         let tokens = lexer.tokenize().expect("Lexing failed");
-        let mut parser = Parser::new(tokens, handler, &interner, &common);
-        let mut program = parser.parse().expect("Parsing failed");
+        let mut parser = Parser::new(tokens, handler, &interner, &common, &arena);
+        let program = parser.parse().expect("Parsing failed");
+        let mutable = MutableProgram::from_program(&program);
 
         let mut generator = CodeGenerator::new(interner.clone()).with_target(target);
-        generator.generate(&mut program)
+        generator.generate(&mutable)
     }
 
     #[test]
@@ -1183,9 +1174,10 @@ const withBackslash = "path\\to\\file"
         // Parse the generated code again - should not panic
         let handler = Arc::new(CollectingDiagnosticHandler::new());
         let (interner, common) = StringInterner::new_with_common_identifiers();
+        let arena = Bump::new();
         let mut lexer = Lexer::new(&generated, handler.clone(), &interner);
         let tokens = lexer.tokenize().expect("Roundtrip lexing failed");
-        let mut parser = Parser::new(tokens, handler, &interner, &common);
+        let mut parser = Parser::new(tokens, handler, &interner, &common, &arena);
         let _program = parser.parse().expect("Roundtrip parsing failed");
     }
 
@@ -1194,9 +1186,10 @@ const withBackslash = "path\\to\\file"
 
         let handler = Arc::new(CollectingDiagnosticHandler::new());
         let (interner, common) = StringInterner::new_with_common_identifiers();
+        let arena = Bump::new();
         let mut lexer = Lexer::new(&generated, handler.clone(), &interner);
         let tokens = lexer.tokenize().expect("Roundtrip lexing failed");
-        let mut parser = Parser::new(tokens, handler, &interner, &common);
+        let mut parser = Parser::new(tokens, handler, &interner, &common, &arena);
         let _program = parser.parse().expect("Roundtrip parsing failed");
     }
 
@@ -1246,9 +1239,10 @@ const obj = { name = "John", age = 30 }
 
         let handler = Arc::new(CollectingDiagnosticHandler::new());
         let (interner, common) = StringInterner::new_with_common_identifiers();
+        let arena = Bump::new();
         let mut lexer = Lexer::new(&output, handler.clone(), &interner);
         let tokens = lexer.tokenize().expect("Roundtrip lexing failed");
-        let mut parser = Parser::new(tokens, handler, &interner, &common);
+        let mut parser = Parser::new(tokens, handler, &interner, &common, &arena);
         let _program = parser.parse().expect("Roundtrip parsing failed");
     }
 

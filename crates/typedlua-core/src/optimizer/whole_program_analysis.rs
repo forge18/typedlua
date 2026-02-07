@@ -26,7 +26,7 @@ impl WholeProgramAnalysis {
     /// This should be called sequentially after type checking, before parallel
     /// code generation begins. The resulting analysis is thread-safe and can
     /// be cloned cheaply (Arc) for each parallel worker.
-    pub fn build(programs: &[&Program], optimization_level: OptimizationLevel) -> Self {
+    pub fn build<'arena>(programs: &[&Program<'arena>], optimization_level: OptimizationLevel) -> Self {
         // Only build expensive analysis if O3+ optimization is enabled
         let class_hierarchy = if optimization_level >= OptimizationLevel::O3 {
             ClassHierarchy::build_multi_module(programs)

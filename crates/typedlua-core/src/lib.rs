@@ -39,12 +39,36 @@ pub use typedlua_parser::{
 };
 
 use std::path::PathBuf;
+use typedlua_parser::ast::statement::Statement;
+use typedlua_parser::span::Span;
+
+/// A mutable program representation for post-type-checking phases (optimizer, codegen).
+///
+/// After parsing and type checking (which use arena-allocated immutable AST),
+/// statements are cloned into a `Vec` so the optimizer can mutate them in-place.
+/// This follows the pattern of having separate representations for different phases,
+/// similar to how rustc has HIR (immutable) and MIR (mutable for optimization).
+#[derive(Debug, Clone)]
+pub struct MutableProgram<'arena> {
+    pub statements: Vec<Statement<'arena>>,
+    pub span: Span,
+}
+
+impl<'arena> MutableProgram<'arena> {
+    /// Convert an arena-allocated Program into a mutable representation.
+    pub fn from_program(program: &Program<'arena>) -> Self {
+        MutableProgram {
+            statements: program.statements.to_vec(),
+            span: program.span,
+        }
+    }
+}
 
 /// A module after parsing, before type checking.
 /// Foundation for parallel parsing infrastructure.
-pub struct ParsedModule {
+pub struct ParsedModule<'arena> {
     pub path: PathBuf,
-    pub ast: Program,
+    pub ast: Program<'arena>,
     pub interner: StringInterner,
     pub common_ids: CommonIdentifiers,
     pub diagnostics: Vec<Diagnostic>,

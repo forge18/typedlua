@@ -1,5 +1,6 @@
 #[test]
 fn time_100k_phases() {
+    use bumpalo::Bump;
     use std::sync::Arc;
     use std::time::Instant;
     use typedlua_core::diagnostics::CollectingDiagnosticHandler;
@@ -64,6 +65,7 @@ fn time_100k_phases() {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
     let interner = Arc::new(interner);
+    let arena = Bump::new();
 
     let start = Instant::now();
     let mut lexer = Lexer::new(&source, handler.clone(), &interner);
@@ -72,8 +74,8 @@ fn time_100k_phases() {
     println!("Lexing: {:?} ({} tokens)", lex_time, tokens.len());
 
     let start = Instant::now();
-    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-    let mut program = parser.parse().expect("Parsing failed");
+    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids, &arena);
+    let program = parser.parse().expect("Parsing failed");
     let parse_time = start.elapsed();
     println!(
         "Parsing: {:?} ({} statements)",
@@ -82,9 +84,9 @@ fn time_100k_phases() {
     );
 
     let start = Instant::now();
-    let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids);
+    let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids, &arena);
     type_checker
-        .check_program(&mut program)
+        .check_program(&program)
         .expect("Type checking failed");
     let typecheck_time = start.elapsed();
     println!("Type checking: {:?}", typecheck_time);

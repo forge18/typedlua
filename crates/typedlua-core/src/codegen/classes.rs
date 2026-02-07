@@ -52,7 +52,7 @@ impl CodeGenerator {
         if has_primary_constructor {
             self.generate_primary_constructor(class_decl, &class_name, base_class_name);
         } else if has_constructor {
-            for member in &class_decl.members {
+            for member in class_decl.members.iter() {
                 if let ClassMember::Constructor(ctor) = member {
                     self.generate_class_constructor(&class_name, ctor, class_decl.is_abstract);
                 }
@@ -93,7 +93,7 @@ impl CodeGenerator {
             self.writeln("end");
         }
 
-        for member in &class_decl.members {
+        for member in class_decl.members.iter() {
             match member {
                 ClassMember::Method(method) => {
                     self.generate_class_method(&class_name, method);
@@ -113,7 +113,7 @@ impl CodeGenerator {
 
         let mut has_operators = false;
 
-        for member in &class_decl.members {
+        for member in class_decl.members.iter() {
             if let ClassMember::Operator(_) = member {
                 has_operators = true;
                 break;
@@ -128,7 +128,7 @@ impl CodeGenerator {
             self.indent();
 
             let mut first = true;
-            for member in &class_decl.members {
+            for member in class_decl.members.iter() {
                 if let ClassMember::Operator(op) = member {
                     let metamethod_name = self.operator_kind_name(&op.operator);
                     self.write_indent();
@@ -150,7 +150,7 @@ impl CodeGenerator {
 
         if !class_decl.decorators.is_empty() {
             self.writeln("");
-            for decorator in &class_decl.decorators {
+            for decorator in class_decl.decorators.iter() {
                 self.write_indent();
                 self.write(&class_name);
                 self.write(" = ");
@@ -160,7 +160,7 @@ impl CodeGenerator {
         }
 
         self.writeln("");
-        for impl_type in &class_decl.implements {
+        for impl_type in class_decl.implements.iter() {
             if let typedlua_parser::ast::types::TypeKind::Reference(type_ref) = &impl_type.kind {
                 let interface_name = self.resolve(type_ref.name.node).to_string();
 
@@ -223,7 +223,7 @@ impl CodeGenerator {
         self.writeln(".__ownFields = {");
 
         self.indent();
-        for member in &class_decl.members {
+        for member in class_decl.members.iter() {
             if let ClassMember::Property(prop) = member {
                 let prop_name = self.resolve(prop.name.node).to_string();
                 self.write_indent();
@@ -243,7 +243,7 @@ impl CodeGenerator {
         self.writeln(".__ownMethods = {");
 
         self.indent();
-        for member in &class_decl.members {
+        for member in class_decl.members.iter() {
             if let ClassMember::Method(method) = member {
                 let method_name = self.resolve(method.name.node).to_string();
                 self.write_indent();
@@ -413,7 +413,7 @@ impl CodeGenerator {
     pub fn generate_interface_declaration(&mut self, iface_decl: &InterfaceDeclaration) {
         let interface_name = self.resolve(iface_decl.name.node).to_string();
 
-        for member in &iface_decl.members {
+        for member in iface_decl.members.iter() {
             if let InterfaceMember::Method(method) = member {
                 if let Some(body) = &method.body {
                     let method_name = self.resolve(method.name.node).to_string();
@@ -425,7 +425,7 @@ impl CodeGenerator {
                     self.write(&default_fn_name);
                     self.write("(self");
 
-                    for param in &method.parameters {
+                    for param in method.parameters.iter() {
                         self.write(", ");
                         self.generate_pattern(&param.pattern);
                     }
@@ -460,7 +460,7 @@ impl CodeGenerator {
             self.write(class_name);
             self.write("._init(self");
 
-            for param in &ctor.parameters {
+            for param in ctor.parameters.iter() {
                 self.write(", ");
                 self.generate_pattern(&param.pattern);
             }
@@ -514,7 +514,7 @@ impl CodeGenerator {
             self.write_indent();
             self.write(class_name);
             self.write("._init(self");
-            for param in &ctor.parameters {
+            for param in ctor.parameters.iter() {
                 self.write(", ");
                 self.generate_pattern(&param.pattern);
             }
@@ -581,7 +581,7 @@ impl CodeGenerator {
         class_name: &str,
         base_class_name: Option<parser::string_interner::StringId>,
     ) {
-        let primary_params = class_decl.primary_constructor.as_ref().unwrap();
+        let primary_params = class_decl.primary_constructor.unwrap();
 
         self.writeln("");
         self.write_indent();
@@ -598,13 +598,13 @@ impl CodeGenerator {
 
         self.indent();
 
-        if let Some(parent_args) = &class_decl.parent_constructor_args {
+        if let Some(parent_args) = class_decl.parent_constructor_args {
             if let Some(parent_name) = base_class_name {
                 self.write_indent();
                 let parent_name_str = self.resolve(parent_name);
                 self.write(&parent_name_str);
                 self.write("._init(self");
-                for arg in parent_args {
+                for arg in parent_args.iter() {
                     self.write(", ");
                     self.generate_expression(arg);
                 }
@@ -729,7 +729,7 @@ impl CodeGenerator {
         self.writeln("end");
 
         if !method.decorators.is_empty() {
-            for decorator in &method.decorators {
+            for decorator in method.decorators.iter() {
                 self.write_indent();
                 self.write(class_name);
                 self.write(".");
@@ -822,7 +822,7 @@ impl CodeGenerator {
         self.write_indent();
         self.writeln("end");
 
-        for decorator in &op.decorators {
+        for decorator in op.decorators.iter() {
             self.write_indent();
             self.write(class_name);
             self.write(".");

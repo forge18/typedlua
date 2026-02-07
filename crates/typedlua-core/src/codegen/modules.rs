@@ -131,7 +131,7 @@ impl CodeGenerator {
                 if let Some(source_path) = source {
                     self.generate_re_export(specifiers, source_path);
                 } else {
-                    for spec in specifiers {
+                    for spec in specifiers.iter() {
                         let export_name = self.resolve(spec.local.node).to_string();
 
                         // Tree shaking: skip unreachable exports

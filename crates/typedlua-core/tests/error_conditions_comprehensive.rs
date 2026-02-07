@@ -8,11 +8,12 @@
 #![allow(unused_variables)]
 #![allow(dead_code)]
 
+use bumpalo::Bump;
 use std::sync::Arc;
 use typedlua_core::codegen::CodeGenerator;
 use typedlua_core::config::CompilerOptions;
 use typedlua_core::diagnostics::{CollectingDiagnosticHandler, DiagnosticHandler, DiagnosticLevel};
-use typedlua_core::TypeChecker;
+use typedlua_core::{MutableProgram, TypeChecker};
 use typedlua_parser::lexer::Lexer;
 use typedlua_parser::parser::Parser;
 use typedlua_parser::string_interner::StringInterner;
@@ -24,6 +25,7 @@ fn compile_with_diagnostics(
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let (interner, common_ids) = StringInterner::new_with_common_identifiers();
     let interner = Arc::new(interner);
+    let arena = Bump::new();
 
     // Lex
     let mut lexer = Lexer::new(source, handler.clone(), &interner);
@@ -35,8 +37,8 @@ fn compile_with_diagnostics(
     };
 
     // Parse
-    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids);
-    let mut program = match parser.parse() {
+    let mut parser = Parser::new(tokens, handler.clone(), &interner, &common_ids, &arena);
+    let program = match parser.parse() {
         Ok(p) => p,
         Err(e) => {
             return (Err(format!("Parsing failed: {:?}", e)), handler);
@@ -49,9 +51,9 @@ fn compile_with_diagnostics(
     }
 
     // Type check
-    let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids)
+    let mut type_checker = TypeChecker::new(handler.clone(), &interner, &common_ids, &arena)
         .with_options(CompilerOptions::default());
-    if let Err(e) = type_checker.check_program(&mut program) {
+    if let Err(e) = type_checker.check_program(&program) {
         return (Err(e.message), handler);
     }
 
@@ -61,8 +63,9 @@ fn compile_with_diagnostics(
     }
 
     // Generate code
+    let mutable = MutableProgram::from_program(&program);
     let mut codegen = CodeGenerator::new(interner.clone());
-    let output = codegen.generate(&mut program);
+    let output = codegen.generate(&mutable);
 
     (Ok(output), handler)
 }

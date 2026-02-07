@@ -116,7 +116,7 @@ impl<'a> ReachabilityAnalysis<'a> {
     }
 
     fn collect_exports(&self, program: &Program, exports: &mut HashSet<(StringId, String)>) {
-        for statement in &program.statements {
+        for statement in program.statements.iter() {
             match statement {
                 Statement::Export(decl) => match &decl.kind {
                     ExportKind::Declaration(inner) => {
@@ -125,7 +125,7 @@ impl<'a> ReachabilityAnalysis<'a> {
                         }
                     }
                     ExportKind::Named { specifiers, .. } => {
-                        for spec in specifiers {
+                        for spec in specifiers.iter() {
                             let id = match &spec.exported {
                                 Some(exported) => exported.node,
                                 None => spec.local.node,
@@ -228,7 +228,7 @@ impl<'a> ReachabilityAnalysis<'a> {
     }
 
     fn collect_imports(&self, program: &Program, imports: &mut Vec<(String, StringId, String)>) {
-        for statement in &program.statements {
+        for statement in program.statements.iter() {
             if let Statement::Import(import_decl) = statement {
                 let source = import_decl.source.clone();
                 match &import_decl.clause {
@@ -239,7 +239,7 @@ impl<'a> ReachabilityAnalysis<'a> {
                     }
                     typedlua_parser::ast::statement::ImportClause::Named(specifiers)
                     | typedlua_parser::ast::statement::ImportClause::TypeOnly(specifiers) => {
-                        for spec in specifiers {
+                        for spec in specifiers.iter() {
                             let id = spec.imported.node;
                             let name = self.resolve_string(id);
                             imports.push((source.clone(), id, name));
@@ -254,7 +254,7 @@ impl<'a> ReachabilityAnalysis<'a> {
                         let default_id = default.node;
                         let default_name = self.resolve_string(default_id);
                         imports.push((source.clone(), default_id, default_name));
-                        for spec in named {
+                        for spec in named.iter() {
                             let id = spec.imported.node;
                             let name = self.resolve_string(id);
                             imports.push((source.clone(), id, name));
@@ -358,31 +358,34 @@ impl<'a> ReachabilityAnalysis<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bumpalo::Bump;
     use crate::diagnostics::CollectingDiagnosticHandler;
     use std::sync::Arc;
     use typedlua_parser::lexer::Lexer;
     use typedlua_parser::parser::Parser;
 
-    fn create_program(
+    fn create_program<'arena>(
         source: &str,
         interner: &StringInterner,
         common: &typedlua_parser::string_interner::CommonIdentifiers,
-    ) -> Program {
+        arena: &'arena Bump,
+    ) -> Program<'arena> {
         let handler = Arc::new(CollectingDiagnosticHandler::new());
         let mut lexer = Lexer::new(source, handler.clone(), interner);
         let tokens = lexer.tokenize().expect("Lexing failed");
-        let mut parser = Parser::new(tokens, handler, interner, common);
+        let mut parser = Parser::new(tokens, handler, interner, common, arena);
         parser.parse().expect("Parsing failed")
     }
 
     #[test]
     fn test_single_module_reachable() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
         let source = r#"
             export function add(a, b) return a + b end
             const x = 42
         "#;
-        let program = create_program(source, &interner, &common);
+        let program = create_program(source, &interner, &common, &arena);
         let mut modules: HashMap<String, Program> = HashMap::default();
         modules.insert("main.lua".to_string(), program);
 
@@ -396,6 +399,7 @@ mod tests {
 
     #[test]
     fn test_simple_import_chain() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
 
         let main_source = r#"
@@ -408,8 +412,8 @@ mod tests {
             export function sub(a, b) return a - b end
         "#;
 
-        let main_program = create_program(main_source, &interner, &common);
-        let math_program = create_program(math_source, &interner, &common);
+        let main_program = create_program(main_source, &interner, &common, &arena);
+        let math_program = create_program(math_source, &interner, &common, &arena);
 
         let mut modules: HashMap<String, Program> = HashMap::default();
         modules.insert("main.lua".to_string(), main_program);
@@ -425,6 +429,7 @@ mod tests {
 
     #[test]
     fn test_unused_module_not_reachable() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
 
         let main_source = r#"
@@ -435,8 +440,8 @@ mod tests {
             export function unused() return 1 end
         "#;
 
-        let main_program = create_program(main_source, &interner, &common);
-        let unused_program = create_program(unused_source, &interner, &common);
+        let main_program = create_program(main_source, &interner, &common, &arena);
+        let unused_program = create_program(unused_source, &interner, &common, &arena);
 
         let mut modules: HashMap<String, Program> = HashMap::default();
         modules.insert("main.lua".to_string(), main_program);
@@ -451,6 +456,7 @@ mod tests {
 
     #[test]
     fn test_circular_dependencies() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
 
         let a_source = r#"
@@ -463,8 +469,8 @@ mod tests {
             export function b_fn() return a_fn() end
         "#;
 
-        let a_program = create_program(a_source, &interner, &common);
-        let b_program = create_program(b_source, &interner, &common);
+        let a_program = create_program(a_source, &interner, &common, &arena);
+        let b_program = create_program(b_source, &interner, &common, &arena);
 
         let mut modules: HashMap<String, Program> = HashMap::default();
         modules.insert("a.lua".to_string(), a_program);
@@ -481,6 +487,7 @@ mod tests {
 
     #[test]
     fn test_transitive_dependencies() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
 
         let main_source = r#"
@@ -497,9 +504,9 @@ mod tests {
             export function formatGreeting(name) return "Hello, " .. name end
         "#;
 
-        let main_program = create_program(main_source, &interner, &common);
-        let greeter_program = create_program(greeter_source, &interner, &common);
-        let utils_program = create_program(utils_source, &interner, &common);
+        let main_program = create_program(main_source, &interner, &common, &arena);
+        let greeter_program = create_program(greeter_source, &interner, &common, &arena);
+        let utils_program = create_program(utils_source, &interner, &common, &arena);
 
         let mut modules: HashMap<String, Program> = HashMap::default();
         modules.insert("main.lua".to_string(), main_program);
@@ -518,6 +525,7 @@ mod tests {
 
     #[test]
     fn test_namespace_import() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
 
         let main_source = r#"
@@ -529,8 +537,8 @@ mod tests {
             export function add(a, b) return a + b end
         "#;
 
-        let main_program = create_program(main_source, &interner, &common);
-        let math_program = create_program(math_source, &interner, &common);
+        let main_program = create_program(main_source, &interner, &common, &arena);
+        let math_program = create_program(math_source, &interner, &common, &arena);
 
         let mut modules: HashMap<String, Program> = HashMap::default();
         modules.insert("main.lua".to_string(), main_program);
@@ -545,6 +553,7 @@ mod tests {
 
     #[test]
     fn test_default_export() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
 
         let main_source = r#"
@@ -556,8 +565,8 @@ mod tests {
             export default function() return 42 end
         "#;
 
-        let main_program = create_program(main_source, &interner, &common);
-        let module_program = create_program(module_source, &interner, &common);
+        let main_program = create_program(main_source, &interner, &common, &arena);
+        let module_program = create_program(module_source, &interner, &common, &arena);
 
         let mut modules: HashMap<String, Program> = HashMap::default();
         modules.insert("main.lua".to_string(), main_program);
@@ -572,11 +581,12 @@ mod tests {
 
     #[test]
     fn test_entry_point_always_reachable() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
         let source = r#"
             function internal() return 1 end
         "#;
-        let program = create_program(source, &interner, &common);
+        let program = create_program(source, &interner, &common, &arena);
         let mut modules: HashMap<String, Program> = HashMap::default();
         modules.insert("deeply/nested/module.lua".to_string(), program);
 
@@ -588,6 +598,7 @@ mod tests {
 
     #[test]
     fn test_reachable_exports_output() {
+        let arena = Bump::new();
         let (interner, common) = StringInterner::new_with_common_identifiers();
 
         let main_source = r#"
@@ -600,8 +611,8 @@ mod tests {
             export function unused() return 2 end
         "#;
 
-        let main_program = create_program(main_source, &interner, &common);
-        let dep_program = create_program(dep_source, &interner, &common);
+        let main_program = create_program(main_source, &interner, &common, &arena);
+        let dep_program = create_program(dep_source, &interner, &common, &arena);
 
         let mut modules: HashMap<String, Program> = HashMap::default();
         modules.insert("main.lua".to_string(), main_program);
