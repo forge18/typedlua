@@ -250,7 +250,7 @@ pub trait WholeProgramPass<'arena> {
 /// Uses clone-and-rebuild for sub-expression mutation: inner `&'arena` references
 /// are cloned to owned values, mutated, then allocated back into the arena.
 pub struct ExpressionCompositePass<'arena> {
-    visitors: Vec<Box<dyn ExprVisitor<'arena>>>,
+    visitors: Vec<Box<dyn ExprVisitor<'arena> + 'arena>>,
     _name: &'static str,
 }
 
@@ -262,8 +262,12 @@ impl<'arena> ExpressionCompositePass<'arena> {
         }
     }
 
-    pub fn add_visitor(&mut self, visitor: Box<dyn ExprVisitor<'arena>>) {
+    pub fn add_visitor(&mut self, visitor: Box<dyn ExprVisitor<'arena> + 'arena>) {
         self.visitors.push(visitor);
+    }
+
+    pub fn visitor_count(&self) -> usize {
+        self.visitors.len()
     }
 
     pub fn required_features(&self) -> AstFeatures {
@@ -407,7 +411,7 @@ impl<'arena> ExpressionCompositePass<'arena> {
 
 /// Composite pass that runs multiple statement visitors in one traversal.
 pub struct StatementCompositePass<'arena> {
-    visitors: Vec<Box<dyn StmtVisitor<'arena>>>,
+    visitors: Vec<Box<dyn StmtVisitor<'arena> + 'arena>>,
     _name: &'static str,
 }
 
@@ -419,8 +423,12 @@ impl<'arena> StatementCompositePass<'arena> {
         }
     }
 
-    pub fn add_visitor(&mut self, visitor: Box<dyn StmtVisitor<'arena>>) {
+    pub fn add_visitor(&mut self, visitor: Box<dyn StmtVisitor<'arena> + 'arena>) {
         self.visitors.push(visitor);
+    }
+
+    pub fn visitor_count(&self) -> usize {
+        self.visitors.len()
     }
 
     pub fn required_features(&self) -> AstFeatures {
@@ -527,8 +535,8 @@ impl<'arena> StatementCompositePass<'arena> {
 
 /// Composite pass that runs multiple visitors with pre-analysis.
 pub struct AnalysisCompositePass<'arena> {
-    pre_analyzers: Vec<Box<dyn PreAnalysisPass<'arena>>>,
-    visitors: Vec<Box<dyn StmtVisitor<'arena>>>,
+    pre_analyzers: Vec<Box<dyn PreAnalysisPass<'arena> + 'arena>>,
+    visitors: Vec<Box<dyn StmtVisitor<'arena> + 'arena>>,
     _name: &'static str,
 }
 
@@ -541,12 +549,16 @@ impl<'arena> AnalysisCompositePass<'arena> {
         }
     }
 
-    pub fn add_pre_analyzer(&mut self, analyzer: Box<dyn PreAnalysisPass<'arena>>) {
+    pub fn add_pre_analyzer(&mut self, analyzer: Box<dyn PreAnalysisPass<'arena> + 'arena>) {
         self.pre_analyzers.push(analyzer);
     }
 
-    pub fn add_visitor(&mut self, visitor: Box<dyn StmtVisitor<'arena>>) {
+    pub fn add_visitor(&mut self, visitor: Box<dyn StmtVisitor<'arena> + 'arena>) {
         self.visitors.push(visitor);
+    }
+
+    pub fn visitor_count(&self) -> usize {
+        self.visitors.len()
     }
 
     pub fn required_features(&self) -> AstFeatures {
@@ -1080,21 +1092,21 @@ impl<'arena> Optimizer<'arena> {
             .push(Box::new(GlobalLocalizationPass::new(interner.clone())));
     }
 
-    /// Returns the number of registered passes
+    /// Returns the number of registered passes (counting individual visitors within composites)
     pub fn pass_count(&self) -> usize {
         let mut count = 0;
 
-        if self.expr_pass.is_some() {
-            count += 1;
+        if let Some(ref expr_pass) = self.expr_pass {
+            count += expr_pass.visitor_count();
         }
-        if self.elim_pass.is_some() {
-            count += 1;
+        if let Some(ref elim_pass) = self.elim_pass {
+            count += elim_pass.visitor_count();
         }
-        if self.func_pass.is_some() {
-            count += 1;
+        if let Some(ref func_pass) = self.func_pass {
+            count += func_pass.visitor_count();
         }
-        if self.data_pass.is_some() {
-            count += 1;
+        if let Some(ref data_pass) = self.data_pass {
+            count += data_pass.visitor_count();
         }
 
         count += self.standalone_passes.len();
@@ -1106,17 +1118,35 @@ impl<'arena> Optimizer<'arena> {
     pub fn pass_names(&self) -> Vec<&'static str> {
         let mut names = Vec::new();
 
-        if self.expr_pass.is_some() {
-            names.push("expression-transforms");
+        // expr_pass contains: constant-folding, algebraic-simplification, [operator-inlining at O3]
+        if let Some(ref ep) = self.expr_pass {
+            // O1 base passes
+            if ep.visitor_count() >= 1 { names.push("constant-folding"); }
+            if ep.visitor_count() >= 2 { names.push("algebraic-simplification"); }
+            // O3 adds operator-inlining
+            if ep.visitor_count() >= 3 { names.push("operator-inlining"); }
         }
-        if self.elim_pass.is_some() {
-            names.push("elimination-transforms");
+
+        // elim_pass contains: dead-code-elimination, dead-store-elimination
+        if let Some(ref elp) = self.elim_pass {
+            if elp.visitor_count() >= 1 { names.push("dead-code-elimination"); }
+            if elp.visitor_count() >= 2 { names.push("dead-store-elimination"); }
         }
-        if self.func_pass.is_some() {
-            names.push("function-transforms");
+
+        // data_pass contains: table-preallocation, string-concat-optimization
+        if let Some(ref dp) = self.data_pass {
+            if dp.visitor_count() >= 1 { names.push("table-preallocation"); }
+            if dp.visitor_count() >= 2 { names.push("string-concat-optimization"); }
         }
-        if self.data_pass.is_some() {
-            names.push("data-structure-transforms");
+
+        // func_pass contains: function-inlining, tail-call-optimization, method-to-function-conversion
+        //   [O3 adds: aggressive-inlining, interface-method-inlining]
+        if let Some(ref fp) = self.func_pass {
+            if fp.visitor_count() >= 1 { names.push("function-inlining"); }
+            if fp.visitor_count() >= 2 { names.push("tail-call-optimization"); }
+            if fp.visitor_count() >= 3 { names.push("method-to-function-conversion"); }
+            if fp.visitor_count() >= 4 { names.push("aggressive-inlining"); }
+            if fp.visitor_count() >= 5 { names.push("interface-method-inlining"); }
         }
 
         for pass in &self.standalone_passes {

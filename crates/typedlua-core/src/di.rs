@@ -211,7 +211,7 @@ impl DiContainer {
         let mut mutable_program = crate::MutableProgram::from_program(&program);
 
         let mut optimizer = Optimizer::new(level, typecheck_handler.clone(), interner.clone());
-        if let Err(err_msg) = optimizer.optimize(&mut mutable_program) {
+        if let Err(err_msg) = optimizer.optimize(&mut mutable_program, &arena) {
             typecheck_handler.warning(
                 typedlua_parser::span::Span::dummy(),
                 &format!("Optimization warning: {}", err_msg),
@@ -262,7 +262,7 @@ impl DiContainer {
         let mut mutable_program = crate::MutableProgram::from_program(&program);
 
         let mut optimizer = Optimizer::new(level, typecheck_handler.clone(), interner.clone());
-        if let Err(err_msg) = optimizer.optimize(&mut mutable_program) {
+        if let Err(err_msg) = optimizer.optimize(&mut mutable_program, &arena) {
             typecheck_handler.warning(
                 typedlua_parser::span::Span::dummy(),
                 &format!("Optimization warning: {}", err_msg),

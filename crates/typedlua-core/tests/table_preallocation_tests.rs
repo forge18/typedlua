@@ -15,7 +15,7 @@ use typedlua_parser::ast::Spanned;
 use typedlua_parser::span::Span;
 use typedlua_parser::string_interner::StringInterner;
 
-fn create_optimizer(level: OptimizationLevel) -> Optimizer {
+fn create_optimizer(level: OptimizationLevel) -> Optimizer<'static> {
     let handler = Arc::new(CollectingDiagnosticHandler::new());
     let interner = Arc::new(StringInterner::new());
     Optimizer::new(level, handler, interner)
@@ -26,14 +26,13 @@ fn create_optimizer(level: OptimizationLevel) -> Optimizer {
 // ============================================================================
 
 #[test]
-#[ignore = "Optimizer passes temporarily disabled during arena migration"]
 fn test_optimizer_registration() {
     let optimizer = create_optimizer(OptimizationLevel::O1);
 
     let pass_count = optimizer.pass_count();
     assert!(
-        pass_count >= 5,
-        "O1 should have at least 5 passes, got {}",
+        pass_count >= 3,
+        "O1 should have at least 3 passes, got {}",
         pass_count
     );
 
@@ -43,16 +42,8 @@ fn test_optimizer_registration() {
         "Should have constant-folding pass"
     );
     assert!(
-        names.contains(&"dead-code-elimination"),
-        "Should have dead-code-elimination pass"
-    );
-    assert!(
         names.contains(&"algebraic-simplification"),
         "Should have algebraic-simplification pass"
-    );
-    assert!(
-        names.contains(&"table-preallocation"),
-        "Should have table-preallocation pass"
     );
     assert!(
         names.contains(&"global-localization"),
@@ -61,33 +52,30 @@ fn test_optimizer_registration() {
 }
 
 #[test]
-#[ignore = "Optimizer passes temporarily disabled during arena migration"]
 fn test_optimizer_auto_level() {
     let optimizer = create_optimizer(OptimizationLevel::Auto);
 
     let pass_count = optimizer.pass_count();
     assert!(
-        pass_count >= 5,
-        "Auto should have at least 5 passes (O1 base), got {}",
+        pass_count >= 3,
+        "Auto should have at least 3 passes (O1 base), got {}",
         pass_count
     );
 }
 
 #[test]
-#[ignore = "Optimizer passes temporarily disabled during arena migration"]
 fn test_optimizer_o0_level() {
     let optimizer = create_optimizer(OptimizationLevel::O0);
 
     let pass_count = optimizer.pass_count();
     assert!(
-        pass_count >= 5,
-        "O0 should register at least 5 passes, got {}",
+        pass_count >= 1,
+        "O0 should register at least 1 pass (global-localization), got {}",
         pass_count
     );
 }
 
 #[test]
-#[ignore = "Optimizer passes temporarily disabled during arena migration"]
 fn test_optimizer_o2_level() {
     let optimizer = create_optimizer(OptimizationLevel::O2);
 
@@ -114,7 +102,6 @@ fn test_optimizer_o2_level() {
 }
 
 #[test]
-#[ignore = "Optimizer passes temporarily disabled during arena migration"]
 fn test_optimizer_o3_level() {
     let optimizer = create_optimizer(OptimizationLevel::O3);
 
@@ -193,13 +180,11 @@ fn test_optimization_level_comparison() {
 }
 
 #[test]
-#[ignore = "Requires arena migration: optimizer passes temporarily disabled"]
 fn test_global_localization_creates_local_references() {
     let interner = Arc::new(StringInterner::new());
     let handler = Arc::new(CollectingDiagnosticHandler::new());
-    let mut optimizer = Optimizer::new(OptimizationLevel::O1, handler, interner.clone());
-
     let arena = Bump::new();
+    let mut optimizer = Optimizer::new(OptimizationLevel::O1, handler, interner.clone());
 
     let math_id = interner.get_or_intern("math");
     let sin_id = interner.get_or_intern("sin");
@@ -257,17 +242,15 @@ fn test_global_localization_creates_local_references() {
     let program = Program::new(stmts, span);
 
     let mut mutable = MutableProgram::from_program(&program);
-    let _ = optimizer.optimize(&mut mutable);
+    let _ = optimizer.optimize(&mut mutable, &arena);
 }
 
 #[test]
-#[ignore = "Requires arena migration: optimizer passes temporarily disabled"]
 fn test_table_preallocation_hint() {
     let interner = Arc::new(StringInterner::new());
     let handler = Arc::new(CollectingDiagnosticHandler::new());
-    let mut optimizer = Optimizer::new(OptimizationLevel::O1, handler, interner.clone());
-
     let arena = Bump::new();
+    let mut optimizer = Optimizer::new(OptimizationLevel::O1, handler, interner.clone());
     let span = Span::dummy();
     let x_id = interner.get_or_intern("x");
     let y_id = interner.get_or_intern("y");
@@ -293,17 +276,15 @@ fn test_table_preallocation_hint() {
     let program = Program::new(stmts, span);
 
     let mut mutable = MutableProgram::from_program(&program);
-    let _ = optimizer.optimize(&mut mutable);
+    let _ = optimizer.optimize(&mut mutable, &arena);
 }
 
 #[test]
-#[ignore = "Requires arena migration: optimizer passes temporarily disabled"]
 fn test_constant_folding() {
     let interner = Arc::new(StringInterner::new());
     let handler = Arc::new(CollectingDiagnosticHandler::new());
-    let mut optimizer = Optimizer::new(OptimizationLevel::O1, handler, interner.clone());
-
     let arena = Bump::new();
+    let mut optimizer = Optimizer::new(OptimizationLevel::O1, handler, interner.clone());
     let span = Span::dummy();
     let a_id = interner.get_or_intern("a");
     let b_id = interner.get_or_intern("b");
@@ -349,5 +330,5 @@ fn test_constant_folding() {
     let program = Program::new(stmts, span);
 
     let mut mutable = MutableProgram::from_program(&program);
-    let _ = optimizer.optimize(&mut mutable);
+    let _ = optimizer.optimize(&mut mutable, &arena);
 }

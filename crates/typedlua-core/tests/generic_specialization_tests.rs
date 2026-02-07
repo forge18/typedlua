@@ -64,13 +64,11 @@ fn number_type(span: Span) -> Type<'static> {
 // =============================================================================
 
 #[test]
-#[ignore = "Requires arena migration: optimizer passes temporarily disabled"]
 fn test_simple_identity_specialization() {
     let interner = Arc::new(StringInterner::new());
     let handler = Arc::new(CollectingDiagnosticHandler::new());
-    let mut optimizer = Optimizer::new(OptimizationLevel::O3, handler, interner.clone());
-
     let arena = Bump::new();
+    let mut optimizer = Optimizer::new(OptimizationLevel::O3, handler, interner.clone());
     let span = Span::dummy();
 
     // Intern identifiers
@@ -159,7 +157,7 @@ fn test_simple_identity_specialization() {
 
     // Run optimization via MutableProgram
     let mut mutable = MutableProgram::from_program(&program);
-    let result = optimizer.optimize(&mut mutable);
+    let result = optimizer.optimize(&mut mutable, &arena);
     assert!(result.is_ok(), "Optimization should succeed");
 
     // Check that a specialized function was created
