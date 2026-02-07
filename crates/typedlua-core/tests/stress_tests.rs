@@ -453,7 +453,6 @@ fn test_mixed_stress_scenario() {
 }
 
 #[test]
-#[ignore = "Recursive type aliases require cycle detection in type alias expansion (tracked in TODO)"]
 fn test_polymorphic_recursive_types() {
     let input = r#"
         type List1<T> = T | List1<T>[]
