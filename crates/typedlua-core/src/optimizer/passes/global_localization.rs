@@ -84,7 +84,7 @@ impl GlobalLocalizationPass {
             Pattern::Array(arr) => {
                 for elem in arr.elements {
                     match elem {
-                        typedlua_parser::ast::pattern::ArrayPatternElement::Pattern(p, _) => {
+                        typedlua_parser::ast::pattern::ArrayPatternElement::Pattern(typedlua_parser::ast::pattern::PatternWithDefault { pattern: p, .. }) => {
                             self.collect_pattern_names(p, locals);
                         }
                         typedlua_parser::ast::pattern::ArrayPatternElement::Rest(ident) => {
