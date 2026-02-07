@@ -1044,8 +1044,11 @@ impl<'arena> Optimizer<'arena> {
         if level >= OptimizationLevel::O2 {
             let mut elim_pass = StatementCompositePass::new("elimination-transforms");
             elim_pass.add_visitor(Box::new(DeadCodeEliminationPass::new()));
-            elim_pass.add_visitor(Box::new(DeadStoreEliminationPass::new()));
             self.elim_pass = Some(elim_pass);
+
+            // Dead store elimination needs whole-program view (inter-statement liveness)
+            self.standalone_passes
+                .push(Box::new(DeadStoreEliminationPass::new()));
 
             let mut data_pass = ExpressionCompositePass::new("data-structure-transforms");
             data_pass.add_visitor(Box::new(TablePreallocationPass::new()));
@@ -1127,10 +1130,9 @@ impl<'arena> Optimizer<'arena> {
             if ep.visitor_count() >= 3 { names.push("operator-inlining"); }
         }
 
-        // elim_pass contains: dead-code-elimination, dead-store-elimination
+        // elim_pass contains: dead-code-elimination
         if let Some(ref elp) = self.elim_pass {
             if elp.visitor_count() >= 1 { names.push("dead-code-elimination"); }
-            if elp.visitor_count() >= 2 { names.push("dead-store-elimination"); }
         }
 
         // data_pass contains: table-preallocation, string-concat-optimization

@@ -1,6 +1,7 @@
 use super::super::config::OptimizationLevel;
 use super::CodeGenerator;
 use typedlua_parser::ast::pattern::{ArrayPattern, ArrayPatternElement, ObjectPattern, Pattern, PatternWithDefault};
+use typedlua_parser::prelude::Expression;
 use typedlua_parser::ast::statement::*;
 use typedlua_parser::prelude::Block;
 
@@ -172,56 +173,69 @@ impl CodeGenerator {
         }
     }
 
+    /// Write a property access expression: source.key or source[computed_expr]
+    fn write_property_access(
+        &mut self,
+        source: &str,
+        key_str: &str,
+        computed_key: &Option<Expression>,
+    ) {
+        if let Some(expr) = computed_key {
+            self.write(&format!("{}[", source));
+            self.generate_expression(expr);
+            self.write("]");
+        } else {
+            self.write(&format!("{}.{}", source, key_str));
+        }
+    }
+
     /// Generate object destructuring assignments
     pub fn generate_object_destructuring(&mut self, pattern: &ObjectPattern, source: &str) {
         for prop in pattern.properties.iter() {
             let key_str = self.resolve(prop.key.node);
 
             if let Some(value_pattern) = &prop.value {
-                // { key: pattern }
+                // { key: pattern } or { [expr]: pattern }
                 match value_pattern {
                     Pattern::Identifier(ident) => {
                         self.write_indent();
                         self.write("local ");
                         let resolved = self.resolve(ident.node);
                         self.write(&resolved);
-                        self.write(&format!(" = {}.{}", source, key_str));
+                        self.write(" = ");
+                        self.write_property_access(source, &key_str, &prop.computed_key);
                         self.writeln("");
                     }
                     Pattern::Array(nested_array) => {
-                        // Nested array destructuring
                         let temp_var = format!("__temp_{}", key_str);
                         self.write_indent();
                         self.write("local ");
                         self.write(&temp_var);
-                        self.write(&format!(" = {}.{}", source, key_str));
+                        self.write(" = ");
+                        self.write_property_access(source, &key_str, &prop.computed_key);
                         self.writeln("");
                         self.generate_array_destructuring(nested_array, &temp_var);
                     }
                     Pattern::Object(nested_obj) => {
-                        // Nested object destructuring
                         let temp_var = format!("__temp_{}", key_str);
                         self.write_indent();
                         self.write("local ");
                         self.write(&temp_var);
-                        self.write(&format!(" = {}.{}", source, key_str));
+                        self.write(" = ");
+                        self.write_property_access(source, &key_str, &prop.computed_key);
                         self.writeln("");
                         self.generate_object_destructuring(nested_obj, &temp_var);
                     }
-                    Pattern::Wildcard(_) | Pattern::Literal(_, _) => {
-                        // Skip - don't bind anything
-                    }
-                    Pattern::Or(_) => {
-                        // Or-patterns should not appear in destructuring
-                        // Skip - don't bind anything
-                    }
+                    Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
+                    Pattern::Or(_) => {}
                 }
             } else {
                 // Shorthand: { key } means { key: key }
                 self.write_indent();
                 self.write("local ");
                 self.write(&key_str);
-                self.write(&format!(" = {}.{}", source, key_str));
+                self.write(" = ");
+                self.write_property_access(source, &key_str, &prop.computed_key);
                 self.writeln("");
             }
         }
@@ -389,28 +403,57 @@ impl CodeGenerator {
                 self.writeln("end");
             }
             ForStatement::Generic(generic) => {
-                self.write_indent();
-                self.write("for ");
-                for (i, var) in generic.variables.iter().enumerate() {
-                    if i > 0 {
-                        self.write(", ");
+                if let Some(pattern) = &generic.pattern {
+                    // Destructuring for loop: for [a, b] in items do ... end
+                    // Desugars to: for _, __item in ipairs(items) do local a = __item[1] ... end
+                    self.write_indent();
+                    self.write("for _, __item in ipairs(");
+                    for (i, iter) in generic.iterators.iter().enumerate() {
+                        if i > 0 {
+                            self.write(", ");
+                        }
+                        self.generate_expression(iter);
                     }
-                    let var_name = self.resolve(var.node);
-                    self.write(&var_name);
-                }
-                self.write(" in ");
-                for (i, iter) in generic.iterators.iter().enumerate() {
-                    if i > 0 {
-                        self.write(", ");
+                    self.writeln(") do");
+                    self.indent();
+                    // Generate destructuring assignments at top of loop body
+                    match pattern {
+                        Pattern::Array(array_pattern) => {
+                            self.generate_array_destructuring(array_pattern, "__item");
+                        }
+                        Pattern::Object(obj_pattern) => {
+                            self.generate_object_destructuring(obj_pattern, "__item");
+                        }
+                        _ => {}
                     }
-                    self.generate_expression(iter);
+                    self.generate_block(&generic.body);
+                    self.dedent();
+                    self.write_indent();
+                    self.writeln("end");
+                } else {
+                    self.write_indent();
+                    self.write("for ");
+                    for (i, var) in generic.variables.iter().enumerate() {
+                        if i > 0 {
+                            self.write(", ");
+                        }
+                        let var_name = self.resolve(var.node);
+                        self.write(&var_name);
+                    }
+                    self.write(" in ");
+                    for (i, iter) in generic.iterators.iter().enumerate() {
+                        if i > 0 {
+                            self.write(", ");
+                        }
+                        self.generate_expression(iter);
+                    }
+                    self.writeln(" do");
+                    self.indent();
+                    self.generate_block(&generic.body);
+                    self.dedent();
+                    self.write_indent();
+                    self.writeln("end");
                 }
-                self.writeln(" do");
-                self.indent();
-                self.generate_block(&generic.body);
-                self.dedent();
-                self.write_indent();
-                self.writeln("end");
             }
         }
     }
