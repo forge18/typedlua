@@ -20,7 +20,7 @@
 use std::sync::Arc;
 use typedlua_parser::string_interner::StringInterner;
 
-use super::{CodeGenMode, CodeGenerator, LuaTarget};
+use super::{CodeGenMode, CodeGenerator, LuaTarget, ReflectionMode};
 use crate::config::{OptimizationLevel, OutputFormat};
 use crate::optimizer::WholeProgramAnalysis;
 
@@ -60,6 +60,7 @@ pub struct CodeGeneratorBuilder {
     output_format: OutputFormat,
     whole_program_analysis: Option<WholeProgramAnalysis>,
     reachable_exports: Option<std::collections::HashSet<String>>,
+    reflection_mode: ReflectionMode,
 }
 
 impl CodeGeneratorBuilder {
@@ -95,6 +96,7 @@ impl CodeGeneratorBuilder {
             output_format: OutputFormat::Readable,
             whole_program_analysis: None,
             reachable_exports: None,
+            reflection_mode: ReflectionMode::default(),
         }
     }
 
@@ -272,6 +274,12 @@ impl CodeGeneratorBuilder {
         self
     }
 
+    /// Sets the reflection metadata generation mode.
+    pub fn reflection_mode(mut self, mode: ReflectionMode) -> Self {
+        self.reflection_mode = mode;
+        self
+    }
+
     /// Sets the reachable exports for tree shaking in bundle mode.
     ///
     /// When tree shaking is enabled, exports not in this set will be skipped
@@ -332,6 +340,7 @@ impl CodeGeneratorBuilder {
         generator = generator.with_mode(self.mode);
         generator = generator.with_optimization_level(self.optimization_level);
         generator = generator.with_output_format(self.output_format);
+        generator = generator.with_reflection_mode(self.reflection_mode);
 
         if let Some(source_file) = self.source_map {
             generator = generator.with_source_map(source_file);

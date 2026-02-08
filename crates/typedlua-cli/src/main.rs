@@ -129,6 +129,10 @@ struct Cli {
     /// Disable scope hoisting (for debugging)
     #[arg(long)]
     no_scope_hoist: bool,
+
+    /// Reflection metadata mode (selective, full, none)
+    #[arg(long, value_name = "MODE", default_value = "selective")]
+    reflection: String,
 }
 
 fn main() -> anyhow::Result<()> {

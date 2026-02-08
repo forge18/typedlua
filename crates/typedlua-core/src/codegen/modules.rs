@@ -2,6 +2,12 @@ use super::{CodeGenMode, CodeGenerator};
 
 impl CodeGenerator {
     pub fn generate_import(&mut self, import: &typedlua_parser::ast::statement::ImportDeclaration) {
+        // Detect @std/reflection import - set flag and skip code generation
+        if import.source == "@std/reflection" {
+            self.has_reflection_import = true;
+            return;
+        }
+
         let (require_fn, module_path) = match &self.mode {
             CodeGenMode::Bundle { .. } => {
                 let resolved_id = self

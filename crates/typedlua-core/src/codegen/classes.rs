@@ -203,10 +203,9 @@ impl CodeGenerator {
 
         self.writeln("");
 
+        // -- Class infrastructure (always emitted) --
         let type_id = self.next_type_id;
         self.next_type_id += 1;
-
-        self.registered_types.insert(class_name.clone(), type_id);
 
         self.write_indent();
         self.write(&class_name);
@@ -217,46 +216,6 @@ impl CodeGenerator {
         self.write_indent();
         self.write(&class_name);
         self.writeln(&format!(".__typeId = {}", type_id));
-
-        self.write_indent();
-        self.write(&class_name);
-        self.writeln(".__ownFields = {");
-
-        self.indent();
-        for member in class_decl.members.iter() {
-            if let ClassMember::Property(prop) = member {
-                let prop_name = self.resolve(prop.name.node).to_string();
-                self.write_indent();
-                self.write(&format!(
-                    "{{ name = \"{}\", type = \"\", modifiers = {{}}",
-                    prop_name
-                ));
-                self.writeln(" },");
-            }
-        }
-        self.dedent();
-        self.write_indent();
-        self.writeln("}");
-
-        self.write_indent();
-        self.write(&class_name);
-        self.writeln(".__ownMethods = {");
-
-        self.indent();
-        for member in class_decl.members.iter() {
-            if let ClassMember::Method(method) = member {
-                let method_name = self.resolve(method.name.node).to_string();
-                self.write_indent();
-                self.write(&format!(
-                    "{{ name = \"{}\", params = {{}}, returnType = \"\" }}",
-                    method_name
-                ));
-                self.writeln(",");
-            }
-        }
-        self.dedent();
-        self.write_indent();
-        self.writeln("}");
 
         // Mark class as final if needed
         if class_decl.is_final {
@@ -299,12 +258,10 @@ impl CodeGenerator {
         self.write_indent();
         self.write(&class_name);
         self.writeln(".__ancestors = {");
-
         self.indent();
         self.write_indent();
         self.write(&format!("[{}] = true", type_id));
         self.writeln(",");
-
         self.dedent();
         self.write_indent();
         self.writeln("}");
@@ -383,31 +340,135 @@ impl CodeGenerator {
             self.writeln("end");
         }
 
-        self.writeln("");
-        self.writeln(
-            &typedlua_runtime::class::BUILD_ALL_FIELDS
-                .replace("{}", &class_name)
-                .replace("{}", &class_name)
-                .replace("{}", &class_name)
-                .replace("{}", &class_name)
-                .replace("{}", &class_name)
-                .replace("{}", &class_name)
-                .replace("{}", &class_name),
-        );
-        self.writeln("");
-        self.writeln(
-            &typedlua_runtime::class::BUILD_ALL_METHODS
-                .replace("{}", &class_name)
-                .replace("{}", &class_name)
-                .replace("{}", &class_name)
-                .replace("{}", &class_name)
-                .replace("{}", &class_name)
-                .replace("{}", &class_name)
-                .replace("{}", &class_name),
-        );
+        // -- Reflection metadata (gated on reflection mode) --
+        if self.should_emit_reflection() {
+            self.registered_types.insert(class_name.clone(), type_id);
+
+            // __ownFields with v2 bit flags
+            self.write_indent();
+            self.write(&class_name);
+            self.writeln(".__ownFields = {");
+            self.indent();
+            for member in class_decl.members.iter() {
+                if let ClassMember::Property(prop) = member {
+                    let prop_name = self.resolve(prop.name.node).to_string();
+                    let flags = Self::encode_field_flags(prop);
+                    let type_code = self.encode_type_code(&prop.type_annotation);
+                    self.write_indent();
+                    self.writeln(&format!(
+                        "{{ name = \"{}\", type = \"{}\", _flags = {} }},",
+                        prop_name, type_code, flags
+                    ));
+                }
+            }
+            self.dedent();
+            self.write_indent();
+            self.writeln("}");
+
+            // __ownMethods with compact signatures
+            self.write_indent();
+            self.write(&class_name);
+            self.writeln(".__ownMethods = {");
+            self.indent();
+            for member in class_decl.members.iter() {
+                if let ClassMember::Method(method) = member {
+                    let method_name = self.resolve(method.name.node).to_string();
+                    let params: String = method
+                        .parameters
+                        .iter()
+                        .map(|p| {
+                            p.type_annotation
+                                .as_ref()
+                                .map(|ty| self.encode_type_code(ty))
+                                .unwrap_or_else(|| "o".to_string())
+                        })
+                        .collect();
+                    let ret = method
+                        .return_type
+                        .as_ref()
+                        .map(|ty| self.encode_type_code(ty))
+                        .unwrap_or_else(|| "v".to_string());
+                    self.write_indent();
+                    self.writeln(&format!(
+                        "{{ name = \"{}\", params = \"{}\", ret = \"{}\" }},",
+                        method_name, params, ret
+                    ));
+                }
+            }
+            self.dedent();
+            self.write_indent();
+            self.writeln("}");
+
+            self.writeln("");
+            self.writeln(
+                &typedlua_runtime::class::BUILD_ALL_FIELDS
+                    .replace("{}", &class_name)
+                    .replace("{}", &class_name)
+                    .replace("{}", &class_name)
+                    .replace("{}", &class_name)
+                    .replace("{}", &class_name)
+                    .replace("{}", &class_name)
+                    .replace("{}", &class_name),
+            );
+            self.writeln("");
+            self.writeln(
+                &typedlua_runtime::class::BUILD_ALL_METHODS
+                    .replace("{}", &class_name)
+                    .replace("{}", &class_name)
+                    .replace("{}", &class_name)
+                    .replace("{}", &class_name)
+                    .replace("{}", &class_name)
+                    .replace("{}", &class_name)
+                    .replace("{}", &class_name),
+            );
+        }
+
         self.writeln("");
 
         self.current_class_parent = prev_parent;
+    }
+
+    /// Encode field access modifiers as bit flags per v2 reflection spec.
+    /// Bit 0=Public(1), Bit 1=Private(2), Bit 2=Protected(4), Bit 3=Readonly(8), Bit 4=Static(16)
+    fn encode_field_flags(prop: &PropertyDeclaration) -> u8 {
+        let mut flags: u8 = match prop.access {
+            Some(AccessModifier::Public) | None => 1,
+            Some(AccessModifier::Private) => 2,
+            Some(AccessModifier::Protected) => 4,
+        };
+        if prop.is_readonly {
+            flags |= 8;
+        }
+        if prop.is_static {
+            flags |= 16;
+        }
+        flags
+    }
+
+    /// Encode a type annotation as a compact type code string per v2 reflection spec.
+    /// n=number, s=string, b=boolean, t=table, f=function, v=void, o=any/unknown
+    fn encode_type_code(&self, ty: &parser::ast::types::Type) -> String {
+        use parser::ast::types::{PrimitiveType, TypeKind};
+        match &ty.kind {
+            TypeKind::Primitive(p) => match p {
+                PrimitiveType::Number | PrimitiveType::Integer => "n".to_string(),
+                PrimitiveType::String => "s".to_string(),
+                PrimitiveType::Boolean => "b".to_string(),
+                PrimitiveType::Table => "t".to_string(),
+                PrimitiveType::Void | PrimitiveType::Nil => "v".to_string(),
+                _ => "o".to_string(),
+            },
+            TypeKind::Function(_) => "f".to_string(),
+            TypeKind::Array(inner) => format!("[{}]", self.encode_type_code(inner)),
+            TypeKind::Nullable(inner) => format!("?{}", self.encode_type_code(inner)),
+            TypeKind::Union(types) => types
+                .iter()
+                .map(|t| self.encode_type_code(t))
+                .collect::<Vec<_>>()
+                .join("|"),
+            TypeKind::Reference(type_ref) => self.resolve(type_ref.name.node),
+            _ => "o".to_string(),
+        }
     }
 
     pub fn generate_interface_declaration(&mut self, iface_decl: &InterfaceDeclaration) {

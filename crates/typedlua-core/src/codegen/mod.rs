@@ -30,6 +30,18 @@ use typedlua_parser::string_interner::{StringId, StringInterner};
 use typedlua_runtime::module;
 use typedlua_runtime::reflection;
 
+/// Reflection metadata generation mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ReflectionMode {
+    /// Only generate for modules that import @std/reflection (default)
+    #[default]
+    Selective,
+    /// Generate for all classes regardless of imports
+    Full,
+    /// Disable reflection metadata entirely
+    None,
+}
+
 /// Target Lua version for code generation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LuaTarget {
@@ -133,6 +145,10 @@ pub struct CodeGenerator {
     next_type_id: u32,
     /// Reflection: track registered types for __TypeRegistry
     registered_types: std::collections::HashMap<String, u32>,
+    /// Reflection: generation mode (selective, full, none)
+    reflection_mode: ReflectionMode,
+    /// Reflection: whether current module imports @std/reflection
+    has_reflection_import: bool,
     /// Code generation strategy for Lua version-specific logic
     strategy: Box<dyn strategies::CodeGenStrategy>,
     /// Enforce access modifiers (private/protected/public) at runtime
@@ -167,6 +183,8 @@ impl CodeGenerator {
             namespace_exports: Vec::new(),
             next_type_id: 1,
             registered_types: Default::default(),
+            reflection_mode: ReflectionMode::default(),
+            has_reflection_import: false,
             strategy: Self::create_strategy(target),
             enforce_access_modifiers: false,
             whole_program_analysis: None,
@@ -220,6 +238,20 @@ impl CodeGenerator {
     pub fn with_optimization_level(mut self, level: crate::config::OptimizationLevel) -> Self {
         self.optimization_level = level;
         self
+    }
+
+    pub fn with_reflection_mode(mut self, mode: ReflectionMode) -> Self {
+        self.reflection_mode = mode;
+        self
+    }
+
+    /// Whether reflection metadata should be emitted for classes in this module
+    fn should_emit_reflection(&self) -> bool {
+        match self.reflection_mode {
+            ReflectionMode::Full => true,
+            ReflectionMode::None => false,
+            ReflectionMode::Selective => self.has_reflection_import,
+        }
     }
 
     pub fn with_whole_program_analysis(
@@ -287,8 +319,8 @@ impl CodeGenerator {
         // Finalize namespace exports if any
         self.finalize_namespace();
 
-        // Generate __TypeRegistry if any types were registered
-        if !self.registered_types.is_empty() {
+        // Generate __TypeRegistry if reflection is active and types were registered
+        if self.should_emit_reflection() && !self.registered_types.is_empty() {
             self.writeln("");
             self.writeln("-- ============================================================");
             self.writeln("-- Type Registry for Reflection");

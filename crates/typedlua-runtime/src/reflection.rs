@@ -60,4 +60,44 @@ function Reflect.forName(name)
     end
     return nil
 end
+
+-- Decode bit flags from _flags field into a table of booleans
+function Reflect.decodeFlags(flags)
+    return {
+        isPublic = (flags % 2) >= 1,
+        isPrivate = (math.floor(flags / 2) % 2) >= 1,
+        isProtected = (math.floor(flags / 4) % 2) >= 1,
+        isReadonly = (math.floor(flags / 8) % 2) >= 1,
+        isStatic = (math.floor(flags / 16) % 2) >= 1,
+    }
+end
+
+-- Type code lookup for parseParams
+local _typeCodes = {
+    n = "number",
+    s = "string",
+    b = "boolean",
+    t = "table",
+    f = "function",
+    v = "void",
+    o = "any",
+}
+
+-- Parse compact parameter signature string into type names
+function Reflect.parseParams(paramStr)
+    local result = {}
+    local i = 1
+    while i <= #paramStr do
+        local ch = paramStr:sub(i, i)
+        local typeName = _typeCodes[ch]
+        if typeName then
+            result[#result + 1] = typeName
+            i = i + 1
+        else
+            -- Unknown code, skip
+            i = i + 1
+        end
+    end
+    return result
+end
 "#;

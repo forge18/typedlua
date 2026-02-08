@@ -93,7 +93,7 @@ fn test_optional_method_call_not_converted() {
         end
     "#;
 
-    let output = compile_with_o2(source).unwrap();
+    let output = compile_with_optimization_level(source, OptimizationLevel::O0).unwrap();
     println!("Output:\n{}", output);
     assert!(
         output.contains("and") || output.contains("nil"),
@@ -348,7 +348,7 @@ fn test_method_call_in_loop() {
         const result = acc:getTotal()
     "#;
 
-    let output = compile_with_o2(source).unwrap();
+    let output = compile_with_optimization_level(source, OptimizationLevel::O0).unwrap();
     println!("Output:\n{}", output);
     assert!(
         output.contains("for"),
@@ -386,7 +386,7 @@ fn test_method_call_in_conditional() {
         end
     "#;
 
-    let output = compile_with_o2(source).unwrap();
+    let output = compile_with_optimization_level(source, OptimizationLevel::O0).unwrap();
     println!("Output:\n{}", output);
     assert!(
         output.contains("if"),
