@@ -7,7 +7,7 @@ use std::sync::Arc;
 use typedlua_parser::ast::expression::{Expression, ExpressionKind};
 use typedlua_parser::ast::pattern::Pattern;
 use typedlua_parser::ast::statement::{
-    Block, ForStatement, Statement, VariableDeclaration, VariableKind,
+    ForStatement, Statement, VariableDeclaration, VariableKind,
 };
 use typedlua_parser::ast::Spanned;
 use typedlua_parser::span::Span;
@@ -168,59 +168,6 @@ impl GlobalLocalizationPass {
 
         new_statements.append(&mut program.statements);
         program.statements = new_statements;
-
-        changed
-    }
-
-    /// Localize globals in an immutable Block (clone-to-Vec pattern).
-    fn localize_in_block<'arena>(
-        &self,
-        block: &mut Block<'arena>,
-        mut declared_locals: HashSet<typedlua_parser::string_interner::StringId>,
-        arena: &'arena Bump,
-    ) -> bool {
-        let mut changed = false;
-
-        // First, collect all locally declared names (variables and functions)
-        self.collect_declared_locals(block.statements, &mut declared_locals);
-
-        let mut global_usage: HashMap<typedlua_parser::string_interner::StringId, usize> =
-            HashMap::default();
-
-        for stmt in block.statements {
-            self.collect_global_usage_optimized(stmt, &mut global_usage, &declared_locals);
-        }
-
-        let frequently_used: Vec<_> = global_usage
-            .into_iter()
-            .filter(|(_, count)| *count > 1)
-            .filter(|(name, _)| !declared_locals.contains(name))
-            // Skip names that already start with underscore to prevent cascading localization
-            .filter(|(name, _)| !self.is_localized_name(*name))
-            .collect();
-
-        let mut new_statements: Vec<Statement<'arena>> = Vec::new();
-
-        for (name, count) in &frequently_used {
-            if *count > 1 {
-                let local_name_id = self.create_local_name(*name);
-                let span = Span::dummy();
-                let var_decl = self.create_local_declaration(*name, local_name_id, span);
-
-                new_statements.push(Statement::Variable(var_decl));
-                declared_locals.insert(local_name_id);
-                changed = true;
-            }
-        }
-
-        // Clone block statements to a mutable Vec, apply replacements, then combine
-        let mut stmts: Vec<Statement<'arena>> = block.statements.to_vec();
-        for stmt in &mut stmts {
-            self.replace_global_usages(stmt, &frequently_used, &declared_locals, arena);
-        }
-
-        new_statements.extend(stmts);
-        block.statements = arena.alloc_slice_clone(&new_statements);
 
         changed
     }

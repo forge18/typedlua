@@ -18,7 +18,7 @@ use typedlua_parser::string_interner::{StringId, StringInterner};
 enum InlineResult<'arena> {
     /// Direct expression substitution - for simple single-return functions
     /// The expression can be directly substituted for the call
-    Direct(Expression<'arena>),
+    Direct(Box<Expression<'arena>>),
     /// Complex inlining - contains statements to insert and the result variable
     Replaced {
         stmts: Vec<Statement<'arena>>,
@@ -988,7 +988,7 @@ impl<'arena> FunctionInliningPass<'arena> {
                     // Simple case: directly substitute the return expression
                     let mut inlined_expr = ret.values[0].clone();
                     self.inline_expression(&mut inlined_expr, &param_subst, arena);
-                    return InlineResult::Direct(inlined_expr);
+                    return InlineResult::Direct(Box::new(inlined_expr));
                 }
             }
         }

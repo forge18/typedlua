@@ -20,7 +20,7 @@ use typedlua_parser::string_interner::StringInterner;
 use typedlua_parser::ast::expression::ArrayElement;
 
 enum InlineResult<'arena> {
-    Direct(Expression<'arena>),
+    Direct(Box<Expression<'arena>>),
     Replaced {
         stmts: Vec<Statement<'arena>>,
         result_var: StringId,
@@ -1255,7 +1255,7 @@ impl AggressiveInliningPass {
                 if ret.values.len() == 1 {
                     let mut inlined_expr = ret.values[0].clone();
                     Self::substitute_expression(&mut inlined_expr, &param_subst, arena);
-                    return InlineResult::Direct(inlined_expr);
+                    return InlineResult::Direct(Box::new(inlined_expr));
                 }
             }
         }

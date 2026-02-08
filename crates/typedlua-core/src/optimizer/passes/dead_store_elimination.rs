@@ -772,12 +772,6 @@ impl DeadStoreEliminationPass {
         captured
     }
 
-    fn collect_captured_variables<'arena>(&self, block: &Block<'arena>) -> HashSet<StringId> {
-        let mut captured = HashSet::new();
-        self.collect_captures_in_block(block, &mut captured);
-        captured
-    }
-
     fn collect_captures_in_block<'arena>(
         &self,
         block: &Block<'arena>,
