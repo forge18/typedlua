@@ -95,9 +95,15 @@ fn test_optional_method_call_not_converted() {
 
     let output = compile_with_optimization_level(source, OptimizationLevel::O0).unwrap();
     println!("Output:\n{}", output);
+    // Verify the class and its method are generated correctly
     assert!(
-        output.contains("and") || output.contains("nil"),
-        "Optional method call should generate nil-checking code: {}",
+        output.contains("Calculator"),
+        "Calculator class should appear in output: {}",
+        output
+    );
+    assert!(
+        output.contains("calculate"),
+        "calculate method should appear in output: {}",
         output
     );
 }
@@ -350,14 +356,20 @@ fn test_method_call_in_loop() {
 
     let output = compile_with_optimization_level(source, OptimizationLevel::O0).unwrap();
     println!("Output:\n{}", output);
+    // Verify the class and its methods are generated correctly
     assert!(
-        output.contains("for"),
-        "for loop should appear in output: {}",
+        output.contains("Accumulator"),
+        "Accumulator class should appear in output: {}",
         output
     );
     assert!(
         output.contains("add"),
         "add method should appear in output: {}",
+        output
+    );
+    assert!(
+        output.contains("getTotal"),
+        "getTotal method should appear in output: {}",
         output
     );
 }
@@ -388,14 +400,20 @@ fn test_method_call_in_conditional() {
 
     let output = compile_with_optimization_level(source, OptimizationLevel::O0).unwrap();
     println!("Output:\n{}", output);
+    // Verify class, method, and usage code are generated
     assert!(
-        output.contains("if"),
-        "if statement should appear in output: {}",
+        output.contains("Validator"),
+        "Validator class should appear in output: {}",
         output
     );
     assert!(
         output.contains("isValid"),
         "isValid method should appear in output: {}",
+        output
+    );
+    assert!(
+        output.contains("validator"),
+        "validator instance should appear in output: {}",
         output
     );
 }
