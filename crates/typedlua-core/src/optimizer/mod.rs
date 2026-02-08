@@ -38,6 +38,12 @@ pub struct AstFeatureDetector {
     features: AstFeatures,
 }
 
+impl Default for AstFeatureDetector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AstFeatureDetector {
     pub fn new() -> Self {
         Self {

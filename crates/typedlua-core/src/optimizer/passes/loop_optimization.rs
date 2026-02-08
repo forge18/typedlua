@@ -514,7 +514,7 @@ impl LoopOptimizationPass {
                 self.collect_modified_in_expression(right, modified);
             }
             ExpressionKind::Match(match_expr) => {
-                self.collect_modified_in_expression(&match_expr.value, modified);
+                self.collect_modified_in_expression(match_expr.value, modified);
                 for arm in match_expr.arms.iter() {
                     self.collect_modified_in_pattern(&arm.pattern, modified);
                     if let Some(guard) = &arm.guard {
@@ -572,9 +572,9 @@ impl LoopOptimizationPass {
                 }
             }
             ExpressionKind::Try(try_expr) => {
-                self.collect_modified_in_expression(&try_expr.expression, modified);
+                self.collect_modified_in_expression(try_expr.expression, modified);
                 modified.insert(try_expr.catch_variable.node);
-                self.collect_modified_in_expression(&try_expr.catch_expression, modified);
+                self.collect_modified_in_expression(try_expr.catch_expression, modified);
             }
             ExpressionKind::ErrorChain(left, right) => {
                 self.collect_modified_in_expression(left, modified);
@@ -700,7 +700,7 @@ impl LoopOptimizationPass {
                     && self.is_invariant_expression(right, loop_vars)
             }
             ExpressionKind::Match(match_expr) => {
-                self.is_invariant_expression(&match_expr.value, loop_vars)
+                self.is_invariant_expression(match_expr.value, loop_vars)
                     && match_expr.arms.iter().all(|arm| {
                         let body_invariant = match &arm.body {
                             typedlua_parser::ast::expression::MatchArmBody::Expression(expr) => {
@@ -750,8 +750,8 @@ impl LoopOptimizationPass {
                         .all(|arg| self.is_invariant_expression(&arg.value, loop_vars))
             }
             ExpressionKind::Try(try_expr) => {
-                self.is_invariant_expression(&try_expr.expression, loop_vars)
-                    && self.is_invariant_expression(&try_expr.catch_expression, loop_vars)
+                self.is_invariant_expression(try_expr.expression, loop_vars)
+                    && self.is_invariant_expression(try_expr.catch_expression, loop_vars)
             }
             ExpressionKind::Assignment(_, _, rhs) => self.is_invariant_expression(rhs, loop_vars),
             ExpressionKind::ErrorChain(left, right) => {

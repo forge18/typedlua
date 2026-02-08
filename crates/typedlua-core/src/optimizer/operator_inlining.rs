@@ -172,7 +172,7 @@ impl OperatorInliningPass {
                 self.catalog_expression(right);
             }
             ExpressionKind::Match(match_expr) => {
-                self.catalog_expression(&match_expr.value);
+                self.catalog_expression(match_expr.value);
                 for arm in match_expr.arms.iter() {
                     match &arm.body {
                         typedlua_parser::ast::expression::MatchArmBody::Expression(e) => {
@@ -206,8 +206,8 @@ impl OperatorInliningPass {
                 }
             }
             ExpressionKind::Try(try_expr) => {
-                self.catalog_expression(&try_expr.expression);
-                self.catalog_expression(&try_expr.catch_expression);
+                self.catalog_expression(try_expr.expression);
+                self.catalog_expression(try_expr.catch_expression);
             }
             ExpressionKind::ErrorChain(left, right) => {
                 self.catalog_expression(left);
@@ -1122,7 +1122,7 @@ fn expression_has_side_effects(expr: &Expression<'_>) -> bool {
             expression_has_side_effects(left) || expression_has_side_effects(right)
         }
         ExpressionKind::Match(match_expr) => {
-            expression_has_side_effects(&match_expr.value)
+            expression_has_side_effects(match_expr.value)
                 || match_expr.arms.iter().any(|arm| match &arm.body {
                     typedlua_parser::ast::expression::MatchArmBody::Expression(e) => {
                         expression_has_side_effects(e)
@@ -1152,8 +1152,8 @@ fn expression_has_side_effects(expr: &Expression<'_>) -> bool {
                     .any(|arg| expression_has_side_effects(&arg.value))
         }
         ExpressionKind::Try(try_expr) => {
-            expression_has_side_effects(&try_expr.expression)
-                || expression_has_side_effects(&try_expr.catch_expression)
+            expression_has_side_effects(try_expr.expression)
+                || expression_has_side_effects(try_expr.catch_expression)
         }
         ExpressionKind::ErrorChain(left, right) => {
             expression_has_side_effects(left) || expression_has_side_effects(right)

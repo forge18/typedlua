@@ -281,7 +281,7 @@ impl ClassHierarchy {
                 self.collect_instantiations_from_expression(right);
             }
             Match(match_expr) => {
-                self.collect_instantiations_from_expression(&match_expr.value);
+                self.collect_instantiations_from_expression(match_expr.value);
                 for arm in match_expr.arms.iter() {
                     match &arm.body {
                         typedlua_parser::ast::expression::MatchArmBody::Expression(e) => {
@@ -313,8 +313,8 @@ impl ClassHierarchy {
                 }
             }
             Try(try_expr) => {
-                self.collect_instantiations_from_expression(&try_expr.expression);
-                self.collect_instantiations_from_expression(&try_expr.catch_expression);
+                self.collect_instantiations_from_expression(try_expr.expression);
+                self.collect_instantiations_from_expression(try_expr.catch_expression);
             }
             ErrorChain(left, right) => {
                 self.collect_instantiations_from_expression(left);

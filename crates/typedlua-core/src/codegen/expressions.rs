@@ -502,14 +502,14 @@ impl CodeGenerator {
             }
             ExpressionKind::Try(try_expr) => {
                 self.write("(function() local __ok, __result = pcall(function() return ");
-                self.generate_expression(&try_expr.expression);
+                self.generate_expression(try_expr.expression);
                 self.writeln(" end); ");
                 self.write("if __ok then return __result else ");
                 let var_name = self.resolve(try_expr.catch_variable.node);
                 self.write("local ");
                 self.write(&var_name);
                 self.write(" = __result; return ");
-                self.generate_expression(&try_expr.catch_expression);
+                self.generate_expression(try_expr.catch_expression);
                 self.writeln(" end end)()");
             }
             ExpressionKind::ErrorChain(left, right) => {
@@ -559,7 +559,7 @@ impl CodeGenerator {
 
         self.write_indent();
         self.write("local __match_value = ");
-        self.generate_expression(&match_expr.value);
+        self.generate_expression(match_expr.value);
         self.writeln("");
 
         for (i, arm) in match_expr.arms.iter().enumerate() {

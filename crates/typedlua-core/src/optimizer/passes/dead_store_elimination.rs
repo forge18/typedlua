@@ -697,7 +697,7 @@ impl DeadStoreEliminationPass {
                 self.collect_expression_reads_into(right, reads);
             }
             ExpressionKind::Match(match_expr) => {
-                self.collect_expression_reads_into(&match_expr.value, reads);
+                self.collect_expression_reads_into(match_expr.value, reads);
                 for arm in match_expr.arms {
                     match &arm.body {
                         typedlua_parser::ast::expression::MatchArmBody::Expression(expr) => {
@@ -748,8 +748,8 @@ impl DeadStoreEliminationPass {
                 }
             }
             ExpressionKind::Try(try_expr) => {
-                self.collect_expression_reads_into(&try_expr.expression, reads);
-                self.collect_expression_reads_into(&try_expr.catch_expression, reads);
+                self.collect_expression_reads_into(try_expr.expression, reads);
+                self.collect_expression_reads_into(try_expr.catch_expression, reads);
             }
             ExpressionKind::ErrorChain(left, right) => {
                 self.collect_expression_reads_into(left, reads);
@@ -879,7 +879,7 @@ impl DeadStoreEliminationPass {
                     || self.expression_captures_variables(right)
             }
             ExpressionKind::Match(match_expr) => {
-                self.expression_captures_variables(&match_expr.value)
+                self.expression_captures_variables(match_expr.value)
                     || match_expr.arms.iter().any(|arm| match &arm.body {
                         typedlua_parser::ast::expression::MatchArmBody::Expression(expr) => {
                             self.expression_captures_variables(expr)
@@ -896,8 +896,8 @@ impl DeadStoreEliminationPass {
                         .any(|arg| self.expression_captures_variables(&arg.value))
             }
             ExpressionKind::Try(try_expr) => {
-                self.expression_captures_variables(&try_expr.expression)
-                    || self.expression_captures_variables(&try_expr.catch_expression)
+                self.expression_captures_variables(try_expr.expression)
+                    || self.expression_captures_variables(try_expr.catch_expression)
             }
             ExpressionKind::ErrorChain(left, right) => {
                 self.expression_captures_variables(left)

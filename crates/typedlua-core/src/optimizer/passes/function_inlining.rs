@@ -773,7 +773,7 @@ impl<'arena> FunctionInliningPass<'arena> {
                 }
             }
             ExpressionKind::Match(match_expr) => {
-                self.expr_contains_call_to(&match_expr.value, name)
+                self.expr_contains_call_to(match_expr.value, name)
                     || match_expr.arms.iter().any(|arm| match &arm.body {
                         MatchArmBody::Expression(expr) => self.expr_contains_call_to(expr, name),
                         MatchArmBody::Block(block) => block
@@ -789,8 +789,8 @@ impl<'arena> FunctionInliningPass<'arena> {
                         .any(|a| self.expr_contains_call_to(&a.value, name))
             }
             ExpressionKind::Try(try_expr) => {
-                self.expr_contains_call_to(&try_expr.expression, name)
-                    || self.expr_contains_call_to(&try_expr.catch_expression, name)
+                self.expr_contains_call_to(try_expr.expression, name)
+                    || self.expr_contains_call_to(try_expr.catch_expression, name)
             }
             ExpressionKind::ErrorChain(left, right) => {
                 self.expr_contains_call_to(left, name) || self.expr_contains_call_to(right, name)
@@ -937,7 +937,7 @@ impl<'arena> FunctionInliningPass<'arena> {
                 self.expr_has_closures(left) || self.expr_has_closures(right)
             }
             ExpressionKind::Match(match_expr) => {
-                self.expr_has_closures(&match_expr.value)
+                self.expr_has_closures(match_expr.value)
                     || match_expr.arms.iter().any(|arm| match &arm.body {
                         MatchArmBody::Expression(expr) => self.expr_has_closures(expr),
                         MatchArmBody::Block(block) => self.block_has_closures(block),
@@ -948,8 +948,8 @@ impl<'arena> FunctionInliningPass<'arena> {
                     || args.iter().any(|a| self.expr_has_closures(&a.value))
             }
             ExpressionKind::Try(try_expr) => {
-                self.expr_has_closures(&try_expr.expression)
-                    || self.expr_has_closures(&try_expr.catch_expression)
+                self.expr_has_closures(try_expr.expression)
+                    || self.expr_has_closures(try_expr.catch_expression)
             }
             ExpressionKind::ErrorChain(left, right) => {
                 self.expr_has_closures(left) || self.expr_has_closures(right)

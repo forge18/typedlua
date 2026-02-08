@@ -35,6 +35,7 @@ use typedlua_parser::string_interner::{StringId, StringInterner};
 const MAX_INLINABLE_STATEMENTS: usize = 10;
 
 #[derive(Debug)]
+#[derive(Default)]
 struct InterfaceImplementationMap<'arena> {
     interface_to_classes: FxHashMap<StringId, Vec<StringId>>,
     class_to_interfaces: FxHashMap<StringId, Vec<StringId>>,
@@ -45,19 +46,6 @@ struct InterfaceImplementationMap<'arena> {
     known_interfaces: FxHashMap<StringId, bool>,
 }
 
-impl<'arena> Default for InterfaceImplementationMap<'arena> {
-    fn default() -> Self {
-        Self {
-            interface_to_classes: FxHashMap::default(),
-            class_to_interfaces: FxHashMap::default(),
-            class_is_final: FxHashMap::default(),
-            method_body: FxHashMap::default(),
-            method_signature: FxHashMap::default(),
-            known_classes: FxHashMap::default(),
-            known_interfaces: FxHashMap::default(),
-        }
-    }
-}
 
 impl<'arena> InterfaceImplementationMap<'arena> {
     pub fn build(program: &MutableProgram<'arena>) -> Self {
@@ -230,7 +218,7 @@ impl<'arena> InterfaceImplementationMap<'arena> {
                     || self.expression_mutates_self(right, class_id)
             }
             ExpressionKind::Match(match_expr) => {
-                self.expression_mutates_self(&match_expr.value, class_id)
+                self.expression_mutates_self(match_expr.value, class_id)
                     || match_expr.arms.iter().any(|arm| match &arm.body {
                         typedlua_parser::ast::expression::MatchArmBody::Expression(e) => {
                             self.expression_mutates_self(e, class_id)
@@ -261,8 +249,8 @@ impl<'arena> InterfaceImplementationMap<'arena> {
                         .any(|a| self.expression_mutates_self(&a.value, class_id))
             }
             ExpressionKind::Try(try_expr) => {
-                self.expression_mutates_self(&try_expr.expression, class_id)
-                    || self.expression_mutates_self(&try_expr.catch_expression, class_id)
+                self.expression_mutates_self(try_expr.expression, class_id)
+                    || self.expression_mutates_self(try_expr.catch_expression, class_id)
             }
             ExpressionKind::ErrorChain(left, right) => {
                 self.expression_mutates_self(left, class_id)

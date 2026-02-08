@@ -264,7 +264,7 @@ impl AggressiveInliningPass {
                 self.detect_calls_in_expr(right, hot_set);
             }
             ExpressionKind::Match(match_expr) => {
-                self.detect_calls_in_expr(&match_expr.value, hot_set);
+                self.detect_calls_in_expr(match_expr.value, hot_set);
                 for arm in match_expr.arms.iter() {
                     match &arm.body {
                         MatchArmBody::Expression(e) => self.detect_calls_in_expr(e, hot_set),
@@ -294,8 +294,8 @@ impl AggressiveInliningPass {
                 }
             }
             ExpressionKind::Try(try_expr) => {
-                self.detect_calls_in_expr(&try_expr.expression, hot_set);
-                self.detect_calls_in_expr(&try_expr.catch_expression, hot_set);
+                self.detect_calls_in_expr(try_expr.expression, hot_set);
+                self.detect_calls_in_expr(try_expr.catch_expression, hot_set);
             }
             ExpressionKind::ErrorChain(left, right) => {
                 self.detect_calls_in_expr(left, hot_set);
@@ -1008,7 +1008,7 @@ impl AggressiveInliningPass {
                 }
             }
             ExpressionKind::Match(match_expr) => {
-                self.expr_contains_call_to(&match_expr.value, name)
+                self.expr_contains_call_to(match_expr.value, name)
                     || match_expr.arms.iter().any(|arm| match &arm.body {
                         MatchArmBody::Expression(expr) => self.expr_contains_call_to(expr, name),
                         MatchArmBody::Block(block) => block
@@ -1024,8 +1024,8 @@ impl AggressiveInliningPass {
                         .any(|a| self.expr_contains_call_to(&a.value, name))
             }
             ExpressionKind::Try(try_expr) => {
-                self.expr_contains_call_to(&try_expr.expression, name)
-                    || self.expr_contains_call_to(&try_expr.catch_expression, name)
+                self.expr_contains_call_to(try_expr.expression, name)
+                    || self.expr_contains_call_to(try_expr.catch_expression, name)
             }
             ExpressionKind::ErrorChain(left, right) => {
                 self.expr_contains_call_to(left, name) || self.expr_contains_call_to(right, name)
@@ -1196,7 +1196,7 @@ impl AggressiveInliningPass {
                 self.count_closures_in_expr(left) + self.count_closures_in_expr(right)
             }
             ExpressionKind::Match(match_expr) => {
-                self.count_closures_in_expr(&match_expr.value)
+                self.count_closures_in_expr(match_expr.value)
                     + match_expr.arms.iter().fold(0, |acc, arm| match &arm.body {
                         MatchArmBody::Expression(e) => acc + self.count_closures_in_expr(e),
                         MatchArmBody::Block(b) => acc + self.count_closures_in_block(b),
@@ -1209,8 +1209,8 @@ impl AggressiveInliningPass {
                         .fold(0, |acc, a| acc + self.count_closures_in_expr(&a.value))
             }
             ExpressionKind::Try(try_expr) => {
-                self.count_closures_in_expr(&try_expr.expression)
-                    + self.count_closures_in_expr(&try_expr.catch_expression)
+                self.count_closures_in_expr(try_expr.expression)
+                    + self.count_closures_in_expr(try_expr.catch_expression)
             }
             ExpressionKind::ErrorChain(left, right) => {
                 self.count_closures_in_expr(left) + self.count_closures_in_expr(right)

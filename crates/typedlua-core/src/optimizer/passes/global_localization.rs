@@ -166,7 +166,7 @@ impl GlobalLocalizationPass {
             self.replace_global_usages(stmt, &frequently_used, &declared_locals, arena);
         }
 
-        new_statements.extend(program.statements.drain(..));
+        new_statements.append(&mut program.statements);
         program.statements = new_statements;
 
         changed
@@ -386,7 +386,7 @@ impl GlobalLocalizationPass {
                 self.collect_from_arrow_body(&arrow.body, usage, declared_locals);
             }
             ExpressionKind::Match(match_expr) => {
-                self.collect_from_expression_optimized(&match_expr.value, usage, declared_locals);
+                self.collect_from_expression_optimized(match_expr.value, usage, declared_locals);
                 for arm in match_expr.arms {
                     self.collect_from_match_arm_body(&arm.body, usage, declared_locals);
                 }
@@ -399,12 +399,12 @@ impl GlobalLocalizationPass {
             }
             ExpressionKind::Try(try_expr) => {
                 self.collect_from_expression_optimized(
-                    &try_expr.expression,
+                    try_expr.expression,
                     usage,
                     declared_locals,
                 );
                 self.collect_from_expression_optimized(
-                    &try_expr.catch_expression,
+                    try_expr.catch_expression,
                     usage,
                     declared_locals,
                 );

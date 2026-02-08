@@ -133,7 +133,7 @@ impl<'a> EscapeAnalysis<'a> {
             match statement {
                 Statement::Function(func) => {
                     // Track returns from private functions
-                    self.walk_statements_for_returns_skip_functions(&func.body.statements);
+                    self.walk_statements_for_returns_skip_functions(func.body.statements);
                 }
                 Statement::Return(ret) => {
                     // Module-level return
@@ -163,16 +163,16 @@ impl<'a> EscapeAnalysis<'a> {
                     }
                 }
                 Statement::If(if_stmt) => {
-                    self.walk_statements_for_returns_skip_functions(&if_stmt.then_block.statements);
+                    self.walk_statements_for_returns_skip_functions(if_stmt.then_block.statements);
                     for elseif in if_stmt.else_ifs.iter() {
-                        self.walk_statements_for_returns_skip_functions(&elseif.block.statements);
+                        self.walk_statements_for_returns_skip_functions(elseif.block.statements);
                     }
                     if let Some(else_block) = &if_stmt.else_block {
-                        self.walk_statements_for_returns_skip_functions(&else_block.statements);
+                        self.walk_statements_for_returns_skip_functions(else_block.statements);
                     }
                 }
                 Statement::While(while_stmt) => {
-                    self.walk_statements_for_returns_skip_functions(&while_stmt.body.statements);
+                    self.walk_statements_for_returns_skip_functions(while_stmt.body.statements);
                 }
                 Statement::For(for_stmt) => match for_stmt {
                     typedlua_parser::ast::statement::ForStatement::Numeric(num) => {
@@ -183,10 +183,10 @@ impl<'a> EscapeAnalysis<'a> {
                     }
                 },
                 Statement::Repeat(repeat_stmt) => {
-                    self.walk_statements_for_returns_skip_functions(&repeat_stmt.body.statements);
+                    self.walk_statements_for_returns_skip_functions(repeat_stmt.body.statements);
                 }
                 Statement::Block(block) => {
-                    self.walk_statements_for_returns_skip_functions(&block.statements);
+                    self.walk_statements_for_returns_skip_functions(block.statements);
                 }
                 _ => {}
             }
@@ -257,7 +257,7 @@ impl<'a> EscapeAnalysis<'a> {
         // Only concern: can the function be relocated to a higher scope?
         // Can't hoist if the function itself returns other module-locals
         // (losing access to them at the higher scope would break the function)
-        !self.function_returns_any_local(&decl.body.statements)
+        !self.function_returns_any_local(decl.body.statements)
     }
 
     fn function_returns_any_local(&self, statements: &[Statement]) -> bool {
@@ -274,22 +274,22 @@ impl<'a> EscapeAnalysis<'a> {
                     }
                 }
                 Statement::If(if_stmt) => {
-                    if self.function_returns_any_local(&if_stmt.then_block.statements) {
+                    if self.function_returns_any_local(if_stmt.then_block.statements) {
                         return true;
                     }
                     for elseif in if_stmt.else_ifs.iter() {
-                        if self.function_returns_any_local(&elseif.block.statements) {
+                        if self.function_returns_any_local(elseif.block.statements) {
                             return true;
                         }
                     }
                     if let Some(else_block) = &if_stmt.else_block {
-                        if self.function_returns_any_local(&else_block.statements) {
+                        if self.function_returns_any_local(else_block.statements) {
                             return true;
                         }
                     }
                 }
                 Statement::While(while_stmt) => {
-                    if self.function_returns_any_local(&while_stmt.body.statements) {
+                    if self.function_returns_any_local(while_stmt.body.statements) {
                         return true;
                     }
                 }
@@ -307,12 +307,12 @@ impl<'a> EscapeAnalysis<'a> {
                     }
                 }
                 Statement::Repeat(repeat_stmt) => {
-                    if self.function_returns_any_local(&repeat_stmt.body.statements) {
+                    if self.function_returns_any_local(repeat_stmt.body.statements) {
                         return true;
                     }
                 }
                 Statement::Block(block) => {
-                    if self.function_returns_any_local(&block.statements) {
+                    if self.function_returns_any_local(block.statements) {
                         return true;
                     }
                 }
@@ -471,28 +471,28 @@ impl<'a> EscapeAnalysis<'a> {
                     }
                 }
                 Statement::If(if_stmt) => {
-                    if self.walk_statements_checking_any_local(&if_stmt.then_block.statements, self_name)
+                    if self.walk_statements_checking_any_local(if_stmt.then_block.statements, self_name)
                     {
                         return true;
                     }
                     for elseif in if_stmt.else_ifs.iter() {
-                        if self.walk_statements_checking_any_local(&elseif.block.statements, self_name) {
+                        if self.walk_statements_checking_any_local(elseif.block.statements, self_name) {
                             return true;
                         }
                     }
                     if let Some(else_block) = &if_stmt.else_block {
-                        if self.walk_statements_checking_any_local(&else_block.statements, self_name) {
+                        if self.walk_statements_checking_any_local(else_block.statements, self_name) {
                             return true;
                         }
                     }
                 }
                 Statement::While(while_stmt) => {
-                    if self.walk_statements_checking_any_local(&while_stmt.body.statements, self_name) {
+                    if self.walk_statements_checking_any_local(while_stmt.body.statements, self_name) {
                         return true;
                     }
                 }
                 Statement::Block(block) => {
-                    if self.walk_statements_checking_any_local(&block.statements, self_name) {
+                    if self.walk_statements_checking_any_local(block.statements, self_name) {
                         return true;
                     }
                 }
