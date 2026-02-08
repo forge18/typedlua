@@ -626,7 +626,7 @@ impl<'arena> FunctionInliningPass<'arena> {
                         match &result {
                             InlineResult::Direct(inlined_expr) => {
                                 // Direct substitution - replace call with the inlined expression
-                                *expr = inlined_expr.clone();
+                                *expr = *inlined_expr.clone();
                             }
                             InlineResult::Replaced { result_var, .. } => {
                                 // Reference the result variable

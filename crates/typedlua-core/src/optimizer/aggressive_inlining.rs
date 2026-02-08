@@ -851,7 +851,7 @@ impl AggressiveInliningPass {
                         }
                         match &result {
                             InlineResult::Direct(inlined_expr) => {
-                                *expr = inlined_expr.clone();
+                                *expr = *inlined_expr.clone();
                             }
                             InlineResult::Replaced { result_var, .. } => {
                                 expr.kind = ExpressionKind::Identifier(*result_var);
